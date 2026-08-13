@@ -1,0 +1,11 @@
+.devenv/
+.devenv.flake.nix
+.direnv/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/

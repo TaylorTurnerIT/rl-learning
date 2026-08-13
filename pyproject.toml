@@ -1,0 +1,22 @@
+[project]
+name = "rl-learning"
+version = "0.1.0"
+description = "A basic Python project managed with uv and devenv"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+rl-learning = "rl_learning.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
