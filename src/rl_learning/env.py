@@ -83,14 +83,24 @@ class EnvBuilder:
 
     def build(self):
 
-        if not 0 < self._params["agent_idx"] >= self._params["map_size"]:
-            raise ValueError("agent_idx is out of bounds")
+        if 0 < self._params["agent_idx"] <= self._params["map_size"]:
+            raise ValueError(
+                "agent_idx is out of bounds. agent_idx:",
+                self._params["win_idx"],
+                ". map_size:",
+                self._params["map_size"],
+            )
+
+        if not (0 < self._params["win_idx"] <= self._params["map_size"]):
+            raise ValueError(
+                "win_idx is out of bounds. win_idx:",
+                self._params["win_idx"],
+                ". map_size:",
+                self._params["map_size"],
+            )
 
         if self._params["agent_idx"] == self._params["win_idx"]:
             raise ValueError("agent_idx and win_idx should not be the same")
-
-        if not 0 < self._params["win_idx"] >= self._params["map_size"]:
-            raise ValueError("win_idx is out of bounds")
 
         return Env(**self._params)
 
