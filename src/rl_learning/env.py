@@ -21,6 +21,12 @@ class Direction(Enum):
     RIGHT = 1
 
 
+class MoveResult(Enum):
+    MOVED_LEFT = 0
+    MOVED_RIGHT = 1
+    INVALID_MOVE = 2
+
+
 class Env:
     def __init__(self, logger: logging.Logger):
         self.logger: logging.Logger = logger
@@ -29,8 +35,12 @@ class Env:
     def show(self):
         print(self.map)
 
-    def move(self, direction: Direction):
+    def move(self, direction: Direction) -> MoveResult:
         AGENT_IDX = self.map.index(Tile.AGENT)
+        valid_moves = self._getValidMoves()
+        if not direction in valid_moves:
+            return MoveResult.INVALID_MOVE
+
         match direction:
             case direction.LEFT:
                 LEFT_IDX = AGENT_IDX - 1
@@ -39,6 +49,7 @@ class Env:
                     self.map[AGENT_IDX],
                 )
                 self.logger.info("moved left")
+                return MoveResult.MOVED_LEFT
 
             case direction.RIGHT:
                 RIGHT_IDX = AGENT_IDX + 1
@@ -47,20 +58,18 @@ class Env:
                     self.map[AGENT_IDX],
                 )
                 self.logger.info("moved right")
+                return MoveResult.MOVED_RIGHT
 
-    def getValidMoves(self):
+    def _getValidMoves(self) -> list[Direction]:
         MAX_INDEX = len(self.map)
         AGENT_IDX = self.map.index(Tile.AGENT)
-        # print(AGENT_IDX)
         valid_moves: list[Direction] = []
 
         LEFT_IDX = AGENT_IDX - 1
-        # print(LEFT_IDX)
         if 0 <= LEFT_IDX < MAX_INDEX:
             valid_moves.append(Direction.LEFT)
 
         RIGHT_IDX = AGENT_IDX + 1
-        # print(RIGHT_IDX)
         if 0 <= RIGHT_IDX < MAX_INDEX:
             valid_moves.append(Direction.RIGHT)
 
