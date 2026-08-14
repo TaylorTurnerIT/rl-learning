@@ -3,7 +3,7 @@ from ast import Constant, Dict
 from enum import IntEnum
 from multiprocessing import Value
 
-from typing_extensions import Any, Literal, Required, TypedDict
+from typing_extensions import Any, Callable, Literal, Required, TypedDict
 
 
 class LogLevel(IntEnum):
@@ -31,6 +31,22 @@ class EnvParams(TypedDict, total=False):
     map_size: Required[int]
     agent_idx: Required[int]
     win_idx: Required[int]
+
+
+class Event(TypedDict):
+    name: str
+    callback: Callable
+
+
+class EventEmitter:
+    """
+    Uses the Observer/Dispatch pattern to allow event-subscription"""
+
+    def __init__(self):
+        self._listeners = {}
+
+    def on(self, event: Event):
+        self._listeners.setdefault(event["name"], []).append(event["callback"])
 
 
 class EnvBuilder:
@@ -67,13 +83,13 @@ class EnvBuilder:
 
     def build(self):
 
-        if not 0 < self._params["agent_idx"] <= self._params["map_size"]:
+        if not 0 < self._params["agent_idx"] >= self._params["map_size"]:
             raise ValueError("agent_idx is out of bounds")
 
         if self._params["agent_idx"] == self._params["win_idx"]:
             raise ValueError("agent_idx and win_idx should not be the same")
 
-        if not 0 < self._params["win_idx"] <= self._params["map_size"]:
+        if not 0 < self._params["win_idx"] >= self._params["map_size"]:
             raise ValueError("win_idx is out of bounds")
 
         return Env(**self._params)
@@ -110,6 +126,8 @@ class Env:
         self.map[self.agent_idx] = Tile.AGENT
         self.map[self.win_idx] = Tile.WIN
 
+        self.emitter = EventEmitter()
+
     def show(self):
         print(self.map)
 
@@ -138,6 +156,9 @@ class Env:
                         self.map[AGENT_IDX],
                     )
                     self.LOGGER.info("moved right")
+
+    def win(self):
+        pass
 
     def reset(self):
         """

@@ -1,5 +1,5 @@
 {
-  "load_direnv": "shell_hook",
+  "load_direnv": "direct",
   "languages": {
     "Python": {
       "format_on_save": "on",
