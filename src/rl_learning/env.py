@@ -34,6 +34,10 @@ class EnvParams(TypedDict, total=False):
 
 
 class EnvBuilder:
+    """
+    Constructs Env() using the Builder Pattern
+    """
+
     def __init__(self):
         self._params: EnvParams = {}  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -76,6 +80,13 @@ class EnvBuilder:
 
 
 class Env:
+    """
+    Construct using EnvBuilder()
+
+    The environment which the agent operates in.
+    Holds the state of the map including agent position and map parameters.
+    """
+
     def __init__(
         self,
         *,
@@ -103,6 +114,9 @@ class Env:
         print(self.map)
 
     def move(self, direction: Direction):
+        """
+        Moves the AGENT tile one index left or right
+        """
         AGENT_IDX = self.map.index(Tile.AGENT)
         MAX_INDEX = len(self.map)
 
