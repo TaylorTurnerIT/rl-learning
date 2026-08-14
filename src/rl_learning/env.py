@@ -49,7 +49,6 @@ class Env:
                         self.map[AGENT_IDX],
                     )
                     self.logger.info("moved left")
-                return
 
             case direction.RIGHT:
                 RIGHT_IDX = AGENT_IDX + 1
@@ -59,7 +58,6 @@ class Env:
                         self.map[AGENT_IDX],
                     )
                     self.logger.info("moved right")
-                return
 
     def reset(self):
         # trying to reinit the game, we will see

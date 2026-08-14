@@ -11,11 +11,11 @@ def main():
 
     while not done:
         state.show()
-        state = state.move(Direction.RIGHT)
+        state.move(Direction.RIGHT)
         state.show()
-        state = state.move(Direction.RIGHT)
+        state.move(Direction.RIGHT)
         state.show()
-        state = state.move(Direction.LEFT)
+        state.move(Direction.LEFT)
         state.show()
         done = True
 
