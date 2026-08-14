@@ -30,59 +30,41 @@ class Env:
         print(self.map)
 
     def move(self, direction: Direction):
-        MAX_INDEX = len(self.map)
         AGENT_IDX = self.map.index(Tile.AGENT)
         match direction:
             case direction.LEFT:
                 LEFT_IDX = AGENT_IDX - 1
-                if 0 >= LEFT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[LEFT_IDX] = (
-                        self.map[LEFT_IDX],
-                        self.map[AGENT_IDX],
-                    )
-                    self.logger.info("moved left")
-                else:
-                    # index error indicates an issue with valid move checking method
-                    raise IndexError(LEFT_IDX, "is out of bounds, cannot move left")
+                self.map[AGENT_IDX], self.map[LEFT_IDX] = (
+                    self.map[LEFT_IDX],
+                    self.map[AGENT_IDX],
+                )
+                self.logger.info("moved left")
 
             case direction.RIGHT:
                 RIGHT_IDX = AGENT_IDX + 1
-                if 0 >= RIGHT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[RIGHT_IDX] = (
-                        self.map[RIGHT_IDX],
-                        self.map[AGENT_IDX],
-                    )
-                    self.logger.info("moved right")
-                else:
-                    # index error indicates an issue with valid move checking method
-                    raise IndexError(RIGHT_IDX, "is out of bounds, cannot move right")
+                self.map[AGENT_IDX], self.map[RIGHT_IDX] = (
+                    self.map[RIGHT_IDX],
+                    self.map[AGENT_IDX],
+                )
+                self.logger.info("moved right")
 
-    def getValidMoves(self, direction: Direction):
+    def getValidMoves(self):
         MAX_INDEX = len(self.map)
         AGENT_IDX = self.map.index(Tile.AGENT)
-        match direction:
-            case direction.LEFT:
-                LEFT_IDX = AGENT_IDX - 1
-                if 0 >= LEFT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[LEFT_IDX] = (
-                        self.map[LEFT_IDX],
-                        self.map[AGENT_IDX],
-                    )
-                    print("moved left")
-                else:
-                    # index error indicates an issue with valid move checking method
-                    raise IndexError(LEFT_IDX, "is out of bounds, cannot move left")
-            case direction.RIGHT:
-                RIGHT_IDX = AGENT_IDX + 1
-                if 0 >= RIGHT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[RIGHT_IDX] = (
-                        self.map[RIGHT_IDX],
-                        self.map[AGENT_IDX],
-                    )
-                    print("moved right")
-                else:
-                    # index error indicates an issue with valid move checking method
-                    raise IndexError(RIGHT_IDX, "is out of bounds, cannot move right")
+        # print(AGENT_IDX)
+        valid_moves: list[Direction] = []
+
+        LEFT_IDX = AGENT_IDX - 1
+        # print(LEFT_IDX)
+        if 0 <= LEFT_IDX < MAX_INDEX:
+            valid_moves.append(Direction.LEFT)
+
+        RIGHT_IDX = AGENT_IDX + 1
+        # print(RIGHT_IDX)
+        if 0 <= RIGHT_IDX < MAX_INDEX:
+            valid_moves.append(Direction.RIGHT)
+
+        return valid_moves
 
     def reset(self):
         # trying to reinit the game, we will see

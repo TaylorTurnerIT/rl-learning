@@ -1,0 +1,9 @@
+[
+  {
+    "label": "Debug RL Learning",
+    "adapter": "Debugpy",
+    "request": "launch",
+    "module": "rl_learning.main",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]
