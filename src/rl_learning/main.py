@@ -7,15 +7,15 @@ def main():
     logger = logging.getLogger()
     done = False
 
-    state = Env(logger)
+    state: Env = Env(logger)
 
     while not done:
         state.show()
-        state.move(Direction.RIGHT)
+        state = state.move(Direction.RIGHT)
         state.show()
-        state.move(Direction.RIGHT)
+        state = state.move(Direction.RIGHT)
         state.show()
-        state.move(Direction.LEFT)
+        state = state.move(Direction.LEFT)
         state.show()
         done = True
 
