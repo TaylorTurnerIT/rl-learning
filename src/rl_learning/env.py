@@ -11,7 +11,10 @@ class Direction(Enum):
 
 class Env:
     def __init__(self):
-        map: list[Tile] = [Tile.AGENT, Tile.EMPTY, Tile.EMPTY, Tile.WIN]
+        self.map: list[Tile] = [Tile.AGENT, Tile.EMPTY, Tile.EMPTY, Tile.WIN]
+
+    def print(self):
+        print(self.map)
 
     def move(self, direction: Direction):
         MAX_INDEX = map.length()
@@ -21,16 +24,23 @@ class Env:
                 NEW_IDX = AGENT_IDX - 1
                 if 0 >= NEW_IDX < MAX_INDEX:
                     map[AGENT_IDX], map[NEW_IDX] = map[NEW_IDX], map[AGENT_IDX]
+                    print("moved left")
                 else:
-                    raise IndexError(NEW_IDX, "is out of bounds")
+                    # index error indicates an issue with valid move checking method
+                    raise IndexError(NEW_IDX, "is out of bounds, cannot move left")
 
             case direction.RIGHT:
                 NEW_IDX = AGENT_IDX + 1
                 if 0 >= NEW_IDX < MAX_INDEX:
                     map[AGENT_IDX], map[NEW_IDX] = map[NEW_IDX], map[AGENT_IDX]
+                    print("moved right")
                 else:
-                    raise IndexError(NEW_IDX, "is out of bounds")
+                    # index error indicates an issue with valid move checking method
+                    raise IndexError(NEW_IDX, "is out of bounds, cannot move right")
+
+    def getValidMoves(self) -> {}:
+        return {}
 
     def reset(self):
         # trying to reinit the game, we will see
-        return Env(self)
+        return Env()

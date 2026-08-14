@@ -7,7 +7,7 @@ def main():
     state = env.reset(env)
 
     while not done:
-        state
+        state.print()
         done = True
 
 
