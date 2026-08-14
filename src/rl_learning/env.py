@@ -90,6 +90,7 @@ class Env:
         self.INITIAL_MAP_SIZE: int = map_size
         self.INITIAL_AGENT_IDX: int = agent_idx
         self.INITIAL_WIN_IDX: int = win_idx
+
         self.agent_idx: int = self.INITIAL_AGENT_IDX
         self.win_idx: int = self.INITIAL_WIN_IDX
         self.map_size: int = self.INITIAL_MAP_SIZE
@@ -125,12 +126,14 @@ class Env:
                     self.LOGGER.info("moved right")
 
     def reset(self):
-        # trying to reinit the game, we will see
+        """
+        Returns a new environment with the same initial state used for its creation
+        """
         return (
             EnvBuilder()
             .logger(self.LOGGER, self.LEVEL)
             .map_size(self.INITIAL_MAP_SIZE)
-            .agent_index(self.agent_idx)
-            .win_index(self.win_idx)
+            .agent_index(self.INITIAL_AGENT_IDX)
+            .win_index(self.INITIAL_WIN_IDX)
             .build()
         )
