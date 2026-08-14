@@ -1,34 +1,28 @@
 # RL Learning
 
-A basic Python project initialized with [uv](https://github.com/astral-sh/uv) and [devenv](https://devenv.sh/).
+A from-first-principles reinforcement learning sandbox. The goal is to understand
+how agents, environments, states, actions, rewards, policies, and returns fit
+together by implementing them directly in Python—without an ML or RL library.
 
-## Features
-- **devenv**: Reproducible development environment powered by Nix.
-- **uv**: Fast Python package installer and virtual environment manager.
-- **Hatchling**: Modern PEP 621 compliant build backend.
-- **Pytest & Ruff**: Pre-configured testing and linting tools.
+The project follows a bottom-up path: build tiny environments, study exploration
+versus exploitation with multi-armed bandits, then add state and implement
+tabular methods such as value iteration, SARSA, and Q-learning. Each step favors
+small experiments and readable mechanics over black-box training APIs, following
+the approach outlined in [Getting Started with RL](https://chatgpt.com/share/6a7e2d90-36dc-83ea-b3d3-630ff2775383).
 
-## Getting Started
+## Run
 
-### Using devenv
-
-To enter the development environment shell:
-
-```bash
-devenv shell
-```
-
-Or if using `direnv`:
+Enter the reproducible development environment with `direnv allow` or
+`devenv shell`, then run:
 
 ```bash
-direnv allow
+uv run rl-learning
 ```
 
-### Development Commands
+Useful checks:
 
-Inside `devenv shell` or via `devenv shell <script>`:
-
-- Run application: `devenv shell app-run` or `uv run rl-learning`
-- Run tests: `devenv shell app-test` or `uv run pytest`
-- Format code: `devenv shell app-fmt` or `uv run ruff format .`
-- Lint code: `devenv shell app-check` or `uv run ruff check .`
+```bash
+ruff format --check .
+ruff check .
+uv run pytest
+```
