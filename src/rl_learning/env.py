@@ -36,27 +36,24 @@ class Env:
 
         match direction:
             case direction.LEFT:
-                if 0 <= AGENT_IDX - 1 < MAX_INDEX:
-                    LEFT_IDX = AGENT_IDX - 1
+                LEFT_IDX = AGENT_IDX - 1
+                if 0 <= LEFT_IDX < MAX_INDEX:
                     map[AGENT_IDX], map[LEFT_IDX] = (
                         map[LEFT_IDX],
                         map[AGENT_IDX],
                     )
                     self.logger.info("moved left")
-                    return map
+                return map
 
             case direction.RIGHT:
-                if 0 <= AGENT_IDX + 1 < MAX_INDEX:
-                    RIGHT_IDX = AGENT_IDX + 1
+                RIGHT_IDX = AGENT_IDX + 1
+                if 0 <= RIGHT_IDX < MAX_INDEX:
                     map[AGENT_IDX], map[RIGHT_IDX] = (
                         map[RIGHT_IDX],
                         map[AGENT_IDX],
                     )
                     self.logger.info("moved right")
-                    return map
-
-        self.logger.info("did not move")
-        return map
+                return map
 
     def reset(self):
         # trying to reinit the game, we will see
