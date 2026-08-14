@@ -1,12 +1,11 @@
 import logging
 from enum import Enum
+from tokenize import String
 
 # Configure global logging settings
 logging.basicConfig(
-    level=logging.INFO,  # Capture INFO and above
+    level=logging.DEBUG,  # Capture INFO and above
     format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
-    filename="%(asctime)-game-session.log",  # Write to file instead of console
-    filemode="w",  # 'w' to overwrite, 'a' to append
 )
 
 
@@ -21,25 +20,30 @@ class Direction(Enum):
     RIGHT = 1
 
 
-class MoveResult(Enum):
-    MOVED_LEFT = 0
-    MOVED_RIGHT = 1
-    INVALID_MOVE = 2
+class InvalidMoveException(Exception):
+    def __init__(
+        self,
+        message: str = "attempted to move in an invalid direction",
+    ):
+        super().__init__(message)
 
 
 class Env:
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger, agent_idx: int = 0, win_idx: int = 3):
         self.logger: logging.Logger = logger
-        self.map: list[Tile] = [Tile.AGENT, Tile.EMPTY, Tile.EMPTY, Tile.WIN]
+
+        self.map: list[Tile] = [Tile.EMPTY, Tile.EMPTY, Tile.EMPTY, Tile.EMPTY]
+        self.map[agent_idx] = Tile.AGENT
+        self.map[win_idx] = Tile.WIN
 
     def show(self):
         print(self.map)
 
-    def move(self, direction: Direction) -> MoveResult:
+    def move(self, direction: Direction):
         AGENT_IDX = self.map.index(Tile.AGENT)
-        valid_moves = self._getValidMoves()
+        valid_moves = self.getValidMoves()
         if not direction in valid_moves:
-            return MoveResult.INVALID_MOVE
+            raise InvalidMoveException()
 
         match direction:
             case direction.LEFT:
@@ -49,7 +53,6 @@ class Env:
                     self.map[AGENT_IDX],
                 )
                 self.logger.info("moved left")
-                return MoveResult.MOVED_LEFT
 
             case direction.RIGHT:
                 RIGHT_IDX = AGENT_IDX + 1
@@ -58,9 +61,8 @@ class Env:
                     self.map[AGENT_IDX],
                 )
                 self.logger.info("moved right")
-                return MoveResult.MOVED_RIGHT
 
-    def _getValidMoves(self) -> list[Direction]:
+    def getValidMoves(self) -> list[Direction]:
         MAX_INDEX = len(self.map)
         AGENT_IDX = self.map.index(Tile.AGENT)
         valid_moves: list[Direction] = []

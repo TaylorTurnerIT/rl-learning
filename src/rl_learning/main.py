@@ -1,6 +1,6 @@
 import logging
 
-from .env import Env
+from .env import Direction, Env
 
 
 def main():
@@ -10,6 +10,12 @@ def main():
     state = Env(logger)
 
     while not done:
+        state.show()
+        state.move(Direction.RIGHT)
+        state.show()
+        state.move(Direction.RIGHT)
+        state.show()
+        state.move(Direction.LEFT)
         state.show()
         done = True
 
