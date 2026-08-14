@@ -30,27 +30,33 @@ class Env:
     def show(self):
         print(self.map)
 
-    def move(self, direction: Direction):
+    def move(self, map: list[Tile], direction: Direction) -> list[Tile]:
         AGENT_IDX = self.map.index(Tile.AGENT)
+        MAX_INDEX = len(map)
 
         match direction:
             case direction.LEFT:
-                LEFT_IDX = AGENT_IDX - 1
-                self.map[AGENT_IDX], self.map[LEFT_IDX] = (
-                    self.map[LEFT_IDX],
-                    self.map[AGENT_IDX],
-                )
-                self.logger.info("moved left")
-                return
+                if 0 <= AGENT_IDX - 1 < MAX_INDEX:
+                    LEFT_IDX = AGENT_IDX - 1
+                    map[AGENT_IDX], map[LEFT_IDX] = (
+                        map[LEFT_IDX],
+                        map[AGENT_IDX],
+                    )
+                    self.logger.info("moved left")
+                    return map
 
             case direction.RIGHT:
-                RIGHT_IDX = AGENT_IDX + 1
-                self.map[AGENT_IDX], self.map[RIGHT_IDX] = (
-                    self.map[RIGHT_IDX],
-                    self.map[AGENT_IDX],
-                )
-                self.logger.info("moved right")
-                return
+                if 0 <= AGENT_IDX + 1 < MAX_INDEX:
+                    RIGHT_IDX = AGENT_IDX + 1
+                    map[AGENT_IDX], map[RIGHT_IDX] = (
+                        map[RIGHT_IDX],
+                        map[AGENT_IDX],
+                    )
+                    self.logger.info("moved right")
+                    return map
+
+        self.logger.info("did not move")
+        return map
 
     def reset(self):
         # trying to reinit the game, we will see
