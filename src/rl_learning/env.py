@@ -1,5 +1,6 @@
 import logging
 from enum import Enum, IntEnum
+from typing import Final
 
 from .events import EventEmitter, EventType
 
@@ -92,10 +93,10 @@ class Env:
         agent_idx: int,
         win_idx: int,
     ) -> None:
-        self.LOGGER: logging.Logger = logger
-        self.INITIAL_MAP_SIZE: int = map_size
-        self.INITIAL_AGENT_IDX: int = agent_idx
-        self.INITIAL_WIN_IDX: int = win_idx
+        self.LOGGER: Final[logging.Logger] = logger
+        self.INITIAL_MAP_SIZE: Final[int] = map_size
+        self.INITIAL_AGENT_IDX: Final[int] = agent_idx
+        self.INITIAL_WIN_IDX: Final[int] = win_idx
 
         self.agent_idx: int = self.INITIAL_AGENT_IDX
         self.win_idx: int = self.INITIAL_WIN_IDX
