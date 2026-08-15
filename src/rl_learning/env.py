@@ -1,6 +1,8 @@
 import logging
+from _collections_abc import Callable
+from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable, Required, TypedDict
+from typing import Required, TypedDict
 
 
 class LogLevel(IntEnum):
@@ -30,9 +32,22 @@ class EnvParams(TypedDict, total=False):
     win_idx: Required[int]
 
 
-class Event(TypedDict):
+@dataclass
+class Event:
     name: str
-    callback: Callable
+    listeners: list[Callable] = field(default_factory=list)
+
+    def subscribe(self, callback: Callable):
+        if callback not in self.listeners:
+            self.listeners.append(callback)
+
+    def unsubscribe(self, callback: Callable):
+        if callback in self.listeners:
+            self.listeners.remove(callback)
+
+    def emit(self, *args, **kwargs):
+        for callback in self.listeners.copy():
+            callback(*args, **kwargs)
 
 
 class EventEmitter:
@@ -40,11 +55,28 @@ class EventEmitter:
     Uses the Observer/Dispatch pattern to allow event-subscription
     """
 
-    def __init__(self):
-        self._listeners = {}
+    def __init__(self, logger: logging.Logger):
+        self._events: dict[str, Event] = {}
+        self.logger: logging.Logger = logger
 
-    def on(self, event: Event):
-        self._listeners.setdefault(event["name"], []).append(event["callback"])
+    def subscribe(self, event_name: str, callback: Callable):
+        if event_name not in self._events:
+            self._events[event_name] = Event(event_name)
+            self.logger.info("created event:", {event_name})
+
+        self._events[event_name].subscribe(callback)
+        self.logger.info({callback}, " subscribed to event: ", {event_name})
+
+    def unsubscribe(self, event_name: str, callback: Callable):
+        if event_name not in self._events:
+            raise ValueError("cannot unsubscribe from event that does not exist")
+        self._events[event_name].unsubscribe(callback)
+
+    def emit(self, event_name: str, *args, **kwargs):
+        if event_name not in self._events:
+            raise ValueError("emitted event that does not exist")
+
+        self._events[event_name].emit(*args, **kwargs)
 
 
 class EnvBuilder:
