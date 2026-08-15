@@ -32,19 +32,12 @@ class EnvBuilder:
     class EnvBuilder:
         def __init__(self):
             self._logger: logging.Logger | None = None
-            self._level: LogLevel | None = None
             self._map_size: int | None = None
             self._agent_idx: int | None = None
             self._win_idx: int | None = None
 
-    def logger(self, ext_logger: logging.Logger, level: LogLevel):
-        # Configure global logging settings
-        logging.basicConfig(
-            level=level,  # Capture INFO and above
-            format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
-        )
+    def logger(self, ext_logger: logging.Logger):
         self._logger = ext_logger
-        self._level = level
         return self
 
     def map_size(self, size: int):
@@ -82,9 +75,7 @@ class EnvBuilder:
         if self._agent_idx == self._win_idx:
             raise ValueError("agent_idx and win_idx should not be the same")
 
-        return Env(
-            self._logger, self._level, self._map_size, self._agent_idx, self._win_idx
-        )
+        return Env(self._logger, self._map_size, self._agent_idx, self._win_idx)
 
 
 class Env:
@@ -98,13 +89,11 @@ class Env:
     def __init__(
         self,
         logger: logging.Logger,
-        level: LogLevel,
         map_size: int,
         agent_idx: int,
         win_idx: int,
     ) -> None:
         self.LOGGER: logging.Logger = logger
-        self.LEVEL: LogLevel = level
         self.INITIAL_MAP_SIZE: int = map_size
         self.INITIAL_AGENT_IDX: int = agent_idx
         self.INITIAL_WIN_IDX: int = win_idx
@@ -158,7 +147,7 @@ class Env:
         """
         return (
             EnvBuilder()
-            .logger(self.LOGGER, self.LEVEL)
+            .logger(self.LOGGER)
             .map_size(self.INITIAL_MAP_SIZE)
             .agent_index(self.INITIAL_AGENT_IDX)
             .win_index(self.INITIAL_WIN_IDX)
