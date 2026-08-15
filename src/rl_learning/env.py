@@ -30,10 +30,10 @@ class EnvBuilder:
     """
 
     def __init__(self):
-        self._logger: logging.Logger | None = None
-        self._map_size: int | None = None
-        self._agent_idx: int | None = None
-        self._win_idx: int | None = None
+        self._logger: logging.Logger
+        self._map_size: int = 4
+        self._agent_idx: int = 0
+        self._win_idx: int = 1
 
     def logger(self, ext_logger: logging.Logger):
         self._logger = ext_logger
@@ -58,7 +58,7 @@ class EnvBuilder:
         if not (0 <= self._agent_idx < self._map_size):
             raise ValueError(
                 "agent_idx is out of bounds. agent_idx:",
-                self._win_idx,
+                self._agent_idx,
                 ". map_size:",
                 self._map_size,
             )
