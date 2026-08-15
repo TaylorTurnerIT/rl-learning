@@ -166,10 +166,17 @@ class Env:
         self.map[self.agent_idx] = Tile.AGENT
         self.map[self.win_idx] = Tile.WIN
 
-        self.emitter = EventEmitter()
+        self.emitter = EventEmitter(self.LOGGER)
+        self.emitter.subscribe("win", self.win)
 
     def show(self):
         print(self.map)
+
+    def swap_tiles(self, OLD_IDX: int, NEW_IDX: int):
+        self.map[OLD_IDX], self.map[NEW_IDX] = (
+            self.map[NEW_IDX],
+            self.map[OLD_IDX],
+        )
 
     def move(self, direction: Direction):
         """
@@ -177,6 +184,14 @@ class Env:
         """
         AGENT_IDX = self.map.index(Tile.AGENT)
         MAX_INDEX = len(self.map)
+
+        NEW_IDX = AGENT_IDX - 1
+        if 0 <= NEW_IDX < MAX_INDEX:
+            self.map[AGENT_IDX], self.map[NEW_IDX] = (
+                self.map[NEW_IDX],
+                self.map[AGENT_IDX],
+            )
+            self.LOGGER.info("moved left")
 
         match direction:
             case direction.LEFT:
@@ -191,14 +206,11 @@ class Env:
             case direction.RIGHT:
                 RIGHT_IDX = AGENT_IDX + 1
                 if 0 <= RIGHT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[RIGHT_IDX] = (
-                        self.map[RIGHT_IDX],
-                        self.map[AGENT_IDX],
-                    )
+                    self.swap_tiles(OLD_IDX=AGENT_IDX, NEW_IDX=RIGHT_IDX)
                     self.LOGGER.info("moved right")
 
     def win(self):
-        pass
+        self.LOGGER.info("you win!")
 
     def reset(self):
         """
