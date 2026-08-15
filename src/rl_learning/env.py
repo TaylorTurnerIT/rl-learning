@@ -1,9 +1,6 @@
 import logging
-from ast import Constant, Dict
 from enum import IntEnum
-from multiprocessing import Value
-
-from typing_extensions import Any, Callable, Literal, Required, TypedDict
+from typing import Callable, Required, TypedDict
 
 
 class LogLevel(IntEnum):
@@ -40,7 +37,8 @@ class Event(TypedDict):
 
 class EventEmitter:
     """
-    Uses the Observer/Dispatch pattern to allow event-subscription"""
+    Uses the Observer/Dispatch pattern to allow event-subscription
+    """
 
     def __init__(self):
         self._listeners = {}
