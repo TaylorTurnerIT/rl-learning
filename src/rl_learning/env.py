@@ -1,8 +1,8 @@
 import logging
-from _collections_abc import Callable
-from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Required, TypedDict
+
+from .events import EventEmitter, EventType
 
 
 class LogLevel(IntEnum):
@@ -13,70 +13,15 @@ class LogLevel(IntEnum):
     CRITICAL = logging.CRITICAL
 
 
-class Tile(IntEnum):
-    AGENT = 0
-    EMPTY = 1
-    WIN = 2
+class Tile(Enum):
+    AGENT = "Agent"
+    EMPTY = "Empty"
+    WIN = "Win"
 
 
-class Direction(IntEnum):
-    LEFT = 0
-    RIGHT = 1
-
-
-class EnvParams(TypedDict, total=False):
-    logger: Required[logging.Logger]
-    level: Required[LogLevel]
-    map_size: Required[int]
-    agent_idx: Required[int]
-    win_idx: Required[int]
-
-
-@dataclass
-class Event:
-    name: str
-    listeners: list[Callable] = field(default_factory=list)
-
-    def subscribe(self, callback: Callable):
-        if callback not in self.listeners:
-            self.listeners.append(callback)
-
-    def unsubscribe(self, callback: Callable):
-        if callback in self.listeners:
-            self.listeners.remove(callback)
-
-    def emit(self, *args, **kwargs):
-        for callback in self.listeners.copy():
-            callback(*args, **kwargs)
-
-
-class EventEmitter:
-    """
-    Uses the Observer/Dispatch pattern to allow event-subscription
-    """
-
-    def __init__(self, logger: logging.Logger):
-        self._events: dict[str, Event] = {}
-        self.logger: logging.Logger = logger
-
-    def subscribe(self, event_name: str, callback: Callable):
-        if event_name not in self._events:
-            self._events[event_name] = Event(event_name)
-            self.logger.info("created event:", {event_name})
-
-        self._events[event_name].subscribe(callback)
-        self.logger.info({callback}, " subscribed to event: ", {event_name})
-
-    def unsubscribe(self, event_name: str, callback: Callable):
-        if event_name not in self._events:
-            raise ValueError("cannot unsubscribe from event that does not exist")
-        self._events[event_name].unsubscribe(callback)
-
-    def emit(self, event_name: str, *args, **kwargs):
-        if event_name not in self._events:
-            raise ValueError("emitted event that does not exist")
-
-        self._events[event_name].emit(*args, **kwargs)
+class Direction(Enum):
+    LEFT = "Left"
+    RIGHT = "Right"
 
 
 class EnvBuilder:
@@ -84,8 +29,13 @@ class EnvBuilder:
     Constructs Env() using the Builder Pattern
     """
 
-    def __init__(self):
-        self._params: EnvParams = {}  # pyright: ignore[reportAttributeAccessIssue]
+    class EnvBuilder:
+        def __init__(self):
+            self._logger: logging.Logger | None = None
+            self._level: LogLevel | None = None
+            self._map_size: int | None = None
+            self._agent_idx: int | None = None
+            self._win_idx: int | None = None
 
     def logger(self, ext_logger: logging.Logger, level: LogLevel):
         # Configure global logging settings
@@ -93,46 +43,48 @@ class EnvBuilder:
             level=level,  # Capture INFO and above
             format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
         )
-        self._params["logger"] = ext_logger
-        self._params["level"] = level
+        self._logger = ext_logger
+        self._level = level
         return self
 
     def map_size(self, size: int):
         if size <= 1:
             raise ValueError("map size should be greater than 1")
-        self._params["map_size"] = size
+        self._map_size = size
         return self
 
     def agent_index(self, idx: int):
-        self._params["agent_idx"] = idx
+        self._agent_idx = idx
         return self
 
     def win_index(self, idx: int):
-        self._params["win_idx"] = idx
+        self._win_idx = idx
         return self
 
     def build(self):
 
-        if 0 < self._params["agent_idx"] <= self._params["map_size"]:
+        if not (0 <= self._agent_idx < self._map_size):
             raise ValueError(
                 "agent_idx is out of bounds. agent_idx:",
-                self._params["win_idx"],
+                self._win_idx,
                 ". map_size:",
-                self._params["map_size"],
+                self._map_size,
             )
 
-        if not (0 < self._params["win_idx"] <= self._params["map_size"]):
+        if not (0 <= self._win_idx < self._map_size):
             raise ValueError(
                 "win_idx is out of bounds. win_idx:",
-                self._params["win_idx"],
+                self._win_idx,
                 ". map_size:",
-                self._params["map_size"],
+                self._map_size,
             )
 
-        if self._params["agent_idx"] == self._params["win_idx"]:
+        if self._agent_idx == self._win_idx:
             raise ValueError("agent_idx and win_idx should not be the same")
 
-        return Env(**self._params)
+        return Env(
+            self._logger, self._level, self._map_size, self._agent_idx, self._win_idx
+        )
 
 
 class Env:
@@ -145,7 +97,6 @@ class Env:
 
     def __init__(
         self,
-        *,
         logger: logging.Logger,
         level: LogLevel,
         map_size: int,
@@ -167,7 +118,9 @@ class Env:
         self.map[self.win_idx] = Tile.WIN
 
         self.emitter = EventEmitter(self.LOGGER)
-        self.emitter.subscribe("win", self.win)
+        self.emitter.subscribe(EventType.WIN, self.win)
+        self.emitter.subscribe(EventType.MOVE, self.move)
+        self.emitter.subscribe(EventType.RESET, self.reset)
 
     def show(self):
         print(self.map)
@@ -185,29 +138,16 @@ class Env:
         AGENT_IDX = self.map.index(Tile.AGENT)
         MAX_INDEX = len(self.map)
 
-        NEW_IDX = AGENT_IDX - 1
-        if 0 <= NEW_IDX < MAX_INDEX:
-            self.map[AGENT_IDX], self.map[NEW_IDX] = (
-                self.map[NEW_IDX],
-                self.map[AGENT_IDX],
-            )
-            self.LOGGER.info("moved left")
-
         match direction:
             case direction.LEFT:
-                LEFT_IDX = AGENT_IDX - 1
-                if 0 <= LEFT_IDX < MAX_INDEX:
-                    self.map[AGENT_IDX], self.map[LEFT_IDX] = (
-                        self.map[LEFT_IDX],
-                        self.map[AGENT_IDX],
-                    )
-                    self.LOGGER.info("moved left")
+                NEW_IDX = AGENT_IDX - 1
 
             case direction.RIGHT:
-                RIGHT_IDX = AGENT_IDX + 1
-                if 0 <= RIGHT_IDX < MAX_INDEX:
-                    self.swap_tiles(OLD_IDX=AGENT_IDX, NEW_IDX=RIGHT_IDX)
-                    self.LOGGER.info("moved right")
+                NEW_IDX = AGENT_IDX + 1
+
+        if 0 <= NEW_IDX < MAX_INDEX:
+            self.swap_tiles(OLD_IDX=AGENT_IDX, NEW_IDX=NEW_IDX)
+            self.LOGGER.info("moved %s", direction)
 
     def win(self):
         self.LOGGER.info("you win!")
