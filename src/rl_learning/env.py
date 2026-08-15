@@ -1,6 +1,5 @@
 import logging
 from enum import Enum, IntEnum
-from typing import Required, TypedDict
 
 from .events import EventEmitter, EventType
 
