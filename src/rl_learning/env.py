@@ -29,12 +29,11 @@ class EnvBuilder:
     Constructs Env() using the Builder Pattern
     """
 
-    class EnvBuilder:
-        def __init__(self):
-            self._logger: logging.Logger | None = None
-            self._map_size: int | None = None
-            self._agent_idx: int | None = None
-            self._win_idx: int | None = None
+    def __init__(self):
+        self._logger: logging.Logger | None = None
+        self._map_size: int | None = None
+        self._agent_idx: int | None = None
+        self._win_idx: int | None = None
 
     def logger(self, ext_logger: logging.Logger):
         self._logger = ext_logger
