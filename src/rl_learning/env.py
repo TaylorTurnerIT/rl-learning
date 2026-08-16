@@ -12,18 +12,32 @@ class Direction(Enum):
     RIGHT = "Right"
 
 
+class EnvParams(Enum):
+    map_size: int
+    agent_idx: int
+    win_idx: int
+    logger: logging.Logger
+
+
 class EnvBuilder:
     """
     Constructs Env() using the Builder Pattern
     """
 
-    def __init__(self):
+    def __init__(self, params: EnvParams | None = None):
         self.env: Env
 
         self._map_size: int
         self._agent_idx: int
         self._win_idx: int
         self._logger: logging.Logger
+
+        if params is not None:
+            self._map_size = params.map_size
+            self._logger = params.logger
+            self._agent_idx = params.agent_idx
+            self._win_idx = params.win_idx
+            self.build()
 
     def map_size(self, size: int):
         if size <= 1:
