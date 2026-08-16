@@ -20,7 +20,7 @@ def main():
         format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
     )
 
-    state: Env = (
+    state: EnvBuilder = (
         EnvBuilder().logger(logger).map_size(5).agent_index(0).win_index(4).build()
     )
 
