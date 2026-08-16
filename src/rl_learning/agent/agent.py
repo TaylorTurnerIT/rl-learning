@@ -21,6 +21,7 @@ class Brain:
         if length <= 0:
             raise ValueError("length should be gt 0: ", length)
 
+        # resize the array if needed
         difference = len(self.actions) - length
         if difference < 0:
             self.actions[:difference]
@@ -28,6 +29,7 @@ class Brain:
         for _ in range(difference):
             self.actions.append(Direction.LEFT)
 
+        # generate random values
         for index in range(len(self.actions)):
             if random.random() < mutation_chance:
                 self.actions[index] = random.choice([Direction.LEFT, Direction.RIGHT])
