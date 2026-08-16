@@ -37,3 +37,7 @@ class AgentHandler:
     def run_agents(self):
         for id in range(self.population):
             self.agents[id].run_actions()
+
+    def mutate_agents(self):
+        for id in range(self.population):
+            self.agents[id].brain.mutate()
