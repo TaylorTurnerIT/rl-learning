@@ -28,6 +28,6 @@ class Brain:
         for _ in range(difference):
             self.actions.append(Direction.LEFT)
 
-        for action in range(len(self.actions), length):
+        for index in range(len(self.actions)):
             if random.random() < mutation_chance:
-                self.actions[action] = random.choice([Direction.LEFT, Direction.RIGHT])
+                self.actions[index] = random.choice([Direction.LEFT, Direction.RIGHT])
