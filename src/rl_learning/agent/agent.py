@@ -29,13 +29,10 @@ class Agent:
 
     def calculate_fitness(self) -> Fitness:
         return Fitness(
-            move_count=self.move_count,
+            move_count=self.env.map_size,
             win=self.win,
             distance_to_win=self.get_win_distance(),
         )
-
-    def count_move(self):
-        self.move_count += 1
 
     def reset(self, new_brain: Brain | None = None):
         self.env.reset()
