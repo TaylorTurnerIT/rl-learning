@@ -87,7 +87,7 @@ class EnvBuilder:
             logger=self._logger,
         )
 
-        return Env
+        return self.env
 
 
 class Env:
