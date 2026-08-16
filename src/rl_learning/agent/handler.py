@@ -22,12 +22,14 @@ class AgentHandler:
         self.best_agent: Agent | None = None
         self.env_builder: EnvBuilder = EnvBuilder(env_params)
 
-    def create_agents(self, brain: Brain, logger: Logger):
+    def create_agents(self, logger: Logger):
         if self.best_agent is not None:
             self.brain = self.best_agent.brain
         for id in range(self.population):
             self.agents.append(
-                Agent(id=id, brain=brain, env=self.env_builder.build(), logger=logger)
+                Agent(
+                    id=id, brain=self.brain, env=self.env_builder.build(), logger=logger
+                )
             )
 
     def reset_agents(self):
