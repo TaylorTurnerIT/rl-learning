@@ -3,6 +3,7 @@ from logging import Logger
 from ..env import Env
 from ..events import EventEmitter, EventType
 from .brain import Brain
+from .handler import Fitness
 
 
 class Agent:
@@ -12,6 +13,7 @@ class Agent:
         self.events: EventEmitter = EventEmitter(logger)
         self.win: bool = False
         self.env: Env = env
+        self.move_count = 0
 
         self.events.subscribe(EventType.WIN, self.set_win)
 
@@ -25,11 +27,19 @@ class Agent:
     def get_win_distance(self):
         return abs(self.env.win_idx - self.env.agent_idx)
 
-    def calculate_fitness(self):
-        pass
+    def calculate_fitness(self) -> Fitness:
+        return Fitness(
+            move_count=self.move_count,
+            win=self.win,
+            distance_to_win=self.get_win_distance(),
+        )
+
+    def count_move(self):
+        self.move_count += 1
 
     def reset(self, new_brain: Brain | None = None):
         self.env.reset()
+        self.move_count = 0
 
         if new_brain is not None:
             self.brain = new_brain
