@@ -40,8 +40,6 @@ class EnvBuilder:
             self.build()
 
     def map_size(self, size: int):
-        if size <= 1:
-            raise ValueError("map size should be greater than 1")
         self._map_size = size
         return self
 
@@ -58,6 +56,10 @@ class EnvBuilder:
         return self
 
     def build(self):
+        if self._map_size <= 1:
+            raise ValueError(
+                "map size should be greater than 1. map_size:", self._map_size
+            )
 
         if not (0 <= self._agent_idx < self._map_size):
             raise ValueError(
