@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 
 {
   # System packages available in environment
@@ -8,14 +8,16 @@
     pkgs.zlib
   ];
 
-  # Language configuration: Enable Python and uv with automatic sync
+  # Provide Python and uv; uv owns the conventional project-local .venv.
   languages.python = {
     enable = true;
     uv = {
       enable = true;
-      sync.enable = true;
     };
   };
+
+  # Use uv's conventional, editor-discoverable project environment.
+  env.UV_PROJECT_ENVIRONMENT = lib.mkForce ".venv";
 
   # Environment scripts for common tasks
   scripts = {
