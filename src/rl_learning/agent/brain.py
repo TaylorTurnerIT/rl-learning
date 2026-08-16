@@ -1,12 +1,10 @@
 import random
 
-import numpy as np
-
 from ..env import Direction
 
 
 class Brain:
-    def __init__(self, population: int = 100):
+    def __init__(self):
         self.actions: list[Direction] = []
 
     def randomize_actions(self, length: int, mutation_chance: float):
