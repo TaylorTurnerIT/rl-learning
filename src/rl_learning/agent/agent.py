@@ -6,12 +6,12 @@ from .brain import Brain
 
 
 class Agent:
-    def __init__(self, id: int, brain: Brain, env: Env, logger: Logger):
+    def __init__(self, id: int, brain: Brain, logger: Logger, env: Env):
         self.id = id
         self.brain = brain
-        self.env = env
         self.events: EventEmitter = EventEmitter(logger)
         self.win: bool = False
+        self.env: Env = env
 
         self.events.subscribe(EventType.WIN, self.set_win)
 
