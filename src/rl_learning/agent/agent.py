@@ -1,13 +1,15 @@
+from logging import Logger
+
 from ..env import Env
 from ..events import EventEmitter, EventType
 from .brain import Brain
 
 
 class Agent:
-    def __init__(self, brain: Brain, env: Env, events: EventEmitter):
+    def __init__(self, brain: Brain, env: Env, logger: Logger):
         self.brain = brain
         self.env = env
-        self.events = events
+        self.events: EventEmitter = EventEmitter(logger)
         self.win: bool = False
 
         self.events.subscribe(EventType.WIN, self.set_win)
@@ -20,4 +22,4 @@ class Agent:
         self.win = True
 
     def get_win_distance(self):
-        self.env
+        abs(self.env.win_idx)
