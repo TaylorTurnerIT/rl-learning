@@ -8,18 +8,23 @@ from .handler import Fitness
 
 class Agent:
     def __init__(self, id: int, brain: Brain, logger: Logger, env: Env):
+        self.MUTATION_CHANCE = 0.20
         self.id = id
         self.brain = brain
         self.events: EventEmitter = EventEmitter(logger)
         self.win: bool = False
         self.env: Env = env
-        self.move_count = 0
 
         self.events.subscribe(EventType.WIN, self.set_win)
 
     def run_actions(self):
         for direction in self.brain.actions:
             self.env.move(direction)
+
+    def mutate(self):
+        self.brain.randomize_actions(
+            length=self.env.map_size, mutation_chance=self.MUTATION_CHANCE
+        )
 
     def set_win(self):
         self.win = True
@@ -36,7 +41,6 @@ class Agent:
 
     def reset(self, new_brain: Brain | None = None):
         self.env.reset()
-        self.move_count = 0
 
         if new_brain is not None:
             self.brain = new_brain
