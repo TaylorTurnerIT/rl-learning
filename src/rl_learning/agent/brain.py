@@ -1,10 +1,4 @@
-# Genetic Algorithm
-# Permutation encoding
-#
-# For each agent:
-#   Create a random list of instructions with either Tile.Left or Tile.Right
 import random
-from multiprocessing import Value
 
 import numpy as np
 
