@@ -144,10 +144,12 @@ class Env:
             self.emitter.emit(EventType.WIN)
 
         self.agent_idx = NEW_IDX
+        self.emitter.emit(EventType.MOVE)
 
         self.LOGGER.info("moved %s", direction)
 
     def win(self):
+        self.emitter.emit(EventType.WIN)
         self.LOGGER.info("you win!")
 
     def reset(self):
