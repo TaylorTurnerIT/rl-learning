@@ -35,5 +35,5 @@ class AgentHandler:
             self.agents[id].reset()
 
     def run_agents(self):
-        for id in range(self.population)
+        for id in range(self.population):
             self.agents[id].run_actions()
