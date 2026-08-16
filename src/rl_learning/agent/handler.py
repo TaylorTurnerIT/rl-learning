@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from logging import Logger
 
-from ..env import Env, EnvBuilder, EnvParams
+from ..env import EnvBuilder, EnvParams
 from .agent import Agent
 from .brain import Brain
 
