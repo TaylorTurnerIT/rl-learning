@@ -20,15 +20,10 @@ class EnvBuilder:
     def __init__(self):
         self.env: Env
 
-        self._id: int
         self._map_size: int
         self._agent_idx: int
         self._win_idx: int
         self._logger: logging.Logger
-
-    def id(self, id: int):
-        self._id = id
-        return self
 
     def map_size(self, size: int):
         if size <= 1:
@@ -70,12 +65,13 @@ class EnvBuilder:
             raise ValueError("agent_idx and win_idx should not be the same")
 
         self.env = Env(
-            id=self._id,
             map_size=self._map_size,
             agent_idx=self._agent_idx,
             win_idx=self._win_idx,
             logger=self._logger,
         )
+
+        return self
 
     def reset(self):
         self.build()
@@ -91,7 +87,6 @@ class Env:
 
     def __init__(
         self,
-        id: int,
         map_size: int,
         agent_idx: int,
         win_idx: int,
