@@ -3,7 +3,7 @@ from logging import Logger
 from ..env import Env
 from ..events import EventEmitter, EventType
 from .brain import Brain
-from .handler import Fitness
+from .fitness import Fitness
 
 
 class Agent:

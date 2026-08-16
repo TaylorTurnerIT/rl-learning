@@ -1,16 +1,9 @@
-from dataclasses import dataclass
 from logging import Logger
 
 from ..env import EnvBuilder, EnvParams
 from .agent import Agent
 from .brain import Brain
-
-
-@dataclass
-class Fitness:
-    win: bool
-    distance_to_win: int
-    move_count: int
+from .fitness import Fitness
 
 
 class AgentHandler:
