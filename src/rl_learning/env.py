@@ -108,11 +108,11 @@ class Env:
         self.LOGGER: Final[logging.Logger] = logger
         self.INITIAL_AGENT_IDX: Final[int] = agent_idx
         self.INITIAL_WIN_IDX: Final[int] = win_idx
+        self.INITIAL_MAP_SIZE: Final[int] = map_size
 
         self.agent_idx: int = self.INITIAL_AGENT_IDX
         self.win_idx: int = self.INITIAL_WIN_IDX
-
-        self.map_size: int = map_size
+        self.map_size: int = self.INITIAL_MAP_SIZE
 
         self.emitter = EventEmitter(self.LOGGER)
         self.emitter.subscribe(EventType.WIN, self.win)
