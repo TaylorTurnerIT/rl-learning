@@ -27,3 +27,10 @@ class Agent:
 
     def calculate_fitness(self):
         pass
+
+    def reset(self, new_brain: Brain | None = None):
+        self.env.reset()
+
+        if new_brain is not None:
+            self.brain = new_brain
+            self.win = False
