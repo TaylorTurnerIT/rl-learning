@@ -6,7 +6,7 @@ from .brain import Brain
 
 
 class Agent:
-    def __init__(self, id:int, brain: Brain, env: Env, logger: Logger):
+    def __init__(self, id: int, brain: Brain, env: Env, logger: Logger):
         self.id = id
         self.brain = brain
         self.env = env
@@ -25,4 +25,5 @@ class Agent:
     def get_win_distance(self):
         return abs(self.env.win_idx - self.env.agent_idx)
 
-    def calc_fitness(self) -> [Bool, ]
+    def calculate_fitness(self):
+        pass
