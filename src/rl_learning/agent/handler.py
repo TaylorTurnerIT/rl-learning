@@ -8,12 +8,9 @@ from .brain import Brain
 
 @dataclass
 class Fitness:
-    def __init__(
-        self,
-        win: bool,
-        win_distance: int,
-    ):
-        pass
+    win: bool
+    distance_to_win: int
+    move_count: int
 
 
 class AgentHandler:
@@ -36,3 +33,7 @@ class AgentHandler:
     def reset_agents(self):
         for id in range(self.population):
             self.agents[id].reset()
+
+    def run_agents(self):
+        for id in range(self.population)
+            self.agents[id].run_actions()
