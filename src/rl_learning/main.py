@@ -1,6 +1,15 @@
 import logging
+from enum import IntEnum
 
-from .env import Direction, Env, EnvBuilder, LogLevel
+from .env import Direction, Env, EnvBuilder
+
+
+class LogLevel(IntEnum):
+    DEBUG = logging.DEBUG
+    INFO = logging.INFO
+    WARNING = logging.WARNING
+    ERROR = logging.ERROR
+    CRITICAL = logging.CRITICAL
 
 
 def main():
