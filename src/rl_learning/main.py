@@ -21,13 +21,18 @@ def main():
         format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
     )
 
-    done = False
+    iteration = 0
+    epochs = 100
     population = 100
     env_params = EnvParams(map_size=5, agent_idx=0, win_idx=4, logger=logger)
+    logger.info("starting workflow with population=%d", population)
     agents = AgentHandler(population=population, env_params=env_params)
     agents.create_agents(logger=logger)
-    while not done:
-        done = True
+    while iteration != epochs:
+        agents.run_agents()
+        agents.mutate_agents()
+        iteration += 1
+    logger.info("workflow complete")
 
 
 if __name__ == "__main__":
