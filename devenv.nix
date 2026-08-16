@@ -1,10 +1,11 @@
-{ pkgs, lib, config, inputs, ... }:
+{ pkgs, ... }:
 
 {
   # System packages available in environment
   packages = [
     pkgs.git
     pkgs.ruff
+    pkgs.zlib
   ];
 
   # Language configuration: Enable Python and uv with automatic sync
