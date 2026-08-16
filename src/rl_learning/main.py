@@ -1,9 +1,8 @@
 import logging
 from enum import IntEnum
 
-from rl_learning.agent.handler import AgentHandler
-
-from .env import Direction, Env, EnvBuilder, EnvParams
+from .agent.handler import AgentHandler
+from .env import EnvParams
 
 
 class LogLevel(IntEnum):
@@ -23,8 +22,10 @@ def main():
     )
 
     done = False
-    env_params = EnvParams(map_size=5, agent_idx=0, win_idx=4, logger=logger)
-    agents = AgentHandler(population=100, env_params=env_params)
+    population = 100
+    env_params = EnvParams(starting_map_size=5, agent_idx=0, win_idx=4, logger=logger)
+    agents = AgentHandler(population=population, env_params=env_params)
+    agents.create_agents(logger=logger)
     while not done:
         done = True
 
