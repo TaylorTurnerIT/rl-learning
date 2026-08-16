@@ -18,17 +18,12 @@ class Brain:
             raise ValueError(
                 "mutation_chance should not exceed 1: ", self.mutation_chance
             )
-        if self.count <= 0:
-            raise ValueError("length should be gt 0: ", self.count)
+        if self.action_count <= 0:
+            raise ValueError("length should be gt 0: ", self.action_count)
         if random.random() > self.mutation_chance:
             return
 
-        modifier = random.randrange(1, 3)
-        match random.randrange(0, 1):
-            case 0:
-                self.action_count -= modifier
-            case 1:
-                self.action_count += modifier
+        self.action_count -= random.randrange(-3, 3)
 
     def mutate_actions(self):
         if self.mutation_chance > 1:
