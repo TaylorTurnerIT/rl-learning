@@ -23,7 +23,7 @@ def main():
 
     done = False
     population = 100
-    env_params = EnvParams(starting_map_size=5, agent_idx=0, win_idx=4, logger=logger)
+    env_params = EnvParams(map_size=5, agent_idx=0, win_idx=4, logger=logger)
     agents = AgentHandler(population=population, env_params=env_params)
     agents.create_agents(logger=logger)
     while not done:

@@ -8,7 +8,6 @@ from .handler import Fitness
 
 class Agent:
     def __init__(self, id: int, brain: Brain, logger: Logger, env: Env):
-        self.MUTATION_CHANCE = 0.20
         self.id = id
         self.brain = brain
         self.events: EventEmitter = EventEmitter(logger)
@@ -22,9 +21,7 @@ class Agent:
             self.env.move(direction)
 
     def mutate(self):
-        self.brain.randomize_actions(
-            length=self.env.map_size, mutation_chance=self.MUTATION_CHANCE
-        )
+        self.brain.mutate()
 
     def set_win(self):
         self.win = True

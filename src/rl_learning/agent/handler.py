@@ -42,4 +42,4 @@ class AgentHandler:
 
     def mutate_agents(self):
         for id in range(self.population):
-            self.agents[id].brain.mutate()
+            self.agents[id].mutate()
