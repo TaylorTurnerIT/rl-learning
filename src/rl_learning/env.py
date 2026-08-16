@@ -1,22 +1,8 @@
 import logging
-from enum import Enum, IntEnum
+from enum import Enum
 from typing import Final
 
 from .events import EventEmitter, EventType
-
-
-class LogLevel(IntEnum):
-    DEBUG = logging.DEBUG
-    INFO = logging.INFO
-    WARNING = logging.WARNING
-    ERROR = logging.ERROR
-    CRITICAL = logging.CRITICAL
-
-
-class Tile(Enum):
-    AGENT = "Agent"
-    EMPTY = "Empty"
-    WIN = "Win"
 
 
 class Direction(Enum):
@@ -30,13 +16,14 @@ class EnvBuilder:
     """
 
     def __init__(self):
+        self._id: int
+        self._map_size: int
+        self._agent_idx: int
+        self._win_idx: int
         self._logger: logging.Logger
-        self._map_size: int = 4
-        self._agent_idx: int = 0
-        self._win_idx: int = 1
 
-    def logger(self, ext_logger: logging.Logger):
-        self._logger = ext_logger
+    def id(self, id: int):
+        self._id = id
         return self
 
     def map_size(self, size: int):
@@ -51,6 +38,10 @@ class EnvBuilder:
 
     def win_index(self, idx: int):
         self._win_idx = idx
+        return self
+
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
         return self
 
     def build(self):
@@ -74,7 +65,7 @@ class EnvBuilder:
         if self._agent_idx == self._win_idx:
             raise ValueError("agent_idx and win_idx should not be the same")
 
-        return Env(self._logger, self._map_size, self._agent_idx, self._win_idx)
+        return Env(self._map_size, self._agent_idx, self._win_idx)
 
 
 class Env:
@@ -87,23 +78,18 @@ class Env:
 
     def __init__(
         self,
-        logger: logging.Logger,
         map_size: int,
         agent_idx: int,
         win_idx: int,
     ) -> None:
-        self.LOGGER: Final[logging.Logger] = logger
-        self.INITIAL_MAP_SIZE: Final[int] = map_size
+        self.LOGGER: Final[logging.Logger] = logging.getLogger()
         self.INITIAL_AGENT_IDX: Final[int] = agent_idx
         self.INITIAL_WIN_IDX: Final[int] = win_idx
 
         self.agent_idx: int = self.INITIAL_AGENT_IDX
         self.win_idx: int = self.INITIAL_WIN_IDX
-        self.map_size: int = self.INITIAL_MAP_SIZE
 
-        self.map: list[Tile] = [Tile.EMPTY for _ in range(self.map_size)]
-        self.map[self.agent_idx] = Tile.AGENT
-        self.map[self.win_idx] = Tile.WIN
+        self.map_size: int = map_size
 
         self.emitter = EventEmitter(self.LOGGER)
         self.emitter.subscribe(EventType.WIN, self.win)
@@ -111,24 +97,30 @@ class Env:
         self.emitter.subscribe(EventType.RESET, self.reset)
 
     def show(self):
-        print(self.map)
+        map_visual = ["empty" for _ in range(self.map_size)]
+        map_visual[self.agent_idx] = "agent"
+        map_visual[self.win_idx] = "win"
+        print(map_visual)
 
     def move(self, direction: Direction):
         """
-        Moves the AGENT tile one index left or right
+        Moves the AGENT index left or right
         """
-        AGENT_IDX = self.map.index(Tile.AGENT)
-        MAX_INDEX = len(self.map)
 
         match direction:
             case direction.LEFT:
-                NEW_IDX = AGENT_IDX - 1
+                NEW_IDX = self.agent_idx - 1
 
             case direction.RIGHT:
-                NEW_IDX = AGENT_IDX + 1
+                NEW_IDX = self.agent_idx + 1
 
-        if not (0 <= NEW_IDX < MAX_INDEX):
+        if not (0 <= NEW_IDX < self.map_size):
             return
+
+        if self.win_idx == NEW_IDX:
+            self.emitter.emit(EventType.WIN)
+
+        self.agent_idx = NEW_IDX
 
         self.LOGGER.info("moved %s", direction)
 
@@ -141,8 +133,7 @@ class Env:
         """
         return (
             EnvBuilder()
-            .logger(self.LOGGER)
-            .map_size(self.INITIAL_MAP_SIZE)
+            .map_size(self.map_size)
             .agent_index(self.INITIAL_AGENT_IDX)
             .win_index(self.INITIAL_WIN_IDX)
             .build()
