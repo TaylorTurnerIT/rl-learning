@@ -40,10 +40,10 @@ class EventEmitter:
     def subscribe(self, event_type: EventType, callback: Callable):
         if event_type not in self._events:
             self._events[event_type] = Event(event_type)
-            self.logger.info("created event: %s", event_type)
+            self.logger.debug("created event: %s", event_type)
 
         self._events[event_type].subscribe(callback)
-        self.logger.info("%s subscribed to event: %s", callback, event_type)
+        self.logger.debug("%s subscribed to event: %s", callback, event_type)
 
     def unsubscribe(self, event_type: EventType, callback: Callable):
         if event_type not in self._events:
