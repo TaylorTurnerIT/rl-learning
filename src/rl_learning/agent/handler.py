@@ -11,15 +11,15 @@ logger = getLogger(__name__)
 class AgentHandler:
     def __init__(self, population: int, env_params: EnvParams):
         # Assign the previous best or generate new brain
-        self.brain = Brain()
+        self.brain = Brain(action_count=env_params.map_size)
         self.population: int = population
         self.agents: list[Agent] = []
-        self.best_agent: Agent | None = None
+        self.best_agent: tuple[Agent, Fitness]
         self.env_builder: EnvBuilder = EnvBuilder(env_params)
 
     def create_agents(self, logger: Logger):
         if self.best_agent is not None:
-            self.brain = self.best_agent.brain
+            self.brain = self.best_agent[0].brain
         for id in range(self.population):
             self.agents.append(
                 Agent(
@@ -34,12 +34,14 @@ class AgentHandler:
 
     def run_agents(self):
         logger.info("running agent set: %d agents", len(self.agents))
-        scores: list[Fitness] = []
         for id in range(self.population):
-            scores.append(self.agents[id].run_actions())
-        logger.info("agent set complete: %d agents", len(scores))
+            results = self.agents[id].run_actions()
+            if results > self.best_agent[1]:
+                self.best_agent = (self.agents[id], results)
+
+        logger.info("agent set complete")
         winning_actions = (
-            self.best_agent.brain.actions if self.best_agent is not None else None
+            self.best_agent[0].brain.actions if self.best_agent is not None else None
         )
         logger.info("current winning action set: %s", winning_actions)
 
