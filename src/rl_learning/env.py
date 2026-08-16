@@ -113,12 +113,6 @@ class Env:
     def show(self):
         print(self.map)
 
-    def swap_tiles(self, OLD_IDX: int, NEW_IDX: int):
-        self.map[OLD_IDX], self.map[NEW_IDX] = (
-            self.map[NEW_IDX],
-            self.map[OLD_IDX],
-        )
-
     def move(self, direction: Direction):
         """
         Moves the AGENT tile one index left or right
@@ -133,9 +127,10 @@ class Env:
             case direction.RIGHT:
                 NEW_IDX = AGENT_IDX + 1
 
-        if 0 <= NEW_IDX < MAX_INDEX:
-            self.swap_tiles(OLD_IDX=AGENT_IDX, NEW_IDX=NEW_IDX)
-            self.LOGGER.info("moved %s", direction)
+        if not (0 <= NEW_IDX < MAX_INDEX):
+            return
+
+        self.LOGGER.info("moved %s", direction)
 
     def win(self):
         self.LOGGER.info("you win!")
