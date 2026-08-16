@@ -15,7 +15,7 @@ class LogLevel(IntEnum):
 
 def main():
     logger = logging.getLogger()
-    level = LogLevel.DEBUG
+    level = LogLevel.INFO
     logging.basicConfig(
         level=level,  # Capture INFO and above
         format="%(asctime)s - %(levelname)s - %(message)s",  # Log message structure
