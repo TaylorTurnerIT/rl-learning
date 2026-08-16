@@ -4,7 +4,7 @@ from ..env import Direction
 
 
 class Brain:
-    def __init__(self):
+    def __init__(self, action_count: int):
         self.actions: list[Direction] = []
         self.action_count: int
         self.mutation_chance: float = 0.2
