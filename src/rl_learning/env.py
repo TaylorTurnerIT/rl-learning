@@ -1,8 +1,7 @@
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import Final
-
-from rl_learning.agent import agent
 
 from .events import EventEmitter, EventType
 
@@ -12,7 +11,8 @@ class Direction(Enum):
     RIGHT = "Right"
 
 
-class EnvParams(Enum):
+@dataclass
+class EnvParams:
     map_size: int
     agent_idx: int
     win_idx: int
