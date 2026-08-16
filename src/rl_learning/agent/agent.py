@@ -3,6 +3,9 @@
 #
 # For each agent:
 #   Create a random list of instructions with either Tile.Left or Tile.Right
+import random
+from multiprocessing import Value
+
 import numpy as np
 
 from ..env import Direction
@@ -13,4 +16,18 @@ class Brain:
         self.actions: list[Direction] = []
 
     def randomize_actions(self, length: int, mutation_chance: float):
-        pass
+        if mutation_chance > 1:
+            raise ValueError("mutation_chance should not exceed 1: ", mutation_chance)
+        if length <= 0:
+            raise ValueError("length should be gt 0: ", length)
+
+        difference = len(self.actions) - length
+        if difference < 0:
+            self.actions[:difference]
+
+        for _ in range(difference):
+            self.actions.append(Direction.LEFT)
+
+        for action in range(len(self.actions), length):
+            if random.random() < mutation_chance:
+                self.actions[action] = random.choice([Direction.LEFT, Direction.RIGHT])
