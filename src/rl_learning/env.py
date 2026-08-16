@@ -141,7 +141,7 @@ class Env:
             return
 
         if self.win_idx == NEW_IDX:
-            self.emitter.emit(EventType.WIN)
+            self.win()
 
         self.agent_idx = NEW_IDX
         self.emitter.emit(EventType.MOVE)
