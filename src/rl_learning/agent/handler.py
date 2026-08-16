@@ -30,5 +30,5 @@ class AgentHandler:
             self.brain = self.best_agent.brain
         for id in range(self.population):
             self.agents.append(
-                Agent(id=id, brain=brain, env=env_builder.build(), logger=logger)
+                Agent(id=id, brain=brain, env=self.env_builder.build(), logger=logger)
             )
