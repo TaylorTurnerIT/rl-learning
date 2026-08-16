@@ -32,3 +32,7 @@ class AgentHandler:
             self.agents.append(
                 Agent(id=id, brain=brain, env=self.env_builder.build(), logger=logger)
             )
+
+    def reset_agents(self):
+        for id in range(self.population):
+            self.agents[id].reset()
