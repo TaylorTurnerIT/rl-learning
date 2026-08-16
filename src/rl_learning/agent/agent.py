@@ -16,9 +16,10 @@ class Agent:
 
         self.events.subscribe(EventType.WIN, self.set_win)
 
-    def run_actions(self):
+    def run_actions(self) -> Fitness:
         for direction in self.brain.actions:
             self.env.move(direction)
+        return self.calculate_fitness()
 
     def mutate(self):
         self.brain.mutate()

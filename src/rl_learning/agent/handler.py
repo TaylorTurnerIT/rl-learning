@@ -37,8 +37,9 @@ class AgentHandler:
             self.agents[id].reset()
 
     def run_agents(self):
+        scores: list[Fitness] = []
         for id in range(self.population):
-            self.agents[id].run_actions()
+            scores.append(self.agents[id].run_actions())
 
     def mutate_agents(self):
         for id in range(self.population):
