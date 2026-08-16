@@ -2,6 +2,8 @@ import logging
 from enum import Enum
 from typing import Final
 
+from rl_learning.agent import agent
+
 from .events import EventEmitter, EventType
 
 
@@ -16,6 +18,8 @@ class EnvBuilder:
     """
 
     def __init__(self):
+        self.env: Env
+
         self._id: int
         self._map_size: int
         self._agent_idx: int
@@ -65,7 +69,16 @@ class EnvBuilder:
         if self._agent_idx == self._win_idx:
             raise ValueError("agent_idx and win_idx should not be the same")
 
-        return Env(self._map_size, self._agent_idx, self._win_idx)
+        self.env = Env(
+            id=self._id,
+            map_size=self._map_size,
+            agent_idx=self._agent_idx,
+            win_idx=self._win_idx,
+            logger=self._logger,
+        )
+
+    def reset(self):
+        self.build()
 
 
 class Env:
@@ -78,11 +91,13 @@ class Env:
 
     def __init__(
         self,
+        id: int,
         map_size: int,
         agent_idx: int,
         win_idx: int,
+        logger: logging.Logger,
     ) -> None:
-        self.LOGGER: Final[logging.Logger] = logging.getLogger()
+        self.LOGGER: Final[logging.Logger] = logger
         self.INITIAL_AGENT_IDX: Final[int] = agent_idx
         self.INITIAL_WIN_IDX: Final[int] = win_idx
 
