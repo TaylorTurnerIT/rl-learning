@@ -28,14 +28,6 @@ class AgentHandler:
         if self.best_agent is not None:
             self.brain = self.best_agent.brain
         for id in range(self.population):
-            env_builder = (
-                EnvBuilder()
-                .logger(logger)
-                .map_size(5)
-                .agent_index(0)
-                .win_index(4)
-                .build()
-            )
             self.agents.append(
                 Agent(id=id, brain=brain, env=env_builder.env, logger=logger)
             )
