@@ -37,7 +37,7 @@ def main():
         print("score:", best_agent[1])
         print("state:", agents[best_agent[0]].state)
         print("move count:", agents[best_agent[0]].move_count)
-        print("move count:", agents[best_agent[0]].brain.actions)
+        # print("moves:", agents[best_agent[0]].brain.actions)
 
         if best_agent[1] >= 10000:
             print("WINNER")
