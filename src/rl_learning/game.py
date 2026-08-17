@@ -10,9 +10,9 @@ class Direction(Enum):
 
 
 class State(Enum):
-    ALIVE = 0
-    DEAD = 1
-    WON = 2
+    ALIVE = "alive"
+    DEAD = "dead"
+    WON = "won"
 
 
 @dataclass(
@@ -76,3 +76,11 @@ class Game:
             case self.win_pos:
                 return State.WON
         return State.ALIVE
+
+    def calculate_distance(self, pos1: Position, pos2: Position) -> int:
+        """
+        Calculates distance from the given position to the win position
+
+        Uses Manhattan Distance
+        """
+        return abs(pos1.x - pos2.x) + abs(pos1.y - pos2.y)
