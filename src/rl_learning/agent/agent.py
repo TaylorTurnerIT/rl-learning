@@ -10,8 +10,8 @@ class Agent:
         self.state: State
         self.move_count: int = 0
 
-    def run_actions(self, actions: list[Direction]):
-        for direction in actions:
+    def run_actions(self):
+        for direction in self.brain.actions:
             self.move(self.pos, direction)
             match self.game.check_pos(self.pos):
                 case State.DEAD:
