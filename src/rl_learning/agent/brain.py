@@ -5,7 +5,7 @@ from rl_learning.game import Direction
 
 class Brain:
     def __init__(self, mutation_chance: float):
-        starting_action_count = 3
+        starting_action_count = 1
         self.actions: list[Direction] = [
             random.choice(list(Direction)) for _ in range(starting_action_count)
         ]
