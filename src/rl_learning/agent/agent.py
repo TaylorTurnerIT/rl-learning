@@ -54,5 +54,5 @@ class Agent:
         return score
 
     def reset(self):
-        self.pos = self.starting_pos
+        self.pos = deepcopy(self.starting_pos)
         self.state = State.ALIVE
