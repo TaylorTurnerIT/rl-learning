@@ -18,14 +18,12 @@ def main():
     agents: list[Agent] = []
     while done is False:
         print("Epoch: ", epoch)
-        epoch += 1
 
         # scores: list[tuple[int, int]] = []
         population = 100
-        population -= 1
         best_agent: tuple[int, int] = (-1, -100000)
         for id in range(population):
-            if agents == []:
+            if epoch == 1:
                 agents.append(
                     Agent(starting_pos=Position(0, 0), brain=brain, game=game)
                 )
@@ -53,6 +51,7 @@ def main():
                 continue
             agents[id].brain = agents[best_agent[0]].brain
             agents[id].brain.mutate_actions()
+        epoch += 1
 
 
 if __name__ == "__main__":
