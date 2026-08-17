@@ -48,10 +48,10 @@ def main():
             break
 
         # brain surgery
-        new_brain = copy(agents[best_agent[0]].brain)
         for id in range(population):
             if id == best_agent[0]:
                 continue
+            new_brain = copy(agents[best_agent[0]].brain)
             new_brain.mutate_actions()
             agents[id].brain = new_brain
         epoch += 1

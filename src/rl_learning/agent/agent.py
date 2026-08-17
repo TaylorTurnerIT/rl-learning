@@ -4,6 +4,7 @@ from rl_learning.game import Direction, Game, Position, State
 
 class Agent:
     def __init__(self, starting_pos: Position, brain: Brain, game: Game):
+        self.starting_pos: Position = starting_pos
         self.pos: Position = starting_pos
         self.brain: Brain = brain
         self.game: Game = game
@@ -45,3 +46,7 @@ class Agent:
         score -= len(self.brain.actions) * 100
         score -= self.game.calculate_distance(self.pos, self.game.win_pos)
         return score
+
+    def reset(self):
+        self.pos = self.starting_pos
+        self.state = State.ALIVE
