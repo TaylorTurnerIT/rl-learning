@@ -1,3 +1,5 @@
+from copy import copy
+
 from rl_learning.agent.agent import Agent
 from rl_learning.agent.brain import Brain
 from rl_learning.game import Game, Position
@@ -46,11 +48,12 @@ def main():
             break
 
         # brain surgery
+        new_brain = copy(agents[best_agent[0]].brain)
         for id in range(population):
             if id == best_agent[0]:
                 continue
-            agents[id].brain = agents[best_agent[0]].brain
-            agents[id].brain.mutate_actions()
+            new_brain.mutate_actions()
+            agents[id].brain = new_brain
         epoch += 1
 
 
