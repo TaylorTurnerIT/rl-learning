@@ -49,7 +49,7 @@ class Agent:
         starting_distance = self.game.calculate_distance(
             self.starting_pos, self.game.win_pos
         )
-        progress = distance - starting_distance
+        progress = starting_distance - distance
         score += progress**2 * 100
         return score
 
