@@ -50,7 +50,7 @@ class Agent:
             self.starting_pos, self.game.win_pos
         )
         progress = distance - starting_distance
-        score -= progress**2 * 100
+        score += progress**2 * 100
         return score
 
     def reset(self):
