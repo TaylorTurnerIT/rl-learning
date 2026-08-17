@@ -8,7 +8,6 @@ class Agent:
         self.brain: Brain = brain
         self.game: Game = game
         self.state: State = State.ALIVE
-        self.move_count: int = 0
 
     def run_actions(self):
         for direction in self.brain.actions:
@@ -33,7 +32,6 @@ class Agent:
                     pos.y += 1
                 case Direction.DOWN:
                     pos.y -= 1
-            self.move_count += 1
 
     def calculate_fitness(
         self,
