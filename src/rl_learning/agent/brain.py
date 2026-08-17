@@ -13,12 +13,14 @@ class Brain:
 
     def mutate_actions(self):
 
-        self.add_move()
-
         for action in range(len(self.actions)):
             if self.mutation_chance < random.random():
                 continue
-            self.actions[action] = random.choice(list(Direction))
+            self.actions[action] = self.get_random_move()
+        self.add_random_move()
 
-    def add_move(self):
-        self.actions.append(Direction.UP)
+    def add_random_move(self):
+        self.actions.append(self.get_random_move())
+
+    def get_random_move(self) -> Direction:
+        return random.choice(list(Direction))
