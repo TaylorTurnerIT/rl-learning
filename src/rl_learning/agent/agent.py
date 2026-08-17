@@ -1,4 +1,4 @@
-import math
+from copy import deepcopy
 
 from rl_learning.agent.brain import Brain
 from rl_learning.game import Direction, Game, Position, State
@@ -6,7 +6,7 @@ from rl_learning.game import Direction, Game, Position, State
 
 class Agent:
     def __init__(self, starting_pos: Position, brain: Brain, game: Game):
-        self.starting_pos: Position = starting_pos
+        self.starting_pos: Position = deepcopy(starting_pos)
         self.pos: Position = starting_pos
         self.brain: Brain = brain
         self.game: Game = game

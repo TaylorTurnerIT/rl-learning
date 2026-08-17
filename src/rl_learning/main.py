@@ -49,6 +49,8 @@ def main():
 
         # brain surgery
         for id in range(population):
+            if id == best_agent[0]:
+                continue
             new_brain = deepcopy(agents[best_agent[0]].brain)
             new_brain.mutate_actions()
             agents[id].brain = new_brain
