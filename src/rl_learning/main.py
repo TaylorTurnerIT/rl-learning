@@ -13,7 +13,7 @@ def main():
         wumpus_pos=Position(x=0, y=0),
         win_pos=Position(x=10, y=50),
     )
-    brain = Brain(mutation_chance=0.05)
+    brain = Brain(mutation_chance=0.10)
 
     done = False
     epoch = 1
@@ -48,13 +48,20 @@ def main():
             break
 
         # brain surgery
-        for id in range(population):
-            if id == best_agent[0]:
+        elite_id = best_agent[0]
+        elite_brain = deepcopy(agents[elite_id].brain)
+
+        for id, agent in enumerate(agents):
+            agent.reset()
+
+            if id == elite_id:
+                agent.brain = elite_brain
                 continue
-            new_brain = deepcopy(agents[best_agent[0]].brain)
-            new_brain.mutate_actions()
-            agents[id].brain = new_brain
-            agents[id].reset()
+
+            child_brain = deepcopy(elite_brain)
+            child_brain.mutate_actions()
+            agent.brain = child_brain
+
         epoch += 1
 
 
