@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+from multiprocessing import Value
 
 
 class Direction(Enum):
@@ -42,6 +43,13 @@ class Game:
         self.pit_pos: Position = pit_pos
         self.wumpus_pos: Position = wumpus_pos
         self.win_pos: Position = win_pos
+
+        if self.get_valid_moves(self.win_pos) == []:
+            raise ValueError("win_pos is out of bounds", self.win_pos)
+        if self.get_valid_moves(self.wumpus_pos) == []:
+            raise ValueError("win_pos is out of bounds", self.wumpus_pos)
+        if self.get_valid_moves(self.pit_pos) == []:
+            raise ValueError("win_pos is out of bounds", self.pit_pos)
 
     def get_valid_moves(self, current_pos: Position) -> list[Direction]:
         """
