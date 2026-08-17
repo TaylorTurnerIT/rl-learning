@@ -1,4 +1,4 @@
-from copy import copy
+from copy import deepcopy
 
 from rl_learning.agent.agent import Agent
 from rl_learning.agent.brain import Brain
@@ -51,7 +51,7 @@ def main():
         for id in range(population):
             if id == best_agent[0]:
                 continue
-            new_brain = copy(agents[best_agent[0]].brain)
+            new_brain = deepcopy(agents[best_agent[0]].brain)
             new_brain.mutate_actions()
             agents[id].brain = new_brain
             agents[id].reset()
