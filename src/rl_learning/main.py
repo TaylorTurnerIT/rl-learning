@@ -39,10 +39,10 @@ def main():
             if fitness_score > best_agent[1]:
                 best_agent = (id, fitness_score)
 
-        print("id:", best_agent[0])
-        print("score:", best_agent[1])
-        print("state:", agents[best_agent[0]].state)
-        print("move count:", len(agents[best_agent[0]].brain.actions))
+        # print("id:", best_agent[0])
+        # print("score:", best_agent[1])
+        # print("state:", agents[best_agent[0]].state)
+        # print("move count:", len(agents[best_agent[0]].brain.actions))
         # print("moves:", agents[best_agent[0]].brain.actions)
 
         # Capture the population that was just evaluated, not its children.
