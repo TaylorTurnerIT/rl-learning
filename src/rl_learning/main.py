@@ -11,10 +11,14 @@ def main():
         wumpus_pos=Position(x=0, y=0),
         win_pos=Position(x=1, y=3),
     )
-    brain = Brain(mutation_chance=0.2)
+    brain = Brain(mutation_chance=0.05)
 
     done = False
+    epoch = 1
     while done is False:
+        print("Epoch: ", epoch)
+        epoch += 1
+
         agents: list[Agent] = []
         scores: list[tuple[int, int]] = []
         population = 100
@@ -26,16 +30,18 @@ def main():
             fitness_score = agents[id].calculate_fitness()
             scores.append((id, fitness_score))
 
-            if best_agent is None or fitness_score > best_agent[1]:
+            if fitness_score > best_agent[1]:
                 best_agent = (id, fitness_score)
 
-        if best_agent is not None and best_agent[1] >= 10000:
-            print("id:", best_agent[0])
-            print("score:", best_agent[1])
-            print("state:", agents[best_agent[0]].state)
-            print("move count:", agents[best_agent[0]].move_count)
-            print("move count:", agents[best_agent[0]].brain.actions)
-            done = True
+        print("id:", best_agent[0])
+        print("score:", best_agent[1])
+        print("state:", agents[best_agent[0]].state)
+        print("move count:", agents[best_agent[0]].move_count)
+        print("move count:", agents[best_agent[0]].brain.actions)
+
+        if best_agent[1] >= 10000:
+            print("WINNER")
+            break
 
         # brain surgery
         for id in range(population):
