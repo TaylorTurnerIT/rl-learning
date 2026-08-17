@@ -7,7 +7,7 @@ class Agent:
         self.pos: Position = starting_pos
         self.brain: Brain = brain
         self.game: Game = game
-        self.state: State
+        self.state: State = State.ALIVE
         self.move_count: int = 0
 
     def run_actions(self):
