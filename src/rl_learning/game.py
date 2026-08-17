@@ -44,11 +44,13 @@ class Game:
         self.wumpus_pos: Position = wumpus_pos
         self.win_pos: Position = win_pos
 
-        if 0 < self.win_pos.x <= self.x_size or 0 < self.win_pos.y <= self.y_size:
+        if not (0 < self.win_pos.x <= self.x_size or 0 < self.win_pos.y <= self.y_size):
             raise ValueError("win_pos is out of bounds", self.win_pos)
-        if 0 < self.wumpus_pos.x <= self.x_size or 0 < self.wumpus_pos.y <= self.y_size:
+        if not (
+            0 < self.wumpus_pos.x <= self.x_size or 0 < self.wumpus_pos.y <= self.y_size
+        ):
             raise ValueError("wumpus_pos is out of bounds", self.wumpus_pos)
-        if 0 < self.pit_pos.x <= self.x_size or 0 < self.pit_pos.y <= self.y_size:
+        if not (0 < self.pit_pos.x <= self.x_size or 0 < self.pit_pos.y <= self.y_size):
             raise ValueError("pit_pos is out of bounds", self.pit_pos)
 
     def get_valid_moves(self, current_pos: Position) -> list[Direction]:
