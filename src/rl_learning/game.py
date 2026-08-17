@@ -9,6 +9,12 @@ class Direction(Enum):
     RIGHT = "right"
 
 
+class State(Enum):
+    ALIVE = 0
+    DEAD = 1
+    WON = 2
+
+
 @dataclass(
     eq=True,
     slots=False,
@@ -16,16 +22,26 @@ class Direction(Enum):
 class Position:
     x: int
     y: int
-    def __init__(self, pos: tuple[int,int]):
-        self.x = pos[0]
-        self.y = pos[1]
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
 
 class Game:
-    def __init__(self, pit_pos: Position, wumpus_pos: Position):
-        self.x_size: int
-        self.y_size: int
+    def __init__(
+        self,
+        x_size: int,
+        y_size: int,
+        pit_pos: Position,
+        wumpus_pos: Position,
+        win_pos: Position,
+    ):
+        self.x_size: int = x_size
+        self.y_size: int = y_size
         self.pit_pos: Position = pit_pos
         self.wumpus_pos: Position = wumpus_pos
+        self.win_pos: Position = win_pos
 
     def get_valid_moves(self, current_pos: Position) -> list[Direction]:
         """
@@ -65,8 +81,12 @@ class Game:
                 case Direction.DOWN:
                     pos.y - 1
 
-    def check_pos(self, pos: Position):
-        # check win and lose
-        for x in range(self.x_size):
-            for y in range(self.y_size):
-                if pos == self.pit_pos or pos == self.wumpus_pos
+    def check_pos(self, pos: Position) -> State:
+        match pos:
+            case self.pit_pos:
+                return State.DEAD
+            case self.wumpus_pos:
+                return State.DEAD
+            case self.win_pos:
+                return State.WON
+        return State.ALIVE
