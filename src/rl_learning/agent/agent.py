@@ -1,5 +1,5 @@
 from rl_learning.agent.brain import Brain
-from rl_learning.game import Direction, Game, Position
+from rl_learning.game import Direction, Game, Position, State
 
 
 class Agent:
@@ -7,10 +7,19 @@ class Agent:
         self.pos: Position = starting_pos
         self.brain: Brain = brain
         self.game: Game = game
+        self.state: State
+        self.move_count: int = 0
 
     def run_actions(self, actions: list[Direction]):
         for direction in actions:
             self.move(self.pos, direction)
+            match self.game.check_pos(self.pos):
+                case State.DEAD:
+                    self.state = State.DEAD
+                    return
+                case State.WON:
+                    self.state = State.WON
+                    return
 
     def move(self, pos: Position, direction: Direction):
         valid_directions = self.game.get_valid_moves(pos)
@@ -24,3 +33,17 @@ class Agent:
                     pos.y += 1
                 case Direction.DOWN:
                     pos.y -= 1
+            self.move_count += 1
+
+    def calculate_fitness(
+        self,
+    ) -> int:
+        score: int = 0
+        match self.state:
+            case State.DEAD:
+                score -= 1000
+            case State.WON:
+                score += 10000
+        score -= self.move_count * 100
+        score -= self.game.calculate_distance(self.pos, self.game.win_pos)
+        return score
