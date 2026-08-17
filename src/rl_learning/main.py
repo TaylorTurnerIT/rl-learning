@@ -20,7 +20,7 @@ def main():
         epoch += 1
 
         agents: list[Agent] = []
-        scores: list[tuple[int, int]] = []
+        # scores: list[tuple[int, int]] = []
         population = 100
         best_agent: tuple[int, int] = (-1, -100000)
         for id in range(population):
@@ -28,7 +28,7 @@ def main():
             agents[id].run_actions()
 
             fitness_score = agents[id].calculate_fitness()
-            scores.append((id, fitness_score))
+            # scores.append((id, fitness_score))
 
             if fitness_score > best_agent[1]:
                 best_agent = (id, fitness_score)
