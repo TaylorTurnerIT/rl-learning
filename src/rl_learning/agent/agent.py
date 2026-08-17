@@ -16,10 +16,10 @@ class Agent:
             match self.game.check_pos(self.pos):
                 case State.DEAD:
                     self.state = State.DEAD
-                    return
+                    break
                 case State.WON:
                     self.state = State.WON
-                    return
+                    break
 
     def move(self, pos: Position, direction: Direction):
         valid_directions = self.game.get_valid_moves(pos)
