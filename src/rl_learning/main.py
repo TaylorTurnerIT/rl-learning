@@ -8,11 +8,11 @@ from rl_learning.visualization.replay import replay_history
 
 def main():
     game = Game(
-        x_size=50,
-        y_size=50,
+        x_size=20,
+        y_size=20,
         pit_pos=Position(x=1, y=5),
         wumpus_pos=Position(x=0, y=0),
-        win_pos=Position(x=10, y=50),
+        win_pos=Position(x=10, y=20),
     )
     brain = Brain(mutation_chance=0.10)
 
