@@ -1,6 +1,6 @@
 from rl_learning.agent.agent import Agent
 from rl_learning.agent.brain import Brain
-from rl_learning.game import Game, Position, State
+from rl_learning.game import Game, Position
 
 
 def main():
@@ -13,11 +13,12 @@ def main():
     )
     brain = Brain(mutation_chance=0.2)
 
-    while True:
+    done = False
+    while done is False:
         agents: list[Agent] = []
         scores: list[tuple[int, int]] = []
         population = 100
-        best_score: tuple[int, int] | None = None
+        best_agent: tuple[int, int] = (-1, -100000)
         for id in range(population):
             agents.append(Agent(starting_pos=Position(0, 0), brain=brain, game=game))
             agents[id].run_actions()
@@ -25,17 +26,23 @@ def main():
             fitness_score = agents[id].calculate_fitness()
             scores.append((id, fitness_score))
 
-            if best_score is None or fitness_score > best_score[1]:
-                best_score = (id, fitness_score)
+            if best_agent is None or fitness_score > best_agent[1]:
+                best_agent = (id, fitness_score)
 
-            if best_score[1] >= 10000:
-                break
-    # Step 6: If score > win_value in fitness: skip to Step 10. Else:
-    # Step 7: Extract Brain from best agent
-    # Step 8: Transplant best agent Brain into AgentHandler population
-    # Step 9: Jump to step 4
-    # Step 10:Output the best agent's path and score
-    # Step 11:Exit
+        if best_agent is not None and best_agent[1] >= 10000:
+            print("id:", best_agent[0])
+            print("score:", best_agent[1])
+            print("state:", agents[best_agent[0]].state)
+            print("move count:", agents[best_agent[0]].move_count)
+            print("move count:", agents[best_agent[0]].brain.actions)
+            done = True
+
+        # brain surgery
+        for id in range(population):
+            if id == best_agent[0]:
+                continue
+            agents[id].brain = agents[best_agent[0]].brain
+            agents[id].brain.mutate_actions()
 
 
 if __name__ == "__main__":
