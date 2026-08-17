@@ -3,6 +3,7 @@ from copy import deepcopy
 from rl_learning.agent.agent import Agent
 from rl_learning.agent.brain import Brain
 from rl_learning.game import Game, Position, State
+from rl_learning.visualization.replay import replay_history
 
 
 def main():
@@ -17,6 +18,7 @@ def main():
 
     done = False
     epoch = 1
+    history: list[list[Agent]] = []
     agents: list[Agent] = []
     while done is False:
         print("Epoch: ", epoch)
@@ -43,6 +45,9 @@ def main():
         print("move count:", len(agents[best_agent[0]].brain.actions))
         # print("moves:", agents[best_agent[0]].brain.actions)
 
+        # Capture the population that was just evaluated, not its children.
+        history.append(deepcopy(agents))
+
         if agents[best_agent[0]].state == State.WON:
             print("WINNER")
             break
@@ -63,6 +68,8 @@ def main():
             agent.brain = child_brain
 
         epoch += 1
+
+    replay_history(history)
 
 
 if __name__ == "__main__":
