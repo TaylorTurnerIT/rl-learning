@@ -15,16 +15,19 @@ def main():
 
     done = False
     epoch = 1
+    agents: list[Agent] = []
     while done is False:
         print("Epoch: ", epoch)
         epoch += 1
 
-        agents: list[Agent] = []
         # scores: list[tuple[int, int]] = []
         population = 100
         best_agent: tuple[int, int] = (-1, -100000)
         for id in range(population):
-            agents.append(Agent(starting_pos=Position(0, 0), brain=brain, game=game))
+            if agents == []:
+                agents.append(
+                    Agent(starting_pos=Position(0, 0), brain=brain, game=game)
+                )
             agents[id].run_actions()
 
             fitness_score = agents[id].calculate_fitness()
