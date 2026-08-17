@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.4.6",
-    "pygame-ce>=2.5.5",
     "pydantic>=2.0.0",
 ]
 

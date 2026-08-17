@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <title>RL Learning Replay</title>
+  <style>
+    body { background: #18181e; color: #ececf0; font: 16px sans-serif; margin: 16px; }
+    canvas { border: 1px solid #3a3a46; display: block; margin-top: 10px; }
+    button { background: #343440; border: 1px solid #555565; color: #ececf0; padding: 4px 8px; }
+    button.selected { background: #3977a8; }
+  </style>
+  <div id="status">Loading replay…</div>
+  <div id="speed-controls">
+    Speed:
+    <button data-speed="2">Slow</button>
+    <button class="selected" data-speed="8">Normal</button>
+    <button data-speed="20">Fast</button>
+  </div>
+  <canvas id="canvas" width="700" height="700"></canvas>
+  <script>
+    const canvas = document.querySelector("#canvas");
+    const context = canvas.getContext("2d");
+    const status = document.querySelector("#status");
+    const moves = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
+    let data, epochIndex = 0, actionIndex = 0, paused = false, agents, lastStep = 0, speed = 8;
+
+    fetch("/replay.json")
+      .then(response => response.json())
+      .then(replay => {
+        data = replay;
+        resetEpoch();
+        requestAnimationFrame(frame);
+      });
+
+    document.addEventListener("keydown", event => {
+      if (event.code === "Space") {
+        event.preventDefault();
+        paused = !paused;
+      }
+    });
+
+    document.querySelector("#speed-controls").addEventListener("click", event => {
+      if (!event.target.matches("button")) return;
+      speed = Number(event.target.dataset.speed);
+      document.querySelectorAll("#speed-controls button").forEach(button => {
+        button.classList.toggle("selected", button === event.target);
+      });
+    });
+
+    function resetEpoch() {
+      const epoch = data.epochs[epochIndex];
+      agents = epoch.agents.map(agent => ({
+        position: [...agent.start], actions: agent.actions, alive: true,
+      }));
+      actionIndex = 0;
+    }
+
+    function frame(time) {
+      if (!paused && time - lastStep >= 1000 / speed) {
+        lastStep = time;
+        step();
+      }
+      draw();
+      requestAnimationFrame(frame);
+    }
+
+    function step() {
+      const epoch = data.epochs[epochIndex];
+      const longest = Math.max(...agents.map(agent => agent.actions.length));
+      if (actionIndex >= longest) {
+        epochIndex = (epochIndex + 1) % data.epochs.length;
+        resetEpoch();
+        return;
+      }
+      for (const agent of agents) {
+        if (!agent.alive || actionIndex >= agent.actions.length) continue;
+        move(agent, agent.actions[actionIndex], epoch.game);
+      }
+      actionIndex += 1;
+    }
+
+    function move(agent, direction, game) {
+      const [dx, dy] = moves[direction];
+      const [x, y] = agent.position;
+      const next = [x + dx, y + dy];
+      if (next[0] > 0 && next[0] <= game.x_size) agent.position[0] = next[0];
+      if (next[1] > 0 && next[1] <= game.y_size) agent.position[1] = next[1];
+      if (same(agent.position, game.pit) || same(agent.position, game.wumpus)
+          || same(agent.position, game.win)) agent.alive = false;
+    }
+
+    function draw() {
+      const epoch = data.epochs[epochIndex];
+      const game = epoch.game;
+      const cell = canvas.width / (game.x_size + 1);
+      context.fillStyle = "#18181e";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = "#343440";
+      for (let x = 0; x <= game.x_size; x++) {
+        for (let y = 0; y <= game.y_size; y++) {
+          context.strokeRect(x * cell, canvas.height - (y + 1) * cell, cell, cell);
+        }
+      }
+      square(game.pit, "#b43737");
+      square(game.wumpus, "#803780");
+      square(game.win, "#e8c33e");
+      for (const agent of agents) circle(agent.position, agent.alive ? "#50beff" : "#777780");
+      status.textContent = `Epoch ${epochIndex + 1}/${data.epochs.length} · `
+        + `Action ${actionIndex} · ${paused ? "paused" : "playing"} · `
+        + `${speed} moves/s · Space: pause/resume`;
+      function square([x, y], color) {
+        context.fillStyle = color;
+        context.fillRect(x * cell + 2, canvas.height - (y + 1) * cell + 2, cell - 4, cell - 4);
+      }
+      function circle([x, y], color) {
+        context.fillStyle = color;
+        context.beginPath();
+        context.arc((x + .5) * cell, canvas.height - (y + .5) * cell, Math.max(2, cell / 4), 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+
+    function same(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+  </script>
+</html>
