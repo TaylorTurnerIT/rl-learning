@@ -13,9 +13,12 @@ class Brain:
 
     def mutate_actions(self):
 
-        self.actions.append(Direction.UP)
+        self.add_move()
 
         for action in range(len(self.actions)):
             if self.mutation_chance < random.random():
                 continue
             self.actions[action] = random.choice(list(Direction))
+
+    def add_move(self):
+        self.actions.append(Direction.UP)
