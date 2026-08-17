@@ -2,7 +2,7 @@ from copy import copy
 
 from rl_learning.agent.agent import Agent
 from rl_learning.agent.brain import Brain
-from rl_learning.game import Game, Position
+from rl_learning.game import Game, Position, State
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
         print("move count:", len(agents[best_agent[0]].brain.actions))
         # print("moves:", agents[best_agent[0]].brain.actions)
 
-        if best_agent[1] >= 10000:
+        if agents[best_agent[0]].state == State.WON:
             print("WINNER")
             break
 
