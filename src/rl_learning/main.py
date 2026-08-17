@@ -54,6 +54,7 @@ def main():
             new_brain = copy(agents[best_agent[0]].brain)
             new_brain.mutate_actions()
             agents[id].brain = new_brain
+            agents[id].reset()
         epoch += 1
 
 
