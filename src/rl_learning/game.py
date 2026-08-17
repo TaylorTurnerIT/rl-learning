@@ -50,36 +50,22 @@ class Game:
         valid_moves: list[Direction] = []
 
         move_left = current_pos.x - 1
-        if move_left > 0:
+        if 0 < move_left < self.x_size:
             valid_moves.append(Direction.LEFT)
 
         move_right = current_pos.x + 1
-        if move_right > 0:
+        if 0 < move_right < self.x_size:
             valid_moves.append(Direction.RIGHT)
 
         move_down = current_pos.y - 1
-        if move_down > 0:
+        if 0 < move_down < self.y_size:
             valid_moves.append(Direction.DOWN)
 
         move_up = current_pos.y + 1
-        if move_up > 0:
+        if 0 < move_up < self.y_size:
             valid_moves.append(Direction.UP)
 
         return valid_moves
-
-    # TODO: move to agent, let them control their state, env tells only valid moves
-    def move(self, pos: Position, direction: Direction):
-        valid_directions = self.get_valid_moves(pos)
-        if direction in valid_directions:
-            match direction:
-                case Direction.LEFT:
-                    pos.x - 1
-                case Direction.RIGHT:
-                    pos.x + 1
-                case Direction.UP:
-                    pos.y + 1
-                case Direction.DOWN:
-                    pos.y - 1
 
     def check_pos(self, pos: Position) -> State:
         match pos:
