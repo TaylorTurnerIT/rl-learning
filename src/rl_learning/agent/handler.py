@@ -18,8 +18,7 @@ class AgentHandler:
         self.env_builder: EnvBuilder = EnvBuilder(env_params)
 
     def create_agents(self, logger: Logger):
-        if self.best_agent is not None:
-            self.brain = self.best_agent[0].brain
+        self.brain = self.best_agent[0].brain
         for id in range(self.population):
             self.agents.append(
                 Agent(
