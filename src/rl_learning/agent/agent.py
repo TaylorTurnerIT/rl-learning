@@ -42,6 +42,6 @@ class Agent:
                 score -= 1000
             case State.WON:
                 score += 10000
-        score -= self.move_count * 100
+        score -= len(self.brain.actions) * 100
         score -= self.game.calculate_distance(self.pos, self.game.win_pos)
         return score
