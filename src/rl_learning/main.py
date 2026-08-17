@@ -50,7 +50,6 @@ def main():
         # brain surgery
         for id in range(population):
             if id == best_agent[0]:
-                agents[best_agent[0]].brain.add_random_move()
                 continue
             new_brain = deepcopy(agents[best_agent[0]].brain)
             new_brain.mutate_actions()
