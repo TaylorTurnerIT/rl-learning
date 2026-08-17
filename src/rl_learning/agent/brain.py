@@ -11,8 +11,8 @@ class Brain:
         ]
         self.mutation_chance: float
 
-    def mutate_actions(self, mutation_chance):
-        if mutation_chance > random.random():
+    def mutate_actions(self):
+        if self.mutation_chance > random.random():
             return
 
         self.actions.append(Direction.UP)
