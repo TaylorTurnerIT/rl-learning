@@ -7,11 +7,11 @@ from rl_learning.game import Game, Position, State
 
 def main():
     game = Game(
-        x_size=5,
-        y_size=5,
+        x_size=50,
+        y_size=50,
         pit_pos=Position(x=1, y=5),
         wumpus_pos=Position(x=0, y=0),
-        win_pos=Position(x=1, y=3),
+        win_pos=Position(x=10, y=50),
     )
     brain = Brain(mutation_chance=0.05)
 

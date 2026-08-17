@@ -1,3 +1,5 @@
+import math
+
 from rl_learning.agent.brain import Brain
 from rl_learning.game import Direction, Game, Position, State
 
@@ -40,11 +42,15 @@ class Agent:
         score: int = 0
         match self.state:
             case State.DEAD:
-                score -= 1000
-            case State.WON:
-                score += 10000
-        score -= len(self.brain.actions)
-        score -= self.game.calculate_distance(self.pos, self.game.win_pos)
+                score -= 10000
+        score -= len(self.brain.actions) * 10
+
+        distance = self.game.calculate_distance(self.pos, self.game.win_pos)
+        starting_distance = self.game.calculate_distance(
+            self.starting_pos, self.game.win_pos
+        )
+        progress = distance - starting_distance
+        score -= progress**2 * 100
         return score
 
     def reset(self):
