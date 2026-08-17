@@ -22,6 +22,7 @@ def main():
 
         # scores: list[tuple[int, int]] = []
         population = 100
+        population -= 1
         best_agent: tuple[int, int] = (-1, -100000)
         for id in range(population):
             if agents == []:
