@@ -19,3 +19,12 @@ Useful checks:
 ruff format --check .
 ruff check .
 ```
+
+## PICO-8 export
+
+The local `dodge-linux.zip` export is unpacked to `src/dodge/runtime/` (ignored
+by Git). Launch it from the development shell with:
+
+```bash
+devenv shell -- dodge-run
+```

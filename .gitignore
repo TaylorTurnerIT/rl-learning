@@ -9,3 +9,6 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+
+# Downloaded/exported PICO-8 runtime; recreate from dodge-linux.zip when needed.
+/src/dodge/runtime/

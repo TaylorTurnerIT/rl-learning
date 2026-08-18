@@ -5,6 +5,7 @@
   packages = [
     pkgs.git
     pkgs.ruff
+    pkgs.SDL2
     pkgs.zlib
   ];
 
@@ -25,6 +26,10 @@
     app-test.exec = "uv run pytest";
     app-fmt.exec = "ruff format .";
     app-check.exec = "ruff check .";
+    dodge-run.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      exec ./src/dodge/runtime/dodge
+    '';
   };
 
   # Shell hook executed when entering devenv shell
