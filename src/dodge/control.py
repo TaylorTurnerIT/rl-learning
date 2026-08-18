@@ -296,11 +296,15 @@ def main(argv: list[str] | None = None) -> int:
         description="Run Dodge from a JSON list of timed movement commands.",
     )
     parser.add_argument("source", help="JSON command file, or - to read stdin")
-    parser.add_argument("--seed", help="PICO-8 random seed from 0 to 32767")
+    parser.add_argument(
+        "--seed",
+        default="42",
+        help="PICO-8 random seed from 0 to 32767 (default: 42)",
+    )
     arguments = parser.parse_args(argv)
 
     try:
-        seed = parse_seed(arguments.seed) if arguments.seed is not None else None
+        seed = parse_seed(arguments.seed)
         commands = load_commands(arguments.source)
         with seeded_cartridge(seed) as cartridge:
             execute_commands(

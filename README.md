@@ -58,7 +58,7 @@ Run a file with:
 just dodge-control movements.json
 ```
 
-Set PICO-8's random seed for a repeatable random sequence with:
+The control runner defaults PICO-8's random seed to 42. Override it with:
 
 ```bash
 just dodge-control movements.json --seed 42

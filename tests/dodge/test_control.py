@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -336,3 +338,28 @@ def test_seed_absent_uses_original_cartridge(tmp_path: Path) -> None:
         assert cartridge == source
 
     assert source.read_text() == "original"
+
+
+@pytest.mark.parametrize(("options", "expected"), [([], 42), (["--seed", "7"], 7)])
+def test_main_uses_default_seed_and_allows_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    options: list[str],
+    expected: int,
+) -> None:
+    command_file = tmp_path / "commands.json"
+    command_file.write_text("[]")
+    observed: list[int | None] = []
+
+    @contextmanager
+    def observe_seed(seed: int | None) -> Iterator[Path]:
+        observed.append(seed)
+        yield Path("seeded.p8")
+
+    monkeypatch.setattr("dodge.control.seeded_cartridge", observe_seed)
+    monkeypatch.setattr("dodge.control.execute_commands", lambda *args, **kwargs: None)
+
+    from dodge.control import main
+
+    assert main([str(command_file), *options]) == 0
+    assert observed == [expected]

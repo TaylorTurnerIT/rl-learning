@@ -20,6 +20,7 @@ C9: seeded run uses temporary cartridge; checked-in `dodge.p8` unchanged.
 
 cli: `just dodge-control <commands.json|->` → launch game, start run, execute sequence, exit `0`.
 cli: `just dodge-control <commands.json|-> --seed <0..32767>` → seed PICO-8 RNG before game init.
+default: omitted `--seed` → seed `42`.
 cli: source `-` → read JSON from stdin.
 cli: invalid JSON/schema/window timeout/injection failure → stderr diagnostic + nonzero exit.
 json: top-level array of `{"move":"<direction>","duration_ms":<int>}`.
@@ -39,7 +40,7 @@ V7: game startup bounded by window timeout; timeout → clear error + no orphan 
 V8: existing `just dodge-run` interactive path remains functional.
 V9: first key injection waits bounded SDL/X11 settle interval after window discovery.
 V10: `--seed N` → `srand(N)` first `_init` statement in launched temporary cartridge.
-V11: seed absent → original cartridge; invalid seed → fail before file/process side effects.
+V11: seed absent → seed `42`; explicit valid seed overrides; invalid seed → fail before side effects.
 
 §T
 
@@ -49,6 +50,7 @@ T2|x|add targeted X11 keyboard backend + Pemsa lifecycle|V3,V4,V5,V6,V7,I.start
 T3|x|add CLI, devenv dependency/scripts, just recipe, docs|V8,I.cli,C4,C5
 T4|x|add unit tests + controlled-run smoke test|V1,V2,V3,V4,V5,V6,V7,V8,V9
 T5|x|add deterministic seed option via temporary cartridge|V10,V11,I.cli,C9
+T6|x|default control seed to `42`|V10,V11,I.cli
 
 §B
 
