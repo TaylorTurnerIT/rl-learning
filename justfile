@@ -29,3 +29,7 @@ dodge-run:
 [group("dodge")]
 dodge-control commands *options:
     devenv shell -- dodge-control {{commands}} {{options}}
+
+[group("dodge")]
+dodge-headless commands *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-headless {{commands}} {{options}}

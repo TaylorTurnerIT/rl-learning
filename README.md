@@ -78,3 +78,27 @@ printf '[{"move":"left","duration_ms":250}]' | just dodge-control -
 
 The controller launches its own game process, executes the listed controls
 through targeted keyboard events, and closes that process afterward.
+
+### Headless runs
+
+Run the same command file without a display or audio device and receive the
+final game score as JSON:
+
+```bash
+just dodge-headless src/dodge/game/movements.json
+```
+
+Example output:
+
+```json
+{"score": 0, "frames": 159, "seed": 42, "started": true}
+```
+
+Headless durations are rounded up to whole 60 Hz game frames. Each invocation
+uses an isolated temporary cartridge, working directory, and `.cartdata`, so
+multiple processes can run concurrently without sharing save state. Pemsa still
+advances at real-time 60 Hz; headless mode removes graphical and audio overhead
+but does not accelerate its clock.
+
+For batches, enter `devenv shell` once and invoke `dodge-headless` directly from
+worker processes instead of starting a new devenv shell through `just` per run.

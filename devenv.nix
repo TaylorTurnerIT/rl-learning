@@ -35,14 +35,21 @@
       export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
       exec python ./src/dodge/control.py "$@"
     '';
+    dodge-headless.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec python -m dodge.headless "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell
   enterShell = ''
-    echo "=========================================="
-    echo "🚀 Python + uv devenv environment active!"
-    echo "Python: $(python --version 2>/dev/null || echo 'N/A')"
-    echo "uv:     $(uv --version 2>/dev/null || echo 'N/A')"
-    echo "=========================================="
+    if [ "''${DODGE_HEADLESS:-0}" != "1" ]; then
+      echo "=========================================="
+      echo "🚀 Python + uv devenv environment active!"
+      echo "Python: $(python --version 2>/dev/null || echo 'N/A')"
+      echo "uv:     $(uv --version 2>/dev/null || echo 'N/A')"
+      echo "=========================================="
+    fi
   '';
 }
