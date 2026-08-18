@@ -23,6 +23,7 @@ class ControlRuntimeError(RuntimeError):
 
 
 DIRECTION_KEYS: dict[str, tuple[str, ...]] = {
+    "x": ("x",),
     "neutral": (),
     "left": ("Left",),
     "right": ("Right",),
@@ -66,8 +67,6 @@ class Keyboard(Protocol):
 
     def focus(self, window_id: str) -> None: ...
 
-    def tap(self, window_id: str, key: str) -> None: ...
-
     def key_down(self, window_id: str, key: str) -> None: ...
 
     def key_up(self, window_id: str, key: str) -> None: ...
@@ -105,9 +104,6 @@ class XDoToolKeyboard:
 
     def focus(self, window_id: str) -> None:
         self._call("windowactivate", "--sync", window_id)
-
-    def tap(self, window_id: str, key: str) -> None:
-        self._call("key", "--window", window_id, key)
 
     def key_down(self, window_id: str, key: str) -> None:
         self._call("keydown", "--window", window_id, key)
@@ -157,6 +153,9 @@ def parse_commands(value: object) -> list[MovementCommand]:
             )
 
         commands.append(MovementCommand(move=move, duration_ms=duration_ms))
+
+    if not commands or commands[0].move != "x":
+        raise ControlInputError("commands must start with an x move")
 
     return commands
 
@@ -238,7 +237,6 @@ def execute_commands(
     sleep: Callable[[float], None] = time.sleep,
     window_timeout: float = 5.0,
     window_settle_delay: float = 0.5,
-    start_delay: float = 0.75,
 ) -> None:
     process = launcher()
     window_id: str | None = None
@@ -248,8 +246,6 @@ def execute_commands(
         sleep(window_settle_delay)
         window_id = keyboard.wait_for_window(process.pid, window_timeout)
         keyboard.focus(window_id)
-        keyboard.tap(window_id, "x")
-        sleep(start_delay)
 
         for command in commands:
             for key in command.keys:

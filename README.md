@@ -41,6 +41,8 @@ Pass `dodge-control` a JSON list of timed movements:
 
 ```json
 [
+  {"move": "x", "duration_ms": 50},
+  {"move": "neutral", "duration_ms": 750},
   {"move": "left", "duration_ms": 250},
   {"move": "up_right", "duration_ms": 400},
   {"move": "neutral", "duration_ms": 100},
@@ -48,9 +50,10 @@ Pass `dodge-control` a JSON list of timed movements:
 ]
 ```
 
-Each movement may be `neutral`, `left`, `right`, `up`, `down`, `up_left`,
-`up_right`, `down_left`, or `down_right`. Durations are integer milliseconds
-from 1 through 60000. The complete list is validated before the game launches.
+Each list must start with `x` to pass the main menu. Subsequent movements may
+be `neutral`, `left`, `right`, `up`, `down`, `up_left`, `up_right`, `down_left`,
+or `down_right`. Durations are integer milliseconds from 1 through 60000. The
+complete list is validated before the game launches.
 
 Run a file with:
 
@@ -73,5 +76,5 @@ Or pipe the JSON list through stdin:
 printf '[{"move":"left","duration_ms":250}]' | just dodge-control -
 ```
 
-The controller launches its own game process, presses X to start, executes the
-movements through targeted keyboard events, and closes that process afterward.
+The controller launches its own game process, executes the listed controls
+through targeted keyboard events, and closes that process afterward.

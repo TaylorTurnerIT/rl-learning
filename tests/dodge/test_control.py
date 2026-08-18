@@ -64,9 +64,6 @@ class FakeKeyboard:
     def focus(self, window_id: str) -> None:
         self.events.append(("focus", window_id))
 
-    def tap(self, window_id: str, key: str) -> None:
-        self.events.append(("tap", window_id, key))
-
     def key_down(self, window_id: str, key: str) -> None:
         self.events.append(("down", window_id, key))
         if self.fail_on_down == key:
@@ -78,6 +75,7 @@ class FakeKeyboard:
 
 def test_all_direction_mappings() -> None:
     assert DIRECTION_KEYS == {
+        "x": ("x",),
         "neutral": (),
         "left": ("Left",),
         "right": ("Right",),
@@ -93,11 +91,13 @@ def test_all_direction_mappings() -> None:
 def test_parse_commands_preserves_order() -> None:
     assert parse_commands(
         [
+            {"move": "x", "duration_ms": 50},
             {"move": "left", "duration_ms": 250},
             {"move": "up_right", "duration_ms": 400},
             {"move": "neutral", "duration_ms": 50},
         ]
     ) == [
+        MovementCommand("x", 50),
         MovementCommand("left", 250),
         MovementCommand("up_right", 400),
         MovementCommand("neutral", 50),
@@ -108,6 +108,8 @@ def test_parse_commands_preserves_order() -> None:
     "value",
     [
         {},
+        [],
+        [{"move": "left", "duration_ms": 1}],
         ["left"],
         [{"move": "left"}],
         [{"move": "left", "duration_ms": 1, "extra": True}],
@@ -123,9 +125,19 @@ def test_invalid_command_schema_is_rejected(value: object) -> None:
 
 
 def test_load_commands_reads_stdin() -> None:
-    source = io.StringIO(json.dumps([{"move": "down", "duration_ms": 25}]))
+    source = io.StringIO(
+        json.dumps(
+            [
+                {"move": "x", "duration_ms": 50},
+                {"move": "down", "duration_ms": 25},
+            ]
+        )
+    )
 
-    assert load_commands("-", stdin=source) == [MovementCommand("down", 25)]
+    assert load_commands("-", stdin=source) == [
+        MovementCommand("x", 50),
+        MovementCommand("down", 25),
+    ]
 
 
 def test_event_sequence_targets_window_and_releases_between_commands() -> None:
@@ -134,7 +146,11 @@ def test_event_sequence_targets_window_and_releases_between_commands() -> None:
     sleeps: list[float] = []
 
     execute_commands(
-        [MovementCommand("up_right", 250), MovementCommand("neutral", 50)],
+        [
+            MovementCommand("x", 50),
+            MovementCommand("up_right", 250),
+            MovementCommand("neutral", 50),
+        ],
         keyboard=keyboard,
         launcher=lambda: process,
         sleep=sleeps.append,
@@ -144,13 +160,14 @@ def test_event_sequence_targets_window_and_releases_between_commands() -> None:
         ("wait", "42", "5.0"),
         ("wait", "42", "5.0"),
         ("focus", "9001"),
-        ("tap", "9001", "x"),
+        ("down", "9001", "x"),
+        ("up", "9001", "x"),
         ("down", "9001", "Up"),
         ("down", "9001", "Right"),
         ("up", "9001", "Right"),
         ("up", "9001", "Up"),
     ]
-    assert sleeps == [0.5, 0.75, 0.25, 0.05]
+    assert sleeps == [0.5, 0.05, 0.25, 0.05]
     assert process.terminated
     assert process.waits == [2.0]
 
@@ -180,7 +197,7 @@ def test_keyboard_interrupt_releases_keys_and_reaps_process() -> None:
     def interrupt_on_movement(_: float) -> None:
         nonlocal calls
         calls += 1
-        if calls == 3:
+        if calls == 2:
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
@@ -208,7 +225,7 @@ def test_window_timeout_reaps_process_without_key_events() -> None:
     assert process.waits == [2.0]
 
 
-def test_startup_settle_delay_precedes_first_key_event() -> None:
+def test_startup_settle_delay_precedes_first_listed_key_event() -> None:
     process = FakeProcess()
     keyboard = FakeKeyboard()
 
@@ -216,7 +233,7 @@ def test_startup_settle_delay_precedes_first_key_event() -> None:
         keyboard.events.append(("sleep", str(seconds)))
 
     execute_commands(
-        [],
+        [MovementCommand("x", 50)],
         keyboard=keyboard,
         launcher=lambda: process,
         sleep=record_sleep,
@@ -227,8 +244,9 @@ def test_startup_settle_delay_precedes_first_key_event() -> None:
         ("sleep", "0.5"),
         ("wait", "42", "5.0"),
         ("focus", "9001"),
-        ("tap", "9001", "x"),
-        ("sleep", "0.75"),
+        ("down", "9001", "x"),
+        ("sleep", "0.05"),
+        ("up", "9001", "x"),
     ]
 
 
@@ -263,13 +281,11 @@ def test_xdotool_commands_always_include_target_window() -> None:
 
     keyboard = XDoToolKeyboard(run=run)
     keyboard.focus("123")
-    keyboard.tap("123", "x")
     keyboard.key_down("123", "Left")
     keyboard.key_up("123", "Left")
 
     assert calls == [
         ["xdotool", "windowactivate", "--sync", "123"],
-        ["xdotool", "key", "--window", "123", "x"],
         ["xdotool", "keydown", "--window", "123", "Left"],
         ["xdotool", "keyup", "--window", "123", "Left"],
     ]
@@ -282,7 +298,7 @@ def test_main_validates_full_input_before_launch(
     command_file.write_text(
         json.dumps(
             [
-                {"move": "left", "duration_ms": 10},
+                {"move": "x", "duration_ms": 10},
                 {"move": "invalid", "duration_ms": 10},
             ]
         )
@@ -348,7 +364,7 @@ def test_main_uses_default_seed_and_allows_override(
     expected: int,
 ) -> None:
     command_file = tmp_path / "commands.json"
-    command_file.write_text("[]")
+    command_file.write_text('[{"move":"x","duration_ms":50}]')
     observed: list[int | None] = []
 
     @contextmanager
@@ -370,5 +386,6 @@ def test_example_movement_file_is_valid() -> None:
 
     commands = load_commands(str(example))
 
+    assert commands[0].move == "x"
     moves = {command.move for command in commands}
-    assert {"left", "right", "up_left", "up_right", "down", "neutral"} <= moves
+    assert {"x", "left", "right", "up_left", "up_right", "down", "neutral"} <= moves

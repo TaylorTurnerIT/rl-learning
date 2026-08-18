@@ -24,15 +24,15 @@ default: omitted `--seed` → seed `42`.
 cli: source `-` → read JSON from stdin.
 cli: invalid JSON/schema/window timeout/injection failure → stderr diagnostic + nonzero exit.
 json: top-level array of `{"move":"<direction>","duration_ms":<int>}`.
-enum: `<direction>` → `neutral|left|right|up|down|up_left|up_right|down_left|down_right`.
-keys: `left|right|up|down` → keyboard `Left|Right|Up|Down` → PICO-8 `btn(0..3)`.
-start: ready window → keyboard `x` tap → PICO-8 `❎`; wait transition before movement.
+enum: `<direction>` → `x|neutral|left|right|up|down|up_left|up_right|down_left|down_right`.
+keys: `x|left|right|up|down` → keyboard `x|Left|Right|Up|Down` → PICO-8 `❎|btn(0..3)`.
+start: first JSON command ! `x`; controller ⊥ hidden start key.
 example: `src/dodge/game/movements.json` → valid runnable movement list.
 
 §V
 
 V1: ∀ JSON input valid list + exact fields/types/enums/ranges before side effects.
-V2: direction → exact key set; diagonal keys held simultaneously; `neutral` → no held keys.
+V2: direction → exact key set; diagonal keys held simultaneously; `neutral` → no held keys; `x` → keyboard `x`.
 V3: ∀ command execute in list order for requested `duration_ms`; previous keys released before next command.
 V4: ∀ injected key event targets launched Pemsa window id.
 V5: normal completion | exception | signal → zero held keys.
@@ -42,7 +42,8 @@ V8: existing `just dodge-run` interactive path remains functional.
 V9: first key injection waits bounded SDL/X11 settle interval after window discovery.
 V10: `--seed N` → `srand(N)` first `_init` statement in launched temporary cartridge.
 V11: seed absent → seed `42`; explicit valid seed overrides; invalid seed → fail before side effects.
-V12: checked-in movement example conforms to JSON interface + covers cardinal, diagonal, neutral moves.
+V12: checked-in movement example conforms to JSON interface + covers start, cardinal, diagonal, neutral moves.
+V13: command list nonempty + first move `x`; execution emits only listed control keys.
 
 §T
 
@@ -54,6 +55,7 @@ T4|x|add unit tests + controlled-run smoke test|V1,V2,V3,V4,V5,V6,V7,V8,V9
 T5|x|add deterministic seed option via temporary cartridge|V10,V11,I.cli,C9
 T6|x|default control seed to `42`|V10,V11,I.cli
 T7|x|add runnable example movement file|V1,V12,I.json,I.example
+T8|x|make menu-start X explicit in command list|V1,V2,V3,V12,V13,I.json,I.start
 
 §B
 
