@@ -1,0 +1,9 @@
+[
+  {"move": "left", "duration_ms": 250},
+  {"move": "up_right", "duration_ms": 350},
+  {"move": "neutral", "duration_ms": 150},
+  {"move": "down", "duration_ms": 300},
+  {"move": "right", "duration_ms": 250},
+  {"move": "up_left", "duration_ms": 350},
+  {"move": "neutral", "duration_ms": 200}
+]

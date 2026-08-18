@@ -55,13 +55,13 @@ from 1 through 60000. The complete list is validated before the game launches.
 Run a file with:
 
 ```bash
-just dodge-control movements.json
+just dodge-control src/dodge/game/movements.json
 ```
 
 The control runner defaults PICO-8's random seed to 42. Override it with:
 
 ```bash
-just dodge-control movements.json --seed 42
+just dodge-control src/dodge/game/movements.json --seed 7
 ```
 
 Valid seeds are integers from 0 through 32767. Seeded runs use a temporary

@@ -363,3 +363,12 @@ def test_main_uses_default_seed_and_allows_override(
 
     assert main([str(command_file), *options]) == 0
     assert observed == [expected]
+
+
+def test_example_movement_file_is_valid() -> None:
+    example = Path(__file__).parents[2] / "src/dodge/game/movements.json"
+
+    commands = load_commands(str(example))
+
+    moves = {command.move for command in commands}
+    assert {"left", "right", "up_left", "up_right", "down", "neutral"} <= moves
