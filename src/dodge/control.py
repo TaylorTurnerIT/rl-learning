@@ -286,7 +286,7 @@ def _terminate_process(process: Process) -> None:
         process.wait()
 
 
-def main(argv: list[str] | None = None) -> int:
+def control(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dodge-control",
         description="Run Dodge from a JSON list of timed movement commands.",
@@ -318,4 +318,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(control())
