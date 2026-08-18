@@ -4,6 +4,7 @@ import io
 import json
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 
@@ -137,6 +138,7 @@ def test_event_sequence_targets_window_and_releases_between_commands() -> None:
 
     assert keyboard.events == [
         ("wait", "42", "5.0"),
+        ("wait", "42", "5.0"),
         ("focus", "9001"),
         ("tap", "9001", "x"),
         ("down", "9001", "Up"),
@@ -144,7 +146,7 @@ def test_event_sequence_targets_window_and_releases_between_commands() -> None:
         ("up", "9001", "Right"),
         ("up", "9001", "Up"),
     ]
-    assert sleeps == [0.75, 0.25, 0.05]
+    assert sleeps == [0.5, 0.75, 0.25, 0.05]
     assert process.terminated
     assert process.waits == [2.0]
 
@@ -174,7 +176,7 @@ def test_keyboard_interrupt_releases_keys_and_reaps_process() -> None:
     def interrupt_on_movement(_: float) -> None:
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 3:
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
@@ -200,6 +202,30 @@ def test_window_timeout_reaps_process_without_key_events() -> None:
     assert keyboard.events == [("wait", "42", "5.0")]
     assert process.terminated
     assert process.waits == [2.0]
+
+
+def test_startup_settle_delay_precedes_first_key_event() -> None:
+    process = FakeProcess()
+    keyboard = FakeKeyboard()
+
+    def record_sleep(seconds: float) -> None:
+        keyboard.events.append(("sleep", str(seconds)))
+
+    execute_commands(
+        [],
+        keyboard=keyboard,
+        launcher=lambda: process,
+        sleep=record_sleep,
+    )
+
+    assert keyboard.events == [
+        ("wait", "42", "5.0"),
+        ("sleep", "0.5"),
+        ("wait", "42", "5.0"),
+        ("focus", "9001"),
+        ("tap", "9001", "x"),
+        ("sleep", "0.75"),
+    ]
 
 
 def test_unresponsive_process_is_killed_and_reaped() -> None:
@@ -243,3 +269,29 @@ def test_xdotool_commands_always_include_target_window() -> None:
         ["xdotool", "keydown", "--window", "123", "Left"],
         ["xdotool", "keyup", "--window", "123", "Left"],
     ]
+
+
+def test_main_validates_full_input_before_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    command_file = tmp_path / "invalid.json"
+    command_file.write_text(
+        json.dumps(
+            [
+                {"move": "left", "duration_ms": 10},
+                {"move": "invalid", "duration_ms": 10},
+            ]
+        )
+    )
+    launched = False
+
+    def unexpected_execute(*_: object, **__: object) -> None:
+        nonlocal launched
+        launched = True
+
+    monkeypatch.setattr("dodge.control.execute_commands", unexpected_execute)
+
+    from dodge.control import main
+
+    assert main([str(command_file)]) == 1
+    assert not launched

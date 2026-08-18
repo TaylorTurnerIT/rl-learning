@@ -192,12 +192,15 @@ def execute_commands(
     launcher: Callable[[], Process] = launch_pemsa,
     sleep: Callable[[float], None] = time.sleep,
     window_timeout: float = 5.0,
+    window_settle_delay: float = 0.5,
     start_delay: float = 0.75,
 ) -> None:
     process = launcher()
     window_id: str | None = None
     held_keys: list[str] = []
     try:
+        window_id = keyboard.wait_for_window(process.pid, window_timeout)
+        sleep(window_settle_delay)
         window_id = keyboard.wait_for_window(process.pid, window_timeout)
         keyboard.focus(window_id)
         keyboard.tap(window_id, "x")

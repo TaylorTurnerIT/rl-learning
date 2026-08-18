@@ -35,6 +35,7 @@ V5: normal completion | exception | signal → zero held keys.
 V6: controller owns emulator lifecycle; completion/error/interrupt → emulator terminated + reaped.
 V7: game startup bounded by window timeout; timeout → clear error + no orphan process.
 V8: existing `just dodge-run` interactive path remains functional.
+V9: first key injection waits bounded SDL/X11 settle interval after window discovery.
 
 §T
 
@@ -42,8 +43,9 @@ id|status|task|cites
 T1|x|add JSON model, full-list validation, direction mapping|V1,V2,I.json,I.enum,I.keys
 T2|x|add targeted X11 keyboard backend + Pemsa lifecycle|V3,V4,V5,V6,V7,I.start
 T3|x|add CLI, devenv dependency/scripts, just recipe, docs|V8,I.cli,C4,C5
-T4|.|add unit tests + controlled-run smoke test|V1,V2,V3,V4,V5,V6,V7,V8
+T4|~|add unit tests + controlled-run smoke test|V1,V2,V3,V4,V5,V6,V7,V8,V9
 
 §B
 
 id|date|cause|fix
+B1|2026-08-17|Pemsa window discovered before SDL X11 init settled|V9
