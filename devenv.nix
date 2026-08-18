@@ -6,6 +6,7 @@
     pkgs.git
     pkgs.ruff
     pkgs.SDL2
+    pkgs.xdotool
     pkgs.zlib
   ];
 
@@ -28,7 +29,11 @@
     app-check.exec = "ruff check .";
     dodge-run.exec = ''
       export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
-      exec ./src/dodge/runtime/dodge
+      exec ./src/dodge/runtime/pemsa ./src/dodge/game/dodge.p8 --no-splash --no-fullscreen
+    '';
+    dodge-control.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      exec python ./src/dodge/control.py "$@"
     '';
   };
 

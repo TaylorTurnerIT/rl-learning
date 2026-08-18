@@ -12,3 +12,6 @@ build/
 
 # Downloaded/exported PICO-8 runtime; recreate from dodge-linux.zip when needed.
 /src/dodge/runtime/
+
+# PICO-8-compatible runner persistence generated beside the project.
+/.cartdata/

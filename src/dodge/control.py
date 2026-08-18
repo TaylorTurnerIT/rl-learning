@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -239,3 +240,27 @@ def _terminate_process(process: Process) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="dodge-control",
+        description="Run Dodge from a JSON list of timed movement commands.",
+    )
+    parser.add_argument("source", help="JSON command file, or - to read stdin")
+    arguments = parser.parse_args(argv)
+
+    try:
+        commands = load_commands(arguments.source)
+        execute_commands(commands, keyboard=XDoToolKeyboard())
+    except (ControlInputError, ControlRuntimeError) as error:
+        print(f"dodge-control: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("dodge-control: interrupted", file=sys.stderr)
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

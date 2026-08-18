@@ -20,11 +20,49 @@ ruff format --check .
 ruff check .
 ```
 
-## PICO-8 export
+## Dodge (PICO-8)
 
-The local `dodge-linux.zip` export is unpacked to `src/dodge/runtime/` (ignored
-by Git). Launch it from the development shell with:
+The complete cartridge extracted from the Linux export lives at
+`src/dodge/game/dodge.p8`. The ignored `src/dodge/runtime/` directory contains
+the prebuilt Pemsa Linux runner, so no emulator compilation is required.
+
+Launch the cartridge with:
 
 ```bash
-devenv shell -- dodge-run
+just dodge-run
 ```
+
+You can also run it directly through the development environment with
+`devenv shell -- dodge-run`.
+
+### Programmatic controls
+
+Pass `dodge-control` a JSON list of timed movements:
+
+```json
+[
+  {"move": "left", "duration_ms": 250},
+  {"move": "up_right", "duration_ms": 400},
+  {"move": "neutral", "duration_ms": 100},
+  {"move": "down", "duration_ms": 300}
+]
+```
+
+Each movement may be `neutral`, `left`, `right`, `up`, `down`, `up_left`,
+`up_right`, `down_left`, or `down_right`. Durations are integer milliseconds
+from 1 through 60000. The complete list is validated before the game launches.
+
+Run a file with:
+
+```bash
+just dodge-control movements.json
+```
+
+Or pipe the JSON list through stdin:
+
+```bash
+printf '[{"move":"left","duration_ms":250}]' | just dodge-control -
+```
+
+The controller launches its own game process, presses X to start, executes the
+movements through targeted keyboard events, and closes that process afterward.

@@ -21,7 +21,11 @@ rl-check:
 rl-format:
     devenv shell -- app-fmt
 
-# PICO-8 Dodge export
+# PICO-8 Dodge cartridge
 [group("dodge")]
 dodge-run:
     devenv shell -- dodge-run
+
+[group("dodge")]
+dodge-control commands:
+    devenv shell -- dodge-control {{commands}}
