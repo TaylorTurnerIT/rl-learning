@@ -5,8 +5,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
@@ -31,6 +33,10 @@ DIRECTION_KEYS: dict[str, tuple[str, ...]] = {
     "down_left": ("Down", "Left"),
     "down_right": ("Down", "Right"),
 }
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CARTRIDGE_PATH = PROJECT_ROOT / "src/dodge/game/dodge.p8"
+PEMSA_PATH = PROJECT_ROOT / "src/dodge/runtime/pemsa"
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,16 +171,55 @@ def load_commands(source: str, *, stdin: TextIO = sys.stdin) -> list[MovementCom
     return parse_commands(value)
 
 
-def launch_pemsa() -> subprocess.Popen[bytes]:
-    project_root = Path(__file__).resolve().parents[2]
-    executable = project_root / "src/dodge/runtime/pemsa"
-    cartridge = project_root / "src/dodge/game/dodge.p8"
+def parse_seed(value: str) -> int:
+    try:
+        seed = int(value)
+    except ValueError as error:
+        raise ControlInputError("seed must be an integer from 0 to 32767") from error
+    if not 0 <= seed <= 32_767:
+        raise ControlInputError("seed must be an integer from 0 to 32767")
+    return seed
+
+
+@contextmanager
+def seeded_cartridge(
+    seed: int | None, *, source: Path = CARTRIDGE_PATH
+) -> Iterator[Path]:
+    if seed is None:
+        yield source
+        return
+
+    try:
+        cartridge = source.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ControlRuntimeError(f"could not read cartridge: {error}") from error
+
+    init_marker = "function _init()\n"
+    if cartridge.count(init_marker) != 1:
+        raise ControlRuntimeError("cartridge must contain exactly one _init function")
+    seeded = cartridge.replace(
+        init_marker,
+        f"{init_marker} srand({seed})\n",
+        1,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="dodge-control-") as directory:
+        generated = Path(directory) / "dodge-seeded.p8"
+        try:
+            generated.write_text(seeded, encoding="utf-8")
+        except OSError as error:
+            message = f"could not create seeded cartridge: {error}"
+            raise ControlRuntimeError(message) from error
+        yield generated
+
+
+def launch_pemsa(cartridge: Path = CARTRIDGE_PATH) -> subprocess.Popen[bytes]:
     environment = os.environ.copy()
     environment["SDL_VIDEODRIVER"] = "x11"
     try:
         return subprocess.Popen(
             [
-                executable,
+                PEMSA_PATH,
                 cartridge,
                 "--no-splash",
                 "--no-fullscreen",
@@ -251,11 +296,18 @@ def main(argv: list[str] | None = None) -> int:
         description="Run Dodge from a JSON list of timed movement commands.",
     )
     parser.add_argument("source", help="JSON command file, or - to read stdin")
+    parser.add_argument("--seed", help="PICO-8 random seed from 0 to 32767")
     arguments = parser.parse_args(argv)
 
     try:
+        seed = parse_seed(arguments.seed) if arguments.seed is not None else None
         commands = load_commands(arguments.source)
-        execute_commands(commands, keyboard=XDoToolKeyboard())
+        with seeded_cartridge(seed) as cartridge:
+            execute_commands(
+                commands,
+                keyboard=XDoToolKeyboard(),
+                launcher=lambda: launch_pemsa(cartridge),
+            )
     except (ControlInputError, ControlRuntimeError) as error:
         print(f"dodge-control: {error}", file=sys.stderr)
         return 1

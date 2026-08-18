@@ -27,5 +27,5 @@ dodge-run:
     devenv shell -- dodge-run
 
 [group("dodge")]
-dodge-control commands:
-    devenv shell -- dodge-control {{commands}}
+dodge-control commands *options:
+    devenv shell -- dodge-control {{commands}} {{options}}

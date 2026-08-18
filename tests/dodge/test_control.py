@@ -17,6 +17,8 @@ from dodge.control import (
     execute_commands,
     load_commands,
     parse_commands,
+    parse_seed,
+    seeded_cartridge,
 )
 
 
@@ -295,3 +297,42 @@ def test_main_validates_full_input_before_launch(
 
     assert main([str(command_file)]) == 1
     assert not launched
+
+
+@pytest.mark.parametrize("seed", ["-1", "32768", "nope"])
+def test_invalid_seed_is_rejected(seed: str) -> None:
+    with pytest.raises(ControlInputError):
+        parse_seed(seed)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("0", 0), ("42", 42), ("32767", 32767)])
+def test_valid_seed_is_parsed(raw: str, expected: int) -> None:
+    assert parse_seed(raw) == expected
+
+
+def test_seeded_cartridge_injects_first_init_statement_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.p8"
+    original = "pico-8 cartridge\n__lua__\nfunction _init()\n cartdata('x')\nend\n"
+    source.write_text(original)
+
+    with seeded_cartridge(42, source=source) as cartridge:
+        assert cartridge != source
+        assert cartridge.read_text() == original.replace(
+            "function _init()\n", "function _init()\n srand(42)\n"
+        )
+        generated = cartridge
+
+    assert not generated.exists()
+    assert source.read_text() == original
+
+
+def test_seed_absent_uses_original_cartridge(tmp_path: Path) -> None:
+    source = tmp_path / "source.p8"
+    source.write_text("original")
+
+    with seeded_cartridge(None, source=source) as cartridge:
+        assert cartridge == source
+
+    assert source.read_text() == "original"

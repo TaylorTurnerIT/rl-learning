@@ -58,6 +58,15 @@ Run a file with:
 just dodge-control movements.json
 ```
 
+Set PICO-8's random seed for a repeatable random sequence with:
+
+```bash
+just dodge-control movements.json --seed 42
+```
+
+Valid seeds are integers from 0 through 32767. Seeded runs use a temporary
+cartridge copy; `src/dodge/game/dodge.p8` is never modified.
+
 Or pipe the JSON list through stdin:
 
 ```bash
