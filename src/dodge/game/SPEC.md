@@ -40,7 +40,7 @@ V8: existing `just dodge-run` interactive path remains functional.
 
 id|status|task|cites
 T1|x|add JSON model, full-list validation, direction mapping|V1,V2,I.json,I.enum,I.keys
-T2|.|add targeted X11 keyboard backend + Pemsa lifecycle|V3,V4,V5,V6,V7,I.start
+T2|x|add targeted X11 keyboard backend + Pemsa lifecycle|V3,V4,V5,V6,V7,I.start
 T3|.|add CLI, devenv dependency/scripts, just recipe, docs|V8,I.cli,C4,C5
 T4|.|add unit tests + controlled-run smoke test|V1,V2,V3,V4,V5,V6,V7,V8
 
