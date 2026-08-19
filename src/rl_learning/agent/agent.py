@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from dodge.headless import HeadlessResult
 from rl_learning.agent.brain import Brain
 from rl_learning.game import Direction, Game, Position, State
 
@@ -36,9 +37,7 @@ class Agent:
                 case Direction.DOWN:
                     pos.y -= 1
 
-    def calculate_fitness(
-        self,
-    ) -> int:
+    def calculate_fitness(self) -> int:
         score: int = 0
         match self.state:
             case State.DEAD:
