@@ -154,7 +154,10 @@ def parse_commands(value: object) -> list[MovementCommand]:
 
         commands.append(MovementCommand(move=move, duration_ms=duration_ms))
 
-    if not commands or commands[0].move != "x":
+    if not commands:
+        raise ControlInputError("commands must not be empty")
+
+    if commands[0].move != "x":
         raise ControlInputError("commands must start with an x move")
 
     return commands
