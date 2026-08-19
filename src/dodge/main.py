@@ -1,8 +1,16 @@
+import os
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
 from dodge.agent.agent import Agent
 from dodge.agent.brain import Brain
-from dodge.headless import replay_commands
+from dodge.headless import HeadlessResult, replay_commands
+
+
+def evaluate_epoch(
+    agents: list[Agent], executor: ThreadPoolExecutor
+) -> list[HeadlessResult]:
+    return list(executor.map(Agent.run_actions, agents))
 
 
 def main():
@@ -18,44 +26,52 @@ def main():
     epoch = 1
     best_agent: tuple[int, int] | None = None
     done = False
-    while not done:
-        for id in range(population):
+    worker_count = min(population, os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        while not done:
             if epoch == 1:
-                brain = deepcopy(starting_brain)
-                brain.mutate_actions()
-                agents.append(Agent(brain=brain))
+                for _ in range(population):
+                    brain = deepcopy(starting_brain)
+                    brain.mutate_actions()
+                    agents.append(Agent(brain=brain))
 
-            result = agents[id].run_actions()
-            fitness = agents[id].calculate_fitness(result)
+            results = evaluate_epoch(agents, executor)
+            for id, (agent, result) in enumerate(zip(agents, results, strict=True)):
+                fitness = agent.calculate_fitness(result)
 
-            print(id + 1, "out of ", population, f"complete. score: {fitness} moves: ")
-            print(agents[id].brain.actions)
+                print(
+                    id + 1,
+                    "out of ",
+                    population,
+                    f"complete. score: {fitness} moves: ",
+                )
+                print(agent.brain.actions)
 
-            if best_agent is None or fitness > best_agent[1]:
-                best_agent = (id, fitness)
+                if best_agent is None or fitness > best_agent[1]:
+                    best_agent = (id, fitness)
 
-            # agents[id].brain.mutate_actions()
-        if best_agent is not None:
-            print(best_agent[1])
+                # agents[id].brain.mutate_actions()
+            if best_agent is not None:
+                print(best_agent[1])
 
-        # brain surgery
-        if best_agent is not None:
-            elite_id = best_agent[0]
-            elite_brain = deepcopy(agents[elite_id].brain)
+            # brain surgery
+            if best_agent is not None:
+                elite_id = best_agent[0]
+                elite_brain = deepcopy(agents[elite_id].brain)
 
-            for id, agent in enumerate(agents):
-                agent.reset()
+                for id, agent in enumerate(agents):
+                    agent.reset()
 
-                if id == elite_id:
-                    agent.brain = elite_brain
-                    continue
+                    if id == elite_id:
+                        agent.brain = elite_brain
+                        continue
 
-                child_brain = deepcopy(elite_brain)
-                child_brain.mutate_actions()
-                agent.brain = child_brain
-        if epoch == 2:
-            done = True
-        epoch += 1
+                    child_brain = deepcopy(elite_brain)
+                    child_brain.mutate_actions()
+                    agent.brain = child_brain
+            if epoch == 2:
+                done = True
+            epoch += 1
     if best_agent is not None:
         winner = agents[best_agent[0]]
         replay_commands(winner.brain.parse_actions(), seed=42)

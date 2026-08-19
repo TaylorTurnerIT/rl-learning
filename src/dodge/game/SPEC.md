@@ -74,6 +74,7 @@ V24: `dodge.control.main` → `control` CLI behavior.
 V25: headless mode advances cartridge transitions without calling cartridge `_draw`.
 V26: headless final input → neutral frames until cartridge death; success result `died:true`.
 V27: winner replay → visible Pemsa + instrumented command input; ⊥ keyboard injection.
+V28: epoch dispatches each agent once concurrently; selection/mutation starts after all results return.
 
 §T
 
@@ -91,6 +92,7 @@ T10|.|expose per-frame visible world state as JSON|V14,V15,C14
 T11|x|add headless survival telemetry + agent fitness|V22,V23,V25,I.result
 T12|x|retain `dodge.control.main` compatibility alias|V24
 T13|x|end episode on death + replay winner visually|V26,V27,C15,I.result,I.py
+T14|x|parallelize agent evaluation per epoch|V19,V28
 
 §B
 
