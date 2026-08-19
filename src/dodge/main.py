@@ -7,7 +7,7 @@ from dodge.headless import replay_commands
 
 def main():
     # Initialize config
-    population: int = 100
+    population: int = 10
     mutation_chance: float = 0.1
 
     # Create brain
@@ -37,9 +37,25 @@ def main():
             # agents[id].brain.mutate_actions()
         if best_agent is not None:
             print(best_agent[1])
-        epoch += 1
+
+        # brain surgery
+        if best_agent is not None:
+            elite_id = best_agent[0]
+            elite_brain = deepcopy(agents[elite_id].brain)
+
+            for id, agent in enumerate(agents):
+                agent.reset()
+
+                if id == elite_id:
+                    agent.brain = elite_brain
+                    continue
+
+                child_brain = deepcopy(elite_brain)
+                child_brain.mutate_actions()
+                agent.brain = child_brain
         if epoch == 2:
             done = True
+        epoch += 1
     if best_agent is not None:
         winner = agents[best_agent[0]]
         replay_commands(winner.brain.parse_actions(), seed=42)
