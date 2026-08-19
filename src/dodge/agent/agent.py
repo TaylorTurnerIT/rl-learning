@@ -19,11 +19,9 @@ class Agent:
     def run_actions(self) -> HeadlessResult:
         return run_headless(commands=self.brain.parse_actions(), seed=42)
 
-    def calculate_fitness(self) -> int:
+    def calculate_fitness(self, result: HeadlessResult) -> int:
         score: int = 0
-        match self.state:
-            case State.DEAD:
-                score -= 100000
+        score += int(result["score"]) * 100
         return score
 
     def reset(self, new_brain: Brain | None = None):
