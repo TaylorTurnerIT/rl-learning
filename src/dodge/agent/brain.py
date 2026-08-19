@@ -26,8 +26,8 @@ class Brain:
 
     def parse_actions(self) -> list[MovementCommand]:
         raw_commands = [
-            {"move": "x", "duration_ms": 10},
-            {"move": "neutral", "duration_ms": 10},
+            {"move": "x", "duration_ms": 50},
+            {"move": "neutral", "duration_ms": 750},
         ]
 
         for direction in self.actions:

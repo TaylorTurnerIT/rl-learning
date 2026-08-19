@@ -67,6 +67,7 @@ __dodge_remaining=__dodge_commands[1][2]
 __dodge_mask=0
 __dodge_previous_mask=0
 __dodge_frames=0
+__dodge_survival_frames=0
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -79,10 +80,33 @@ end
 function _draw()
 end
 
+function __dodge_advance_transition()
+ trsy+=(target==2 and -10 or 10)
+ if (target==2 and trsy<=-128) or (target!=2 and trsy>=128) then
+  trsdone=true
+  if target==0 then
+   _upd=updatemenu
+  elseif target==1 then
+   _upd=updategame
+  else
+   _upd=updatesettings
+  end
+ else
+  trsdone=false
+ end
+end
+
 function _update60()
  local command=__dodge_commands[__dodge_command]
  __dodge_mask=command[1]
+ local game_frame=_upd==updategame and not isdead
  __dodge_game_update60()
+ if game_frame and not isdead then
+  __dodge_survival_frames+=1
+ end
+ if _upd==updatetransition then
+  __dodge_advance_transition()
+ end
  __dodge_frames+=1
  __dodge_previous_mask=__dodge_mask
  __dodge_remaining-=1
@@ -94,7 +118,8 @@ function _update60()
   else
    local started=hasplayed and "true" or "false"
    local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
-   result=result.."|"..tostr({seed}).."|"..started
+   result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
+   result=result.."|"..started
    printh(result)
    exit()
   end
@@ -168,12 +193,17 @@ def run_headless(
 
     payload = result_lines[0][len(RESULT_PREFIX) :].strip()
     try:
-        score_raw, frames_raw, seed_raw, started_raw = payload.split("|")
+        score_raw, frames_raw, survival_frames_raw, seed_raw, started_raw = (
+            payload.split("|")
+        )
         score = json.loads(score_raw)
         frames = int(frames_raw)
+        survival_frames = int(survival_frames_raw)
         result_seed = int(seed_raw)
         if isinstance(score, bool) or not isinstance(score, int | float):
             raise ValueError("score is not numeric")
+        if survival_frames < 0:
+            raise ValueError("survival_frames is negative")
         if started_raw not in {"true", "false"}:
             raise ValueError("started is not boolean")
     except (ValueError, json.JSONDecodeError) as error:
@@ -183,6 +213,7 @@ def run_headless(
     return {
         "score": score,
         "frames": frames,
+        "survival_frames": survival_frames,
         "seed": result_seed,
         "started": started_raw == "true",
     }

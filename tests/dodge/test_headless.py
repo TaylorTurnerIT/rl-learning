@@ -60,6 +60,8 @@ def test_instrumented_cartridge_seeds_inputs_and_disables_draw() -> None:
     assert "function _init()\n srand(42)\n" in result
     assert "__dodge_game_update60=_update60" in result
     assert "__dodge_commands={{32,3},{0,45},{5,6}}" in result
+    assert "function __dodge_advance_transition()" in result
+    assert "_upd=updategame" in result
     assert "function _draw()\nend" in result
     assert RESULT_PREFIX in result
     assert result.endswith("__gfx__\n")
@@ -95,13 +97,19 @@ def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
         return subprocess.CompletedProcess(
             arguments,
             0,
-            f"noise\n{RESULT_PREFIX}1.5|54|42|true\t\n",
+            f"noise\n{RESULT_PREFIX}1.5|54|12|42|true\t\n",
             "",
         )
 
     result = run_headless(COMMANDS, seed=42, source=source, runner=runner)
 
-    assert result == {"score": 1.5, "frames": 54, "seed": 42, "started": True}
+    assert result == {
+        "score": 1.5,
+        "frames": 54,
+        "survival_frames": 12,
+        "seed": 42,
+        "started": True,
+    }
     assert source.read_text() == original
     assert not Path(str(observed["workspace"])).exists()
     assert not Path(str(observed["cartridge"])).exists()
@@ -124,6 +132,12 @@ def test_run_headless_rejects_missing_result(tmp_path: Path) -> None:
 
 
 def test_headless_result_is_json_serializable() -> None:
-    result = {"score": 2.5, "frames": 100, "seed": 42, "started": True}
+    result = {
+        "score": 2.5,
+        "frames": 100,
+        "survival_frames": 40,
+        "seed": 42,
+        "started": True,
+    }
 
     assert json.loads(json.dumps(result)) == result

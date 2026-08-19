@@ -2,7 +2,6 @@ from copy import deepcopy
 from enum import Enum
 
 from dodge.agent.brain import Brain
-from dodge.control import MovementCommand, execute_commands, parse_commands
 from dodge.headless import HeadlessResult, run_headless
 
 
@@ -20,9 +19,7 @@ class Agent:
         return run_headless(commands=self.brain.parse_actions(), seed=42)
 
     def calculate_fitness(self, result: HeadlessResult) -> int:
-        score: int = 0
-        score += int(result["score"]) * 100
-        return score
+        return int(result["survival_frames"])
 
     def reset(self, new_brain: Brain | None = None):
         self.state = State.ALIVE

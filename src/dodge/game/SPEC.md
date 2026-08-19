@@ -34,7 +34,7 @@ keys: `x|left|right|up|down` → keyboard `x|Left|Right|Up|Down` → PICO-8 `❎
 start: first JSON command ! `x`; controller ⊥ hidden start key.
 example: `src/dodge/game/movements.json` → valid runnable movement list.
 cli: `just dodge-headless <commands.json|-> [--seed N]` → stdout one JSON result.
-result: `{"score":number,"frames":int,"seed":int,"started":bool}`.
+result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started":bool}`.
 
 §R
 
@@ -66,6 +66,10 @@ V18: same commands + seed + initial data → identical result JSON.
 V19: ≥4 concurrent headless runs → isolated success; ⊥ shared `.cartdata` or residue.
 V20: checked-in cartridge unchanged by headless runs.
 V21: non-UTF-8 Pemsa diagnostics → replacement text; result parser remains operational.
+V22: headless `survival_frames` → live `updategame` frames before death; ⊥ menu/transition frames.
+V23: Agent fitness → headless `survival_frames`; ⊥ cartridge `score`.
+V24: `dodge.control.main` → `control` CLI behavior.
+V25: headless mode advances cartridge transitions without calling cartridge `_draw`.
 
 §T
 
@@ -80,9 +84,13 @@ T7|x|add runnable example movement file|V1,V12,I.json,I.example
 T8|x|make menu-start X explicit in command list|V1,V2,V3,V12,V13,I.json,I.start
 T9|x|add isolated headless command runner + score JSON|V1,V10,V11,V13,V14,V15,V16,V17,V18,V19,V20,V21,I.cli,I.result
 T10|.|expose per-frame visible world state as JSON|V14,V15,C14
+T11|x|add headless survival telemetry + agent fitness|V22,V23,V25,I.result
+T12|x|retain `dodge.control.main` compatibility alias|V24
 
 §B
 
 id|date|cause|fix
 B1|2026-08-17|Pemsa window discovered before SDL X11 init settled|V9
 B2|2026-08-17|Pemsa glyph diagnostics contain invalid UTF-8 bytes|V21
+B3|2026-08-19|`main` renamed `control`; control tests/import callers broke|V24
+B4|2026-08-19|no-op headless `_draw` froze cartridge draw-driven transitions|V25
