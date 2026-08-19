@@ -24,6 +24,7 @@ def main():
     # Create agents
     agents: list[Agent] = []
     epoch = 1
+    max_epoch = 50
     best_agent: tuple[int, int] | None = None
     done = False
     worker_count = min(population, os.cpu_count() or 1)
@@ -69,7 +70,7 @@ def main():
                     child_brain = deepcopy(elite_brain)
                     child_brain.mutate_actions()
                     agent.brain = child_brain
-            if epoch == 2:
+            if epoch == max_epoch:
                 done = True
             epoch += 1
     if best_agent is not None:
