@@ -16,15 +16,8 @@ class Agent:
         self.state: State = State.ALIVE
 
     def run_actions(self):
-        parse_commands()
-        actions_to_run: list[MovementCommand] = []
-        actions_to_run.append(MovementCommand("x", 10))
-        actions_to_run.append(MovementCommand("neutral", 10))
-        for direction in self.brain.actions:
-            actions_to_run.append(MovementCommand(move=direction, duration_ms=100))
-
-    def step(self, direction: MovementCommand):
-        pass
+        for _ in self.brain.actions:
+            pass
 
     def calculate_fitness(self) -> int:
         score: int = 0
@@ -33,5 +26,7 @@ class Agent:
                 score -= 100000
         return score
 
-    def reset(self):
+    def reset(self, new_brain: Brain | None = None):
         self.state = State.ALIVE
+        if new_brain is not None:
+            self.brain = deepcopy(new_brain)
