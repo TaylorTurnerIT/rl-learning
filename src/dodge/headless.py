@@ -43,7 +43,11 @@ def duration_to_frames(duration_ms: int) -> int:
 
 
 def instrument_cartridge(
-    source: str, commands: list[MovementCommand], *, seed: int
+    source: str,
+    commands: list[MovementCommand],
+    *,
+    seed: int,
+    render: bool = False,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
@@ -59,6 +63,33 @@ def instrument_cartridge(
     encoded_commands = ",".join(
         f"{{{COMMAND_MASKS[command.move]},{duration_to_frames(command.duration_ms)}}}"
         for command in commands
+    )
+    draw_override = "" if render else "function _draw()\nend\n\n"
+    transition_harness = (
+        ""
+        if render
+        else """function __dodge_advance_transition()
+ trsy+=(target==2 and -10 or 10)
+ if (target==2 and trsy<=-128) or (target!=2 and trsy>=128) then
+  trsdone=true
+  if target==0 then
+   _upd=updatemenu
+  elseif target==1 then
+   _upd=updategame
+  else
+   _upd=updatesettings
+  end
+ else
+  trsdone=false
+ end
+end
+
+"""
+    )
+    transition_tick = (
+        ""
+        if render
+        else (" if _upd==updatetransition then\n  __dodge_advance_transition()\n end\n")
     )
     harness = f'''__dodge_game_update60=_update60
 __dodge_commands={{{encoded_commands}}}
@@ -77,51 +108,37 @@ function btnp(i)
  return btn(i) and flr(__dodge_previous_mask/(2^i))%2!=1
 end
 
-function _draw()
-end
-
-function __dodge_advance_transition()
- trsy+=(target==2 and -10 or 10)
- if (target==2 and trsy<=-128) or (target!=2 and trsy>=128) then
-  trsdone=true
-  if target==0 then
-   _upd=updatemenu
-  elseif target==1 then
-   _upd=updategame
-  else
-   _upd=updatesettings
-  end
- else
-  trsdone=false
- end
+{draw_override}{transition_harness}function __dodge_finish()
+ local started=hasplayed and "true" or "false"
+ local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
+ result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
+ result=result.."|"..started.."|true"
+ printh(result)
+ exit()
 end
 
 function _update60()
  local command=__dodge_commands[__dodge_command]
- __dodge_mask=command[1]
+ __dodge_mask=command and command[1] or 0
  local game_frame=_upd==updategame and not isdead
  __dodge_game_update60()
  if game_frame and not isdead then
   __dodge_survival_frames+=1
  end
- if _upd==updatetransition then
-  __dodge_advance_transition()
- end
+{transition_tick}
  __dodge_frames+=1
  __dodge_previous_mask=__dodge_mask
- __dodge_remaining-=1
- if __dodge_remaining<=0 then
-  __dodge_command+=1
-  local next_command=__dodge_commands[__dodge_command]
-  if next_command then
-   __dodge_remaining=next_command[2]
-  else
-   local started=hasplayed and "true" or "false"
-   local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
-   result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
-   result=result.."|"..started
-   printh(result)
-   exit()
+ if isdead then
+  __dodge_finish()
+ end
+ if command then
+  __dodge_remaining-=1
+  if __dodge_remaining<=0 then
+   __dodge_command+=1
+   local next_command=__dodge_commands[__dodge_command]
+   if next_command then
+    __dodge_remaining=next_command[2]
+   end
   end
  end
 end
@@ -136,22 +153,28 @@ def run_headless(
     seed: int,
     source: Path = CARTRIDGE_PATH,
     runner: Runner = subprocess.run,
+    timeout: float | None = None,
+    render: bool = False,
 ) -> HeadlessResult:
     try:
         original = source.read_text(encoding="utf-8")
-        instrumented = instrument_cartridge(original, commands, seed=seed)
+        instrumented = instrument_cartridge(
+            original, commands, seed=seed, render=render
+        )
     except OSError as error:
         raise ControlRuntimeError(f"could not read cartridge: {error}") from error
 
-    frame_count = sum(duration_to_frames(command.duration_ms) for command in commands)
-    timeout = max(5.0, frame_count / 60 + 5.0)
     environment = os.environ.copy()
-    environment["SDL_VIDEODRIVER"] = "dummy"
-    environment["SDL_AUDIODRIVER"] = "dummy"
+    environment["SDL_VIDEODRIVER"] = "x11" if render else "dummy"
+    if render:
+        environment.pop("SDL_AUDIODRIVER", None)
+    else:
+        environment["SDL_AUDIODRIVER"] = "dummy"
 
-    with tempfile.TemporaryDirectory(prefix="dodge-headless-") as directory:
+    mode = "replay" if render else "headless"
+    with tempfile.TemporaryDirectory(prefix=f"dodge-{mode}-") as directory:
         workspace = Path(directory)
-        cartridge = workspace / "dodge-headless.p8"
+        cartridge = workspace / f"dodge-{mode}.p8"
         try:
             cartridge.write_text(instrumented, encoding="utf-8")
             completed = runner(
@@ -170,8 +193,9 @@ def run_headless(
             stdout = _timeout_text(error.stdout)
             detail = stderr.strip() or stdout.strip()
             suffix = f": {detail}" if detail else ""
+            timeout_text = f"{timeout:g}" if timeout is not None else "unbounded"
             raise ControlRuntimeError(
-                f"headless run timed out after {timeout:g}s{suffix}"
+                f"Dodge run timed out after {timeout_text}s{suffix}"
             ) from error
         except OSError as error:
             message = f"could not run headless Pemsa: {error}"
@@ -193,9 +217,14 @@ def run_headless(
 
     payload = result_lines[0][len(RESULT_PREFIX) :].strip()
     try:
-        score_raw, frames_raw, survival_frames_raw, seed_raw, started_raw = (
-            payload.split("|")
-        )
+        (
+            score_raw,
+            frames_raw,
+            survival_frames_raw,
+            seed_raw,
+            started_raw,
+            died_raw,
+        ) = payload.split("|")
         score = json.loads(score_raw)
         frames = int(frames_raw)
         survival_frames = int(survival_frames_raw)
@@ -206,6 +235,8 @@ def run_headless(
             raise ValueError("survival_frames is negative")
         if started_raw not in {"true", "false"}:
             raise ValueError("started is not boolean")
+        if died_raw != "true":
+            raise ValueError("died is not true")
     except (ValueError, json.JSONDecodeError) as error:
         message = "headless Pemsa produced an invalid result"
         raise ControlRuntimeError(message) from error
@@ -216,7 +247,19 @@ def run_headless(
         "survival_frames": survival_frames,
         "seed": result_seed,
         "started": started_raw == "true",
+        "died": True,
     }
+
+
+def replay_commands(
+    commands: list[MovementCommand],
+    *,
+    seed: int,
+    source: Path = CARTRIDGE_PATH,
+    runner: Runner = subprocess.run,
+) -> HeadlessResult:
+    """Show an input-simulated winner replay; physical keyboard input is ignored."""
+    return run_headless(commands, seed=seed, source=source, runner=runner, render=True)
 
 
 def _timeout_text(value: str | bytes | None) -> str:

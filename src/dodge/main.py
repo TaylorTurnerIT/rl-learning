@@ -2,6 +2,7 @@ from copy import deepcopy
 
 from dodge.agent.agent import Agent
 from dodge.agent.brain import Brain
+from dodge.headless import replay_commands
 
 
 def main():
@@ -37,6 +38,11 @@ def main():
         if best_agent is not None:
             print(best_agent[1])
         epoch += 1
+        if epoch == 2:
+            done = True
+    if best_agent is not None:
+        winner = agents[best_agent[0]]
+        replay_commands(winner.brain.parse_actions(), seed=42)
     return 0
 
 

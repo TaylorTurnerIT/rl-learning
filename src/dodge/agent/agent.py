@@ -16,7 +16,9 @@ class Agent:
         self.state: State = State.ALIVE
 
     def run_actions(self) -> HeadlessResult:
-        return run_headless(commands=self.brain.parse_actions(), seed=42)
+        result = run_headless(commands=self.brain.parse_actions(), seed=42)
+        self.state = State.DEAD if result["died"] else State.ALIVE
+        return result
 
     def calculate_fitness(self, result: HeadlessResult) -> int:
         return int(result["survival_frames"])

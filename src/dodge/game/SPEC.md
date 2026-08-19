@@ -20,6 +20,7 @@ C11: headless input duration → `ceil(duration_ms*60/1000)` game frames.
 C12: ∀ headless run → unique temp cartridge + cwd + `.cartdata`; safe process parallelism.
 C13: prebuilt Pemsa remains 60 Hz; ⊥ promise faster-than-real-time simulation.
 C14: full visible world-state JSON deferred to T10.
+C15: headless episode ends only on cartridge death; post-command input → neutral.
 
 §I
 
@@ -34,7 +35,8 @@ keys: `x|left|right|up|down` → keyboard `x|Left|Right|Up|Down` → PICO-8 `❎
 start: first JSON command ! `x`; controller ⊥ hidden start key.
 example: `src/dodge/game/movements.json` → valid runnable movement list.
 cli: `just dodge-headless <commands.json|-> [--seed N]` → stdout one JSON result.
-result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started":bool}`.
+result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started":bool,"died":bool}`.
+py: `replay_commands(commands, seed)` → visible Pemsa replay; command input only.
 
 §R
 
@@ -70,6 +72,8 @@ V22: headless `survival_frames` → live `updategame` frames before death; ⊥ m
 V23: Agent fitness → headless `survival_frames`; ⊥ cartridge `score`.
 V24: `dodge.control.main` → `control` CLI behavior.
 V25: headless mode advances cartridge transitions without calling cartridge `_draw`.
+V26: headless final input → neutral frames until cartridge death; success result `died:true`.
+V27: winner replay → visible Pemsa + instrumented command input; ⊥ keyboard injection.
 
 §T
 
@@ -86,6 +90,7 @@ T9|x|add isolated headless command runner + score JSON|V1,V10,V11,V13,V14,V15,V1
 T10|.|expose per-frame visible world state as JSON|V14,V15,C14
 T11|x|add headless survival telemetry + agent fitness|V22,V23,V25,I.result
 T12|x|retain `dodge.control.main` compatibility alias|V24
+T13|x|end episode on death + replay winner visually|V26,V27,C15,I.result,I.py
 
 §B
 

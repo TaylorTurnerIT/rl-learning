@@ -12,6 +12,7 @@ from dodge.headless import (
     RESULT_PREFIX,
     duration_to_frames,
     instrument_cartridge,
+    replay_commands,
     run_headless,
 )
 
@@ -67,6 +68,20 @@ def test_instrumented_cartridge_seeds_inputs_and_disables_draw() -> None:
     assert result.endswith("__gfx__\n")
 
 
+def test_instrumented_cartridge_preserves_draw_for_visible_replay() -> None:
+    source = (
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\n score=0\nend\n"
+        "function _update60()\nend\n"
+        "function _draw()\n cls()\nend\n__gfx__\n"
+    )
+
+    result = instrument_cartridge(source, COMMANDS, seed=42, render=True)
+
+    assert result.count("function _draw()") == 1
+    assert "function __dodge_advance_transition()" not in result
+
+
 def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
     tmp_path: Path,
 ) -> None:
@@ -94,10 +109,11 @@ def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
         assert environment["SDL_AUDIODRIVER"] == "dummy"
         assert kwargs["encoding"] == "utf-8"
         assert kwargs["errors"] == "replace"
+        assert kwargs["timeout"] is None
         return subprocess.CompletedProcess(
             arguments,
             0,
-            f"noise\n{RESULT_PREFIX}1.5|54|12|42|true\t\n",
+            f"noise\n{RESULT_PREFIX}1.5|54|12|42|true|true\t\n",
             "",
         )
 
@@ -109,10 +125,36 @@ def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
         "survival_frames": 12,
         "seed": 42,
         "started": True,
+        "died": True,
     }
     assert source.read_text() == original
     assert not Path(str(observed["workspace"])).exists()
     assert not Path(str(observed["cartridge"])).exists()
+
+
+def test_replay_commands_uses_visible_instrumented_input(tmp_path: Path) -> None:
+    source = tmp_path / "source.p8"
+    source.write_text(
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\n score=0\nend\n"
+        "function _update60()\nend\n"
+        "function _draw()\nend\n__gfx__\n"
+    )
+
+    def runner(
+        arguments: list[object], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert environment["SDL_VIDEODRIVER"] == "x11"
+        assert environment.get("SDL_AUDIODRIVER") != "dummy"
+        cartridge = Path(arguments[1])
+        assert "function _draw()\nend" in cartridge.read_text()
+        return subprocess.CompletedProcess(
+            arguments, 0, f"{RESULT_PREFIX}0|2|1|42|true|true\n", ""
+        )
+
+    assert replay_commands(COMMANDS, seed=42, source=source, runner=runner)["died"]
 
 
 def test_run_headless_rejects_missing_result(tmp_path: Path) -> None:
@@ -138,6 +180,7 @@ def test_headless_result_is_json_serializable() -> None:
         "survival_frames": 40,
         "seed": 42,
         "started": True,
+        "died": True,
     }
 
     assert json.loads(json.dumps(result)) == result
