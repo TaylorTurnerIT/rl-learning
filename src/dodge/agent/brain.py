@@ -7,7 +7,7 @@ from dodge.control import DIRECTION_KEYS, MovementCommand, parse_commands
 
 class Brain:
     def __init__(self, mutation_chance: float):
-        starting_action_count = 3
+        starting_action_count = 6
         self.options: list[str] = list(DIRECTION_KEYS)
         self.options.remove("x")
         self.options.remove("neutral")
