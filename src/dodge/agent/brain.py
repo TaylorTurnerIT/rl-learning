@@ -7,7 +7,7 @@ from dodge.control import DIRECTION_KEYS, MovementCommand, parse_commands
 
 class Brain:
     def __init__(self, mutation_chance: float):
-        starting_action_count = 20
+        starting_action_count = 30
         self.options: list[str] = list(DIRECTION_KEYS)
         self.options.remove("x")
         self.options.remove("neutral")
@@ -27,14 +27,14 @@ class Brain:
     def parse_actions(self) -> list[MovementCommand]:
         raw_commands = [
             {"move": "x", "duration_ms": 50},
-            {"move": "neutral", "duration_ms": 750},
+            {"move": "neutral", "duration_ms": 300},
         ]
 
         for direction in self.actions:
             raw_commands.append(
                 {
                     "move": direction,
-                    "duration_ms": 100,
+                    "duration_ms": 200,
                 }
             )
 
