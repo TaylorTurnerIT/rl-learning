@@ -39,6 +39,9 @@ result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started"
 py: `replay_commands(commands, seed)` → visible Pemsa replay; command input only.
 history: `history/dodge/*.json` → winner seed, fitness, commands, epoch count, replay result.
 cli: `just dodge-replay <history.json>` → visible controls-disabled replay from saved winner.
+history: `history/dodge/run-*/epoch-*.json` → per-epoch winner + headless result.
+cli: `just dodge-replay-run <history-dir>` → visible per-epoch replay sequence.
+cli: `just dodge-replay-latest` → visible replay sequence for newest saved run.
 
 §R
 
@@ -81,6 +84,9 @@ V29: completed training replay → saved local history JSON with exact commands 
 V30: `dodge-replay` validates saved history JSON before visible replay; ⊥ keyboard injection.
 V31: same commands + seed + initial cartridge → headless and visible replay result JSON equal.
 V32: replay renderer ⊥ advance gameplay RNG or read host mouse state.
+V33: training run creates one history directory; each evaluated epoch writes its own winner before mutation.
+V34: replay-run replays epoch files ordered by epoch and fails on visible/headless result mismatch.
+V35: replay-latest selects newest valid `run-*` directory; absent run → fail before replay.
 
 §T
 
@@ -101,6 +107,8 @@ T13|x|end episode on death + replay winner visually|V26,V27,C15,I.result,I.py
 T14|x|parallelize agent evaluation per epoch|V19,V28
 T15|x|save winner history + replay history command|V29,V30,I.history,I.cli
 T16|x|unify headless and visible replay simulation state|V31,V32
+T17|x|save per-epoch winners + replay run sequence|V33,V34,I.history,I.cli
+T18|x|replay newest run command|V35,I.cli
 
 §B
 

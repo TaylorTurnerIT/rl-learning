@@ -45,6 +45,16 @@
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec python -m dodge.history "$@"
     '';
+    dodge-replay-run.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec python -m dodge.history replay-run "$@"
+    '';
+    dodge-replay-latest.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec python -m dodge.history replay-latest "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

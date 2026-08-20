@@ -8,13 +8,13 @@ from dodge.control import MovementCommand
 from dodge.main import evaluate_epoch
 
 
-def test_brain_commands_wait_for_menu_transition() -> None:
+def test_brain_commands_include_menu_start() -> None:
     brain = Brain(0.1)
     brain.actions = ["left", "up_right"]
 
     assert brain.parse_actions()[:2] == [
         MovementCommand("x", 50),
-        MovementCommand("neutral", 750),
+        MovementCommand("neutral", 300),
     ]
 
 

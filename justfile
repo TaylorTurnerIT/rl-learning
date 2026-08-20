@@ -37,3 +37,11 @@ dodge-headless commands *options:
 [group("dodge")]
 dodge-replay history:
     devenv shell -- dodge-replay {{history}}
+
+[group("dodge")]
+dodge-replay-run history:
+    devenv shell -- dodge-replay-run {{history}}
+
+[group("dodge")]
+dodge-replay-latest:
+    devenv shell -- dodge-replay-latest

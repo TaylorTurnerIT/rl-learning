@@ -28,13 +28,16 @@ class Brain:
         raw_commands = [
             {"move": "x", "duration_ms": 50},
             {"move": "neutral", "duration_ms": 300},
+            {"move": "up", "duration_ms": 100},
+            {"move": "down", "duration_ms": 100},
+            {"move": "neutral", "duration_ms": 3000},
         ]
 
         for direction in self.actions:
             raw_commands.append(
                 {
                     "move": direction,
-                    "duration_ms": 200,
+                    "duration_ms": 500,
                 }
             )
 
