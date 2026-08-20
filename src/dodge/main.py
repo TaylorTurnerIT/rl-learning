@@ -5,6 +5,7 @@ from copy import deepcopy
 from dodge.agent.agent import Agent
 from dodge.agent.brain import Brain
 from dodge.headless import HeadlessResult, replay_commands
+from dodge.history import save_winner
 
 
 def evaluate_epoch(
@@ -15,8 +16,8 @@ def evaluate_epoch(
 
 def main():
     # Initialize config
-    population: int = 10
-    mutation_chance: float = 0.1
+    population: int = 15
+    mutation_chance: float = 0.2
 
     # Create brain
     starting_brain: Brain = Brain(mutation_chance)
@@ -24,7 +25,7 @@ def main():
     # Create agents
     agents: list[Agent] = []
     epoch = 1
-    max_epoch = 50
+    max_epoch = 5
     best_agent: tuple[int, int] | None = None
     done = False
     worker_count = min(population, os.cpu_count() or 1)
@@ -40,20 +41,20 @@ def main():
             for id, (agent, result) in enumerate(zip(agents, results, strict=True)):
                 fitness = agent.calculate_fitness(result)
 
-                print(
-                    id + 1,
-                    "out of ",
-                    population,
-                    f"complete. score: {fitness} moves: ",
-                )
-                print(agent.brain.actions)
+                # print(
+                #     id + 1,
+                #     "out of ",
+                #     population,
+                #     f"complete. score: {fitness} moves: ",
+                # )
+                # print(agent.brain.actions)
 
                 if best_agent is None or fitness > best_agent[1]:
                     best_agent = (id, fitness)
 
                 # agents[id].brain.mutate_actions()
             if best_agent is not None:
-                print(best_agent[1])
+                print(f"epoch {epoch} best: {best_agent[1]}")
 
             # brain surgery
             if best_agent is not None:
@@ -75,7 +76,16 @@ def main():
             epoch += 1
     if best_agent is not None:
         winner = agents[best_agent[0]]
-        replay_commands(winner.brain.parse_actions(), seed=42)
+        commands = winner.brain.parse_actions()
+        replay_result = replay_commands(commands, seed=42)
+        history_path = save_winner(
+            commands,
+            seed=42,
+            fitness=best_agent[1],
+            epochs=epoch - 1,
+            replay_result=replay_result,
+        )
+        print(f"saved winner: {history_path}")
     return 0
 
 

@@ -40,6 +40,11 @@
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec python -m dodge.headless "$@"
     '';
+    dodge-replay.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec python -m dodge.history "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

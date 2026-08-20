@@ -33,3 +33,7 @@ dodge-control commands *options:
 [group("dodge")]
 dodge-headless commands *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-headless {{commands}} {{options}}
+
+[group("dodge")]
+dodge-replay history:
+    devenv shell -- dodge-replay {{history}}

@@ -37,6 +37,8 @@ example: `src/dodge/game/movements.json` → valid runnable movement list.
 cli: `just dodge-headless <commands.json|-> [--seed N]` → stdout one JSON result.
 result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started":bool,"died":bool}`.
 py: `replay_commands(commands, seed)` → visible Pemsa replay; command input only.
+history: `history/dodge/*.json` → winner seed, fitness, commands, epoch count, replay result.
+cli: `just dodge-replay <history.json>` → visible controls-disabled replay from saved winner.
 
 §R
 
@@ -75,6 +77,8 @@ V25: headless mode advances cartridge transitions without calling cartridge `_dr
 V26: headless final input → neutral frames until cartridge death; success result `died:true`.
 V27: winner replay → visible Pemsa + instrumented command input; ⊥ keyboard injection.
 V28: epoch dispatches each agent once concurrently; selection/mutation starts after all results return.
+V29: completed training replay → saved local history JSON with exact commands + seed + fitness.
+V30: `dodge-replay` validates saved history JSON before visible replay; ⊥ keyboard injection.
 
 §T
 
@@ -93,6 +97,7 @@ T11|x|add headless survival telemetry + agent fitness|V22,V23,V25,I.result
 T12|x|retain `dodge.control.main` compatibility alias|V24
 T13|x|end episode on death + replay winner visually|V26,V27,C15,I.result,I.py
 T14|x|parallelize agent evaluation per epoch|V19,V28
+T15|x|save winner history + replay history command|V29,V30,I.history,I.cli
 
 §B
 

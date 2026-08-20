@@ -15,3 +15,6 @@ build/
 
 # PICO-8-compatible runner persistence generated beside the project.
 /.cartdata/
+
+# Locally saved Dodge winner replays.
+/history/dodge/
