@@ -62,7 +62,7 @@ def test_instrumented_cartridge_seeds_inputs_and_disables_draw() -> None:
     assert "__dodge_game_update60=_update60" in result
     assert "__dodge_commands={{32,3},{0,45},{5,6}}" in result
     assert "function __dodge_advance_transition()" in result
-    assert "_upd=updategame" in result
+    assert "_upd,_drw=updategame,drawgame" in result
     assert "function _draw()\nend" in result
     assert RESULT_PREFIX in result
     assert result.endswith("__gfx__\n")
@@ -78,8 +78,14 @@ def test_instrumented_cartridge_preserves_draw_for_visible_replay() -> None:
 
     result = instrument_cartridge(source, COMMANDS, seed=42, render=True)
 
-    assert result.count("function _draw()") == 1
-    assert "function __dodge_advance_transition()" not in result
+    assert result.count("function _draw()") == 2
+    assert "__dodge_game_draw=_draw" in result
+    assert "__dodge_game_rnd=rnd" in result
+    assert "function __dodge_draw_rnd(max)" in result
+    assert "__dodge_game_stat=stat" in result
+    assert "function __dodge_advance_transition()" in result
+    assert "if _upd==updatetransition then" in result
+    assert "if _upd!=updatetransition then" in result
 
 
 def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(

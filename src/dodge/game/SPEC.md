@@ -79,6 +79,8 @@ V27: winner replay → visible Pemsa + instrumented command input; ⊥ keyboard 
 V28: epoch dispatches each agent once concurrently; selection/mutation starts after all results return.
 V29: completed training replay → saved local history JSON with exact commands + seed + fitness.
 V30: `dodge-replay` validates saved history JSON before visible replay; ⊥ keyboard injection.
+V31: same commands + seed + initial cartridge → headless and visible replay result JSON equal.
+V32: replay renderer ⊥ advance gameplay RNG or read host mouse state.
 
 §T
 
@@ -98,6 +100,7 @@ T12|x|retain `dodge.control.main` compatibility alias|V24
 T13|x|end episode on death + replay winner visually|V26,V27,C15,I.result,I.py
 T14|x|parallelize agent evaluation per epoch|V19,V28
 T15|x|save winner history + replay history command|V29,V30,I.history,I.cli
+T16|x|unify headless and visible replay simulation state|V31,V32
 
 §B
 
@@ -106,3 +109,5 @@ B1|2026-08-17|Pemsa window discovered before SDL X11 init settled|V9
 B2|2026-08-17|Pemsa glyph diagnostics contain invalid UTF-8 bytes|V21
 B3|2026-08-19|`main` renamed `control`; control tests/import callers broke|V24
 B4|2026-08-19|no-op headless `_draw` froze cartridge draw-driven transitions|V25
+B5|2026-08-20|visible draw-driven transition clock diverged from headless update clock|V31
+B6|2026-08-20|visible draw consumed gameplay RNG + host mouse state|V32

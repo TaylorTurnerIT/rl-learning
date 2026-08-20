@@ -64,20 +64,35 @@ def instrument_cartridge(
         f"{{{COMMAND_MASKS[command.move]},{duration_to_frames(command.duration_ms)}}}"
         for command in commands
     )
-    draw_override = "" if render else "function _draw()\nend\n\n"
-    transition_harness = (
-        ""
+    draw_override = (
+        """__dodge_game_draw=_draw
+__dodge_game_rnd=rnd
+function __dodge_draw_rnd(max)
+ if max then return max/2 end
+ return 0.5
+end
+function _draw()
+ if _upd!=updatetransition then
+  rnd=__dodge_draw_rnd
+  __dodge_game_draw()
+  rnd=__dodge_game_rnd
+ end
+end
+
+"""
         if render
-        else """function __dodge_advance_transition()
+        else "function _draw()\nend\n\n"
+    )
+    transition_harness = """function __dodge_advance_transition()
  trsy+=(target==2 and -10 or 10)
  if (target==2 and trsy<=-128) or (target!=2 and trsy>=128) then
   trsdone=true
   if target==0 then
-   _upd=updatemenu
+   _upd,_drw=updatemenu,drawmenu
   elseif target==1 then
-   _upd=updategame
+   _upd,_drw=updategame,drawgame
   else
-   _upd=updatesettings
+   _upd,_drw=updatesettings,drawsettings
   end
  else
   trsdone=false
@@ -85,11 +100,8 @@ def instrument_cartridge(
 end
 
 """
-    )
     transition_tick = (
-        ""
-        if render
-        else (" if _upd==updatetransition then\n  __dodge_advance_transition()\n end\n")
+        " if _upd==updatetransition then\n  __dodge_advance_transition()\n end\n"
     )
     harness = f'''__dodge_game_update60=_update60
 __dodge_commands={{{encoded_commands}}}
@@ -106,6 +118,12 @@ end
 
 function btnp(i)
  return btn(i) and flr(__dodge_previous_mask/(2^i))%2!=1
+end
+
+__dodge_game_stat=stat
+function stat(i)
+ if i==32 or i==33 or i==34 then return 0 end
+ return __dodge_game_stat(i)
 end
 
 {draw_override}{transition_harness}function __dodge_finish()
