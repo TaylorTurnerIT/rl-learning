@@ -143,12 +143,7 @@ def replay_run(directory: Path) -> list[HeadlessResult]:
     for index, path in enumerate(paths, start=1):
         epoch, commands, seed, expected = load_epoch(path)
         print(f"replaying epoch {epoch} ({index}/{len(paths)})")
-        result = replay_commands(commands, seed=seed)
-        if result != expected:
-            raise ControlRuntimeError(
-                f"epoch {epoch} replay diverged: expected {expected}, got {result}"
-            )
-        results.append(result)
+        results.append(_replay_epoch(epoch, commands, seed, expected))
     return results
 
 
@@ -163,8 +158,26 @@ def latest_run(directory: Path = HISTORY_DIRECTORY) -> Path:
     return runs[-1]
 
 
-def replay_latest_run(directory: Path = HISTORY_DIRECTORY) -> list[HeadlessResult]:
-    return replay_run(latest_run(directory))
+def replay_epoch(directory: Path, epoch: int) -> HeadlessResult:
+    if epoch < 1:
+        raise ControlInputError("epoch must be a positive integer")
+
+    path = directory / f"epoch-{epoch:04d}.json"
+    if not path.is_file():
+        raise ControlInputError(f"run history contains no epoch {epoch}")
+    saved_epoch, commands, seed, expected = load_epoch(path)
+    if saved_epoch != epoch:
+        raise ControlInputError(
+            f"epoch record {path.name} contains epoch {saved_epoch}"
+        )
+    print(f"replaying epoch {epoch}")
+    return _replay_epoch(epoch, commands, seed, expected)
+
+
+def replay_latest_run(
+    epoch: int, directory: Path = HISTORY_DIRECTORY
+) -> HeadlessResult:
+    return replay_epoch(latest_run(directory), epoch)
 
 
 def replay_run_main(argv: list[str] | None = None) -> int:
@@ -188,8 +201,9 @@ def replay_run_main(argv: list[str] | None = None) -> int:
 def replay_latest_run_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dodge-replay-latest",
-        description="Replay every epoch from the most recent saved Dodge run.",
+        description="Replay one epoch from the most recent saved Dodge run.",
     )
+    parser.add_argument("epoch", type=_positive_epoch, help="epoch number to replay")
     parser.add_argument(
         "--history-dir",
         type=Path,
@@ -199,12 +213,12 @@ def replay_latest_run_main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     try:
-        results = replay_latest_run(arguments.history_dir)
+        result = replay_latest_run(arguments.epoch, arguments.history_dir)
     except (ControlInputError, ControlRuntimeError) as error:
         print(f"dodge-replay-latest: {error}", file=sys.stderr)
         return 1
 
-    print(json.dumps(results, separators=(",", ":")))
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 
@@ -238,6 +252,30 @@ def _commands_json(commands: list[MovementCommand]) -> list[dict[str, str | int]
         {"move": command.move, "duration_ms": command.duration_ms}
         for command in commands
     ]
+
+
+def _positive_epoch(value: str) -> int:
+    try:
+        epoch = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("epoch must be a positive integer") from error
+    if epoch < 1:
+        raise argparse.ArgumentTypeError("epoch must be a positive integer")
+    return epoch
+
+
+def _replay_epoch(
+    epoch: int,
+    commands: list[MovementCommand],
+    seed: int,
+    expected: HeadlessResult,
+) -> HeadlessResult:
+    result = replay_commands(commands, seed=seed)
+    if result != expected:
+        raise ControlRuntimeError(
+            f"epoch {epoch} replay diverged: expected {expected}, got {result}"
+        )
+    return result
 
 
 def _load_record(path: Path) -> dict[str, object]:

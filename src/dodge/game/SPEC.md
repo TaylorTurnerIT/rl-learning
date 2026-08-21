@@ -41,7 +41,7 @@ history: `history/dodge/*.json` → winner seed, fitness, commands, epoch count,
 cli: `just dodge-replay <history.json>` → visible controls-disabled replay from saved winner.
 history: `history/dodge/run-*/epoch-*.json` → per-epoch winner + headless result.
 cli: `just dodge-replay-run <history-dir>` → visible per-epoch replay sequence.
-cli: `just dodge-replay-latest` → visible replay sequence for newest saved run.
+cli: `just dodge-replay-latest <epoch>` → visible replay requested epoch from newest saved run.
 
 §R
 
@@ -87,6 +87,7 @@ V32: replay renderer ⊥ advance gameplay RNG or read host mouse state.
 V33: training run creates one history directory; each evaluated epoch writes its own winner before mutation.
 V34: replay-run replays epoch files ordered by epoch and fails on visible/headless result mismatch.
 V35: replay-latest selects newest valid `run-*` directory; absent run → fail before replay.
+V36: replay-latest `<epoch>` → only matching saved epoch; invalid or absent epoch → fail before Pemsa.
 
 §T
 
@@ -109,6 +110,7 @@ T15|x|save winner history + replay history command|V29,V30,I.history,I.cli
 T16|x|unify headless and visible replay simulation state|V31,V32
 T17|x|save per-epoch winners + replay run sequence|V33,V34,I.history,I.cli
 T18|x|replay newest run command|V35,I.cli
+T19|x|replay requested epoch from newest run|V36,I.cli
 
 §B
 
@@ -119,3 +121,4 @@ B3|2026-08-19|`main` renamed `control`; control tests/import callers broke|V24
 B4|2026-08-19|no-op headless `_draw` froze cartridge draw-driven transitions|V25
 B5|2026-08-20|visible draw-driven transition clock diverged from headless update clock|V31
 B6|2026-08-20|visible draw consumed gameplay RNG + host mouse state|V32
+B7|2026-08-20|new replay lines exceeded Ruff width|mechanical wrap

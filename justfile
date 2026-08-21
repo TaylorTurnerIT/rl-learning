@@ -43,5 +43,5 @@ dodge-replay-run history:
     devenv shell -- dodge-replay-run {{history}}
 
 [group("dodge")]
-dodge-replay-latest:
-    devenv shell -- dodge-replay-latest
+dodge-replay-latest epoch:
+    devenv shell -- dodge-replay-latest {{epoch}}

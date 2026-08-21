@@ -159,16 +159,29 @@ def test_replay_latest_run_selects_newest_run(monkeypatch, tmp_path, capsys) -> 
         directory=tmp_path,
         created_at=datetime(2026, 8, 20, 13, 0, tzinfo=UTC),
     )
-    replayed: list[object] = []
+    save_epoch(
+        COMMANDS,
+        epoch=2,
+        seed=42,
+        fitness=90,
+        global_best_fitness=90,
+        headless_result=REPLAY_RESULT,
+        directory=newer,
+    )
     monkeypatch.setattr(
-        "dodge.history.replay_run",
-        lambda directory: replayed.append(directory) or [REPLAY_RESULT],
+        "dodge.history.replay_commands", lambda commands, **_: REPLAY_RESULT
     )
 
     assert latest_run(tmp_path) == newer
-    assert replay_latest_run_main(["--history-dir", str(tmp_path)]) == 0
-    assert replayed == [newer]
-    assert json.loads(capsys.readouterr().out) == [REPLAY_RESULT]
+    assert replay_latest_run_main(["2", "--history-dir", str(tmp_path)]) == 0
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "replaying epoch 2",
+        json.dumps(REPLAY_RESULT, separators=(",", ":")),
+    ]
+
+    assert replay_latest_run_main(["1", "--history-dir", str(tmp_path)]) == 1
+    assert "contains no epoch 1" in capsys.readouterr().err
 
     older.joinpath("run.json").unlink()
     newer.joinpath("run.json").unlink()
