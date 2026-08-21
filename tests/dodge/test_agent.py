@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dodge.agent.agent import Agent, State
 from dodge.agent.brain import Brain
 from dodge.control import MovementCommand
-from dodge.main import evaluate_epoch
+from dodge.main import breed_next_generation, evaluate_epoch, rank_agents
 
 
 def test_brain_commands_include_menu_start() -> None:
@@ -79,3 +79,37 @@ def test_evaluate_epoch_runs_each_agent_once(monkeypatch) -> None:
         results = evaluate_epoch(agents, executor)
 
     assert results == [expected[id(agent)] for agent in agents]
+
+
+def test_breed_next_generation_preserves_five_ranked_elites() -> None:
+    directions = ["left", "right", "up", "down", "up_left"]
+    agents = [Agent(Brain(0)) for _ in range(10)]
+    for agent, direction in zip(agents, directions * 2, strict=True):
+        agent.brain.actions = [direction]
+
+    results = [
+        {
+            "score": 0,
+            "frames": 10,
+            "survival_frames": 10 - id,
+            "seed": 42,
+            "started": True,
+            "died": True,
+        }
+        for id in range(10)
+    ]
+
+    ranked_agents = rank_agents(agents, results)
+    assert [id for id, _ in ranked_agents[:5]] == [0, 1, 2, 3, 4]
+
+    breed_next_generation(agents, ranked_agents)
+
+    assert [agent.brain.actions for agent in agents[:5]] == [
+        [direction] for direction in directions
+    ]
+    for id, agent in enumerate(agents[5:], start=5):
+        assert agent.brain.actions[0] == directions[id % 5]
+        assert len(agent.brain.actions) == 2
+
+    agents[5].brain.actions[0] = "down_right"
+    assert agents[0].brain.actions == ["left"]

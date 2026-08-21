@@ -7,6 +7,8 @@ from dodge.agent.brain import Brain
 from dodge.headless import HeadlessResult, replay_commands
 from dodge.history import create_run, save_epoch, save_winner
 
+ELITE_COUNT = 5
+
 
 def evaluate_epoch(
     agents: list[Agent], executor: ThreadPoolExecutor
@@ -14,10 +16,42 @@ def evaluate_epoch(
     return list(executor.map(Agent.run_actions, agents))
 
 
+def rank_agents(
+    agents: list[Agent], results: list[HeadlessResult]
+) -> list[tuple[int, int]]:
+    return sorted(
+        (
+            (id, agent.calculate_fitness(result))
+            for id, (agent, result) in enumerate(zip(agents, results, strict=True))
+        ),
+        key=lambda candidate: candidate[1],
+        reverse=True,
+    )
+
+
+def breed_next_generation(
+    agents: list[Agent],
+    ranked_agents: list[tuple[int, int]],
+    elite_count: int = ELITE_COUNT,
+) -> None:
+    parent_count = min(elite_count, len(ranked_agents))
+    if parent_count == 0:
+        return
+
+    elite_brains = [
+        deepcopy(agents[id].brain) for id, _ in ranked_agents[:parent_count]
+    ]
+    for id, agent in enumerate(agents):
+        agent.reset()
+        agent.brain = deepcopy(elite_brains[id % parent_count])
+        if id >= parent_count:
+            agent.brain.mutate_actions()
+
+
 def main():
     # Initialize config
     population: int = 100
-    mutation_chance: float = 0.2
+    mutation_chance: float = 0.05
 
     # Create brain
     starting_brain: Brain = Brain(mutation_chance)
@@ -26,7 +60,8 @@ def main():
     agents: list[Agent] = []
     epoch = 1
     max_epoch = 100
-    best_agent: tuple[int, int] | None = None
+    best_brain: Brain | None = None
+    best_fitness: int | None = None
     done = False
     run_directory = create_run(
         seed=42,
@@ -44,68 +79,40 @@ def main():
                     agents.append(Agent(brain=brain))
 
             results = evaluate_epoch(agents, executor)
-            epoch_best: tuple[int, int] | None = None
-            for id, (agent, result) in enumerate(zip(agents, results, strict=True)):
-                fitness = agent.calculate_fitness(result)
+            ranked_agents = rank_agents(agents, results)
+            epoch_best = ranked_agents[0]
+            if best_fitness is None or epoch_best[1] > best_fitness:
+                best_brain = deepcopy(agents[epoch_best[0]].brain)
+                best_fitness = epoch_best[1]
 
-                # print(
-                #     id + 1,
-                #     "out of ",
-                #     population,
-                #     f"complete. score: {fitness} moves: ",
-                # )
-                # print(agent.brain.actions)
-
-                if best_agent is None or fitness > best_agent[1]:
-                    best_agent = (id, fitness)
-                if epoch_best is None or fitness > epoch_best[1]:
-                    epoch_best = (id, fitness)
-
-                # agents[id].brain.mutate_actions()
-            if epoch_best is not None and best_agent is not None:
+            if best_fitness is not None:
                 print(
-                    f"epoch {epoch} best: {epoch_best[1]} "
-                    f"(global best: {best_agent[1]})"
+                    f"epoch {epoch} best: {epoch_best[1]} (global best: {best_fitness})"
                 )
 
-            if epoch_best is not None and best_agent is not None:
+            if best_fitness is not None:
                 epoch_agent = agents[epoch_best[0]]
                 save_epoch(
                     epoch_agent.brain.parse_actions(),
                     epoch=epoch,
                     seed=42,
                     fitness=epoch_best[1],
-                    global_best_fitness=best_agent[1],
+                    global_best_fitness=best_fitness,
                     headless_result=results[epoch_best[0]],
                     directory=run_directory,
                 )
 
-            # brain surgery
-            if best_agent is not None:
-                elite_id = best_agent[0]
-                elite_brain = deepcopy(agents[elite_id].brain)
-
-                for id, agent in enumerate(agents):
-                    agent.reset()
-
-                    if id == elite_id:
-                        agent.brain = elite_brain
-                        continue
-
-                    child_brain = deepcopy(elite_brain)
-                    child_brain.mutate_actions()
-                    agent.brain = child_brain
+            breed_next_generation(agents, ranked_agents)
             if epoch == max_epoch:
                 done = True
             epoch += 1
-    if best_agent is not None:
-        winner = agents[best_agent[0]]
-        commands = winner.brain.parse_actions()
+    if best_brain is not None and best_fitness is not None:
+        commands = best_brain.parse_actions()
         replay_result = replay_commands(commands, seed=42)
         history_path = save_winner(
             commands,
             seed=42,
-            fitness=best_agent[1],
+            fitness=best_fitness,
             epochs=epoch - 1,
             replay_result=replay_result,
             directory=run_directory,
