@@ -49,6 +49,7 @@ V10: bridge discovers input window after game-ready boundary; ⊥ transient star
 V11: diagonal action → matching simultaneous directional mask across exact step frames.
 V12: bridge serializes action bits while game paused; completed bit mask starts next exact step.
 V13: ∀ consecutive actions → final collection press clears physical-held state before game frames advance.
+V14: NEAT CLI recipes launch through `uv run` so declared Python dependencies are importable.
 
 §T
 
@@ -73,3 +74,4 @@ B8|2026-08-21|user-modified GA mutation invalidated fixed-length elite test|excl
 B9|2026-08-21|new evaluator missed Ruff import and assignment rules|mechanical format
 B10|2026-08-21|Python formatter was applied to Nix and Just files|format Python scope only
 B11|2026-08-21|final action press remained held into the next decision boundary|V13
+B12|2026-08-21|NEAT devenv recipes bypassed the project uv environment|V14

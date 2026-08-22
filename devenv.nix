@@ -59,12 +59,12 @@
     dodge-neat-train.exec = ''
       export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
-      exec python -m dodge.neat.train "$@"
+      exec uv run python -m dodge.neat.train "$@"
     '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
-      exec python -m dodge.neat.replay "$@"
+      exec uv run python -m dodge.neat.replay "$@"
     '';
   };
 
