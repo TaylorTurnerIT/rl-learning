@@ -17,6 +17,7 @@ C8: episode ends only cartridge death; ⊥ arbitrary survival cap.
 C9: fixed NEAT projection = player + 16 enemies + 8 AOEs; raw state retains all entities.
 C10: overflow telemetry ! report; ⊥ fail episode.
 C11: existing uncommitted `src/dodge/neat/config-xor` + `neat-testing.py` ⊥ overwrite.
+C12: train workers default ≤8; `--workers` selects positive process count.
 
 §I
 
@@ -28,6 +29,7 @@ json: projection → fixed numeric vector, zero slots use `present=0`.
 json: episode history → seed, config, action trace, result, overflow telemetry.
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
+cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
 
 §R
 
@@ -52,6 +54,7 @@ V12: bridge serializes action bits while game paused; completed bit mask starts 
 V13: ∀ consecutive actions → final collection press clears physical-held state before game frames advance.
 V14: NEAT CLI recipes launch through `uv run` so declared Python dependencies are importable.
 V15: ∀ generation → report completed genomes; end → report best fitness + compact topology and strongest edges.
+V16: parallel worker result equals sequential per-genome 3-seed contract; parent writes history after worker result.
 
 §T
 
@@ -62,6 +65,7 @@ T3|x|add `DodgeEnv` reset/step + episode history|V1,V2,V5,V6,I.py,I.json
 T4|x|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
 T5|x|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 T6|x|add NEAT training progress + compact network summary|V15,I.cli
+T7|x|parallelize NEAT genome evaluation|V7,V16,I.cli
 
 §B
 
@@ -78,3 +82,5 @@ B9|2026-08-21|new evaluator missed Ruff import and assignment rules|mechanical f
 B10|2026-08-21|Python formatter was applied to Nix and Just files|format Python scope only
 B11|2026-08-21|final action press remained held into the next decision boundary|V13
 B12|2026-08-21|NEAT devenv recipes bypassed the project uv environment|V14
+B13|2026-08-21|parallel evaluator imports and test task access missed Ruff rules|mechanical format
+B14|2026-08-21|spawn test import order missed Ruff rule|mechanical format

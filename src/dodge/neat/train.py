@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from dodge.neat.environment import NEAT_HISTORY_DIRECTORY
-from dodge.neat.evaluator import DodgeEvaluator
+from dodge.neat.evaluator import DodgeEvaluator, default_worker_count
 
 DEFAULT_CONFIG = Path(__file__).with_name("config-dodge")
 
@@ -22,6 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step-frames", type=_step_frames, default=4)
     parser.add_argument("--enemy-slots", type=_positive, default=16)
     parser.add_argument("--aoe-slots", type=_positive, default=8)
+    parser.add_argument(
+        "--workers",
+        type=_positive,
+        default=default_worker_count(),
+        help="concurrent genome workers (default: up to 8 CPU cores)",
+    )
     arguments = parser.parse_args(argv)
 
     import neat
@@ -40,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         aoe_slots=arguments.aoe_slots,
         history_directory=run_directory,
         progress=print,
+        workers=arguments.workers,
     )
     population = neat.Population(config)
     population.add_reporter(neat.StdOutReporter(True))
@@ -70,6 +77,7 @@ def _write_run_record(
         "step_frames": arguments.step_frames,
         "enemy_slots": arguments.enemy_slots,
         "aoe_slots": arguments.aoe_slots,
+        "workers": arguments.workers,
         "last_seed_bank": list(last_generation.seeds) if last_generation else [],
         "winner": str(winner),
     }

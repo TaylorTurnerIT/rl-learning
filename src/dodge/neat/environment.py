@@ -187,13 +187,14 @@ class DodgeEnv:
         directory: Path = NEAT_HISTORY_DIRECTORY,
         *,
         created_at: datetime | None = None,
+        filename: str | None = None,
     ) -> Path:
-        trace = self.episode_trace
-        timestamp = created_at or datetime.now(UTC)
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"episode-{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}.json"
-        _write_json(path, trace.to_json())
-        return path
+        return save_episode_trace(
+            self.episode_trace,
+            directory,
+            created_at=created_at,
+            filename=filename,
+        )
 
     def close(self) -> None:
         if self._bridge is not None:
@@ -268,6 +269,23 @@ def load_episode(path: Path) -> EpisodeTrace:
     if trace.result.seed != trace.seed or not trace.result.died:
         raise ControlInputError("NEAT episode has inconsistent terminal result")
     return trace
+
+
+def save_episode_trace(
+    trace: EpisodeTrace,
+    directory: Path = NEAT_HISTORY_DIRECTORY,
+    *,
+    created_at: datetime | None = None,
+    filename: str | None = None,
+) -> Path:
+    timestamp = created_at or datetime.now(UTC)
+    directory.mkdir(parents=True, exist_ok=True)
+    name = filename or f"episode-{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}.json"
+    path = directory / name
+    if path.exists():
+        raise FileExistsError(f"NEAT episode history already exists: {path}")
+    _write_json(path, trace.to_json())
+    return path
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import os
 import secrets
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Protocol
 
 from dodge.neat.bridge import Direction
-from dodge.neat.environment import DodgeEnv, EpisodeTrace
+from dodge.neat.environment import DodgeEnv, EpisodeTrace, save_episode_trace
 
 ACTIONS: tuple[Direction, ...] = (
     "neutral",
@@ -31,6 +34,7 @@ NetworkFactory = Callable[[object, object], Network]
 EnvironmentFactory = Callable[..., DodgeEnv]
 SeedBankFactory = Callable[[], tuple[int, int, int]]
 ProgressReporter = Callable[[str], None]
+ParallelExecutorFactory = Callable[[int], ProcessPoolExecutor]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +46,17 @@ class GenerationEvaluation:
     best_genome_id: int | None
     best_fitness: float | None
     network_summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class GenomeEvaluationTask:
+    genome_id: int
+    genome: object
+    config: object
+    seeds: tuple[int, int, int]
+    step_frames: int
+    enemy_slots: int
+    aoe_slots: int
 
 
 class DodgeEvaluator:
@@ -58,7 +73,15 @@ class DodgeEvaluator:
         network_factory: NetworkFactory | None = None,
         seed_bank_factory: SeedBankFactory | None = None,
         progress: ProgressReporter | None = None,
+        workers: int = 1,
+        parallel_executor_factory: ParallelExecutorFactory | None = None,
     ) -> None:
+        if workers < 1:
+            raise ValueError("workers must be positive")
+        if workers > 1 and (
+            environment_factory is not DodgeEnv or network_factory is not None
+        ):
+            raise ValueError("parallel evaluation requires default Dodge environment")
         self.step_frames = step_frames
         self.enemy_slots = enemy_slots
         self.aoe_slots = aoe_slots
@@ -67,6 +90,8 @@ class DodgeEvaluator:
         self._network_factory = network_factory or _neat_network
         self._seed_bank_factory = seed_bank_factory or fresh_seed_bank
         self._progress = progress
+        self._parallel_executor_factory = parallel_executor_factory
+        self.workers = workers
         self.generation = 0
         self.last_generation: GenerationEvaluation | None = None
 
@@ -76,28 +101,29 @@ class DodgeEvaluator:
         seeds = self._seed_bank_factory()
         self._report(
             f"generation {generation}: evaluating {len(genome_items)} genomes "
-            f"on seeds {list(seeds)}"
+            f"on seeds {list(seeds)} with {self.workers} worker(s)"
         )
         results: dict[int, float] = {}
         traces: dict[int, tuple[EpisodeTrace, ...]] = {}
-        for completed, (genome_id, genome) in enumerate(genome_items, start=1):
-            network = self._network_factory(genome, config)
-            genome_traces = tuple(
-                self._evaluate_episode(network, seed) for seed in seeds
-            )
-            fitness = (
-                sum(trace.result.survival_frames for trace in genome_traces)
-                / SEED_BANK_SIZE
-            )
-            genome.fitness = fitness
-            results[genome_id] = fitness
-            traces[genome_id] = genome_traces
-            survival = ", ".join(
-                str(trace.result.survival_frames) for trace in genome_traces
-            )
-            self._report(
-                f"generation {generation}: genome {completed}/{len(genome_items)} "
-                f"id={genome_id} mean={fitness:.1f} survival=[{survival}]"
+        if self.workers == 1:
+            for completed, (genome_id, genome) in enumerate(genome_items, start=1):
+                network = self._network_factory(genome, config)
+                genome_traces = tuple(
+                    self._evaluate_episode(network, seed) for seed in seeds
+                )
+                self._record_genome(
+                    generation,
+                    completed,
+                    len(genome_items),
+                    genome_id,
+                    genome,
+                    genome_traces,
+                    results,
+                    traces,
+                )
+        else:
+            self._evaluate_parallel(
+                generation, genome_items, config, seeds, results, traces
             )
         self.generation += 1
         best_genome_id, best_genome = max(
@@ -147,15 +173,97 @@ class DodgeEvaluator:
                 observation = transition.observation
                 if transition.done:
                     break
-            trace = environment.episode_trace
-            if self.history_directory is not None:
-                generation_directory = self.history_directory / (
-                    f"generation-{self.generation + 1:04d}"
-                )
-                environment.save_episode(generation_directory)
-            return trace
+            return environment.episode_trace
         finally:
             environment.close()
+
+    def _evaluate_parallel(
+        self,
+        generation: int,
+        genomes: tuple[tuple[int, object], ...],
+        config: object,
+        seeds: tuple[int, int, int],
+        results: dict[int, float],
+        traces: dict[int, tuple[EpisodeTrace, ...]],
+    ) -> None:
+        tasks = (
+            GenomeEvaluationTask(
+                genome_id=genome_id,
+                genome=genome,
+                config=config,
+                seeds=seeds,
+                step_frames=self.step_frames,
+                enemy_slots=self.enemy_slots,
+                aoe_slots=self.aoe_slots,
+            )
+            for genome_id, genome in genomes
+        )
+        genomes_by_id = dict(genomes)
+        with self._parallel_executor() as pool:
+            futures = [pool.submit(_evaluate_genome_task, task) for task in tasks]
+            for completed, future in enumerate(as_completed(futures), start=1):
+                genome_id, genome_traces = future.result()
+                self._record_genome(
+                    generation,
+                    completed,
+                    len(genomes),
+                    genome_id,
+                    genomes_by_id[genome_id],
+                    genome_traces,
+                    results,
+                    traces,
+                )
+
+    def _parallel_executor(self) -> ProcessPoolExecutor:
+        if self._parallel_executor_factory is not None:
+            return self._parallel_executor_factory(self.workers)
+        return ProcessPoolExecutor(
+            max_workers=self.workers,
+            mp_context=get_context("spawn"),
+        )
+
+    def _record_genome(
+        self,
+        generation: int,
+        completed: int,
+        total: int,
+        genome_id: int,
+        genome: object,
+        genome_traces: tuple[EpisodeTrace, ...],
+        results: dict[int, float],
+        traces: dict[int, tuple[EpisodeTrace, ...]],
+    ) -> None:
+        fitness = (
+            sum(trace.result.survival_frames for trace in genome_traces)
+            / SEED_BANK_SIZE
+        )
+        genome.fitness = fitness
+        results[genome_id] = fitness
+        traces[genome_id] = genome_traces
+        self._save_traces(generation, genome_id, genome_traces)
+        survival = ", ".join(
+            str(trace.result.survival_frames) for trace in genome_traces
+        )
+        self._report(
+            f"generation {generation}: genome {completed}/{total} "
+            f"id={genome_id} mean={fitness:.1f} survival=[{survival}]"
+        )
+
+    def _save_traces(
+        self,
+        generation: int,
+        genome_id: int,
+        genome_traces: tuple[EpisodeTrace, ...],
+    ) -> None:
+        if self.history_directory is None:
+            return
+        directory = self.history_directory / f"generation-{generation:04d}"
+        for trace in genome_traces:
+            save_episode_trace(
+                trace,
+                directory,
+                filename=f"genome-{genome_id:04d}-seed-{trace.seed}.json",
+            )
 
     def _report(self, message: str) -> None:
         if self._progress is not None:
@@ -173,6 +281,53 @@ def fresh_seed_bank() -> tuple[int, int, int]:
     while len(seeds) < SEED_BANK_SIZE:
         seeds.add(secrets.randbelow(32_768))
     return tuple(sorted(seeds))  # stable saved ordering, fresh entropy every generation
+
+
+def default_worker_count() -> int:
+    available = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    return min(8, available)
+
+
+def _evaluate_genome_task(
+    task: GenomeEvaluationTask,
+) -> tuple[int, tuple[EpisodeTrace, ...]]:
+    network = _neat_network(task.genome, task.config)
+    traces = tuple(
+        _evaluate_default_episode(
+            network,
+            seed,
+            step_frames=task.step_frames,
+            enemy_slots=task.enemy_slots,
+            aoe_slots=task.aoe_slots,
+        )
+        for seed in task.seeds
+    )
+    return task.genome_id, traces
+
+
+def _evaluate_default_episode(
+    network: Network,
+    seed: int,
+    *,
+    step_frames: int,
+    enemy_slots: int,
+    aoe_slots: int,
+) -> EpisodeTrace:
+    environment = DodgeEnv(
+        step_frames=step_frames,
+        enemy_slots=enemy_slots,
+        aoe_slots=aoe_slots,
+    )
+    try:
+        observation = environment.reset(seed=seed)
+        while True:
+            action = action_from_outputs(network.activate(observation.projected.values))
+            transition = environment.step(action)
+            observation = transition.observation
+            if transition.done:
+                return environment.episode_trace
+    finally:
+        environment.close()
 
 
 def compact_network_summary(
