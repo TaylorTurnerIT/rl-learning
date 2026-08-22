@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dodge.neat.visual import network_visualization_html, write_network_visualization
+from dodge.neat.visual import (
+    _node_label,
+    network_visualization_html,
+    write_network_visualization,
+)
 
 
 class Connection:
@@ -56,3 +60,9 @@ def test_network_visualization_html_contains_every_enabled_edge() -> None:
     assert '"source":"node:-1","target":"node:0"' in html
     assert '"source":"node:-2","target":"node:1"' in html
     assert '"source":"node:-1","target":"node:4"' not in html
+
+
+def test_v27_visual_labels_time_to_intersection_for_v2_projection() -> None:
+    input_keys = tuple(-index for index in range(1, 222))
+
+    assert _node_label(-7, input_keys, (0,), 16, 8) == "enemy 1.time_to_intersection"

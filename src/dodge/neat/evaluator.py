@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import secrets
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -12,6 +13,10 @@ from typing import Protocol
 from dodge.control import ControlRuntimeError
 from dodge.neat.bridge import Direction
 from dodge.neat.environment import DodgeEnv, EpisodeTrace, save_episode_trace
+from dodge.neat.state import (
+    OBSERVATION_SIZE,
+    OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION,
+)
 from dodge.neat.visual import write_network_visualization
 
 ACTIONS: tuple[Direction, ...] = (
@@ -27,6 +32,7 @@ ACTIONS: tuple[Direction, ...] = (
 )
 SEED_BANK_SIZE = 3
 EPISODE_ATTEMPTS = 2
+SEED_BANK_GENERATIONS = 5
 
 
 class Network(Protocol):
@@ -50,6 +56,29 @@ class GenerationEvaluation:
     best_fitness: float | None
     network_summary: str
     network_visualization: Path | None
+    validation_seeds: tuple[int, int, int] = ()
+    validation_fitness: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SeedBankSchedule:
+    seed: int
+    generations_per_bank: int = SEED_BANK_GENERATIONS
+
+    def training_bank(self, generation: int) -> tuple[int, int, int]:
+        return self._bank("training", (generation - 1) // self.generations_per_bank)
+
+    def validation_bank(self, generation: int) -> tuple[int, int, int]:
+        return self._bank("validation", generation)
+
+    def _bank(self, purpose: str, index: int) -> tuple[int, int, int]:
+        if index < 0:
+            raise ValueError("seed-bank index must be non-negative")
+        random_source = random.Random(f"{self.seed}:{purpose}:{index}")
+        seeds: set[int] = set()
+        while len(seeds) < SEED_BANK_SIZE:
+            seeds.add(random_source.randrange(32_768))
+        return tuple(sorted(seeds))
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,10 +101,12 @@ class DodgeEvaluator:
         step_frames: int = 4,
         enemy_slots: int = 16,
         aoe_slots: int = 8,
+        include_time_to_intersection: bool = False,
         history_directory: Path | None = None,
         environment_factory: EnvironmentFactory = DodgeEnv,
         network_factory: NetworkFactory | None = None,
         seed_bank_factory: SeedBankFactory | None = None,
+        seed_bank_schedule: SeedBankSchedule | None = None,
         progress: ProgressReporter | None = None,
         workers: int = 1,
         parallel_executor_factory: ParallelExecutorFactory | None = None,
@@ -89,10 +120,12 @@ class DodgeEvaluator:
         self.step_frames = step_frames
         self.enemy_slots = enemy_slots
         self.aoe_slots = aoe_slots
+        self.include_time_to_intersection = include_time_to_intersection
         self.history_directory = history_directory
         self._environment_factory = environment_factory
         self._network_factory = network_factory or _neat_network
         self._seed_bank_factory = seed_bank_factory or fresh_seed_bank
+        self._seed_bank_schedule = seed_bank_schedule
         self._progress = progress
         self._parallel_executor_factory = parallel_executor_factory
         self.workers = workers
@@ -103,7 +136,11 @@ class DodgeEvaluator:
     def __call__(self, genomes: Iterable[tuple[int, object]], config: object) -> None:
         genome_items = tuple(genomes)
         generation = self.generation + 1
-        seeds = self._seed_bank_factory()
+        seeds = (
+            self._seed_bank_schedule.training_bank(generation)
+            if self._seed_bank_schedule is not None
+            else self._seed_bank_factory()
+        )
         self._report(
             f"generation {generation}: evaluating {len(genome_items)} genomes "
             f"on seeds {list(seeds)} with {self.workers} worker(s)"
@@ -139,6 +176,19 @@ class DodgeEvaluator:
         best_fitness = (
             results.get(best_genome_id) if best_genome_id is not None else None
         )
+        validation_seeds: tuple[int, int, int] = ()
+        validation_fitness: float | None = None
+        if best_genome is not None and self._seed_bank_schedule is not None:
+            validation_seeds = self._seed_bank_schedule.validation_bank(generation)
+            network = self._network_factory(best_genome, config)
+            validation_traces = tuple(
+                self._evaluate_episode(network, seed) for seed in validation_seeds
+            )
+            validation_fitness = (
+                sum(trace.result.survival_frames for trace in validation_traces)
+                / SEED_BANK_SIZE
+            )
+            self._save_validation_traces(generation, best_genome_id, validation_traces)
         summary = compact_network_summary(
             best_genome,
             config,
@@ -154,9 +204,14 @@ class DodgeEvaluator:
         if best_fitness is None:
             self._report(f"generation {generation} complete: no genomes")
         else:
+            validation_suffix = (
+                f" validation={validation_fitness:.1f}"
+                if validation_fitness is not None
+                else ""
+            )
             self._report(
                 f"generation {generation} complete: best id={best_genome_id} "
-                f"mean={best_fitness:.1f} {summary}{visual_suffix}"
+                f"mean={best_fitness:.1f}{validation_suffix} {summary}{visual_suffix}"
             )
         self.last_generation = GenerationEvaluation(
             generation=generation,
@@ -167,6 +222,8 @@ class DodgeEvaluator:
             best_fitness=best_fitness,
             network_summary=summary,
             network_visualization=visualization,
+            validation_seeds=validation_seeds,
+            validation_fitness=validation_fitness,
         )
         self.generation_history.append(self.last_generation)
 
@@ -178,6 +235,7 @@ class DodgeEvaluator:
             step_frames=self.step_frames,
             enemy_slots=self.enemy_slots,
             aoe_slots=self.aoe_slots,
+            include_time_to_intersection=self.include_time_to_intersection,
         )
 
     def _evaluate_parallel(
@@ -268,6 +326,22 @@ class DodgeEvaluator:
                 filename=f"genome-{genome_id:04d}-seed-{trace.seed}.json",
             )
 
+    def _save_validation_traces(
+        self,
+        generation: int,
+        genome_id: int | None,
+        traces: tuple[EpisodeTrace, ...],
+    ) -> None:
+        if self.history_directory is None or genome_id is None:
+            return
+        directory = self.history_directory / f"generation-{generation:04d}"
+        for trace in traces:
+            save_episode_trace(
+                trace,
+                directory,
+                filename=f"genome-{genome_id:04d}-validation-seed-{trace.seed}.json",
+            )
+
     def _save_network_visualization(
         self,
         generation: int,
@@ -319,6 +393,11 @@ def _evaluate_genome_task(
             step_frames=task.step_frames,
             enemy_slots=task.enemy_slots,
             aoe_slots=task.aoe_slots,
+            include_time_to_intersection=_uses_time_to_intersection(
+                task.config,
+                enemy_slots=task.enemy_slots,
+                aoe_slots=task.aoe_slots,
+            ),
         )
         for seed in task.seeds
     )
@@ -332,6 +411,7 @@ def _evaluate_default_episode(
     step_frames: int,
     enemy_slots: int,
     aoe_slots: int,
+    include_time_to_intersection: bool,
 ) -> EpisodeTrace:
     return _evaluate_episode_with_retries(
         network,
@@ -340,6 +420,7 @@ def _evaluate_default_episode(
         step_frames=step_frames,
         enemy_slots=enemy_slots,
         aoe_slots=aoe_slots,
+        include_time_to_intersection=include_time_to_intersection,
     )
 
 
@@ -351,12 +432,14 @@ def _evaluate_episode_with_retries(
     step_frames: int,
     enemy_slots: int,
     aoe_slots: int,
+    include_time_to_intersection: bool = False,
 ) -> EpisodeTrace:
     for attempt in range(EPISODE_ATTEMPTS):
         environment = environment_factory(
             step_frames=step_frames,
             enemy_slots=enemy_slots,
             aoe_slots=aoe_slots,
+            include_time_to_intersection=include_time_to_intersection,
         )
         try:
             observation = environment.reset(seed=seed)
@@ -374,6 +457,29 @@ def _evaluate_episode_with_retries(
         finally:
             environment.close()
     raise AssertionError("episode retry loop exhausted")
+
+
+def _uses_time_to_intersection(
+    config: object, *, enemy_slots: int, aoe_slots: int
+) -> bool:
+    input_keys = tuple(
+        getattr(getattr(config, "genome_config", None), "input_keys", ())
+    )
+    legacy_size = 5 + (enemy_slots + aoe_slots) * 8
+    enhanced_size = 5 + (enemy_slots + aoe_slots) * 9
+    if len(input_keys) == enhanced_size:
+        return True
+    if len(input_keys) == legacy_size:
+        return False
+    if (enemy_slots, aoe_slots) == (16, 8):
+        if len(input_keys) == OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION:
+            return True
+        if len(input_keys) == OBSERVATION_SIZE:
+            return False
+    raise ValueError(
+        f"NEAT config expects {len(input_keys)} inputs, but Dodge projection has "
+        f"{legacy_size} or {enhanced_size}"
+    )
 
 
 def compact_network_summary(

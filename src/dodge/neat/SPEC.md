@@ -12,7 +12,7 @@ C3: live bridge uses hidden X11 window + no-op `_draw`; target window only.
 C4: step interval integer `3..5`, fixed per episode.
 C5: action space = `neutral|left|right|up|down|up_left|up_right|down_left|down_right`.
 C6: `reset()` default → fresh entropy seed; explicit seed only test/replay.
-C7: generation seed bank size = 3; every genome receives same bank; next generation rotates bank.
+C7: generation seed bank size = 3; every genome receives same bank for 5 generations; fresh held-out bank reports champion generalization.
 C8: episode ends only cartridge death; ⊥ arbitrary survival cap.
 C9: fixed NEAT projection = player + 16 enemies + 8 AOEs; raw state retains all entities.
 C10: overflow telemetry ! report; ⊥ fail episode.
@@ -27,7 +27,7 @@ py: `DodgeEnv(step_frames=4, enemy_slots=16, aoe_slots=8)` → env.
 py: `env.reset(seed: int|None = None)` → `Observation` after menu transition.
 py: `env.step(action: Direction)` → `Transition(observation, reward, done, result?)` after exact `step_frames` updates.
 json: raw state → player `{x,y,vx,vy,size}` + all `enemies` + all `aoes`.
-json: projection → fixed numeric vector, zero slots use `present=0`.
+json: projection → fixed numeric vector, zero slots use `present=0`; v2 entity slots include bounded time-to-intersection.
 json: episode history → seed, config, action trace, result, overflow telemetry.
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
 cli: `just dodge-neat-replay-latest <epoch>` → visible replay selected generation winner from newest NEAT run.
@@ -51,7 +51,7 @@ V3: raw state exposes player position/vector, every enemy position/vector/bounds
 V4: projection reserves 16 enemy + 8 AOE slots; slots danger-order by predicted player-box intersection then distance; overflow retains telemetry.
 V5: same seed + config + action trace → same terminal result in headless and visible replay.
 V6: reset seed omitted → entropy seed; explicit seed preserved in result/history.
-V7: ∀ generation genomes → same 3 seeds; fitness = mean `survival_frames`; future generation → fresh bank.
+V7: ∀ generation genomes → same 3 seeds; fitness = mean `survival_frames`; bank holds 5 generations; champion held-out result ⊥ selection fitness.
 V8: stored episode trace replays visibly without physical controls.
 V9: bridge holds injected keys until Pemsa acknowledges action; release follows acknowledgement.
 V10: bridge discovers input window after game-ready boundary; ⊥ transient startup window.
@@ -70,6 +70,8 @@ V22: completed generation → atomic checkpoint + run record; resume latest → 
 V23: `RunCheckpointer` ∈ full NEAT reporter lifecycle; ⊥ missing hook abort generation.
 V24: checkpoint pickle ⊥ live callback; tiny live population completes gen1 → checkpoint exists.
 V25: NEAT replay-latest selects newest `run-*`; epoch → recorded best genome trace with greatest `survival_frames`; absent run, epoch, or trace → fail before Pemsa.
+V26: v2 default → 3-frame decisions, sparse direct initial graph, local weight/bias mutation; v1 config remains resume-compatible.
+V27: v2 entity feature `time_to_intersection` ∈ [0,1]; overlap → 0; no future intersection → 1; visual labels identify feature.
 
 §T
 
@@ -90,6 +92,7 @@ T13|x|add NEAT checkpoint retention + resume|V22,I.cli
 T14|x|make checkpoint reporter full NEAT reporter|V23
 T15|x|exclude checkpoint callback from NEAT pickle|V24
 T16|x|add latest NEAT generation replay|V25,I.cli
+T17|x|add v2 NEAT search profile, seed schedule, intersection feature|V7,V26,V27,I.json
 
 §B
 
@@ -117,3 +120,5 @@ B20|2026-08-22|a single missed X11 key ack aborted a parallel generation|V21
 B21|2026-08-22|checkpoint reporter lacked NEAT `post_evaluate` hook|V23
 B22|2026-08-22|checkpoint pickle captured local run-record callback via species reporters|V24
 B23|2026-08-22|latest NEAT replay test + CLI exceeded Ruff format|mechanical format
+B24|2026-08-22|v2 scheduler import missed Ruff order|mechanical format
+B25|2026-08-22|v1 report + resume tests omitted v2 validation metadata|V7,V26

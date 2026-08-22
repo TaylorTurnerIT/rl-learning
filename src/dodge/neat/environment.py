@@ -61,6 +61,7 @@ class EpisodeTrace:
     enemy_overflow_frames: int
     aoe_overflow_frames: int
     input_mode: EpisodeInputMode = "keyboard"
+    include_time_to_intersection: bool = False
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -72,6 +73,7 @@ class EpisodeTrace:
                 "enemy_slots": self.enemy_slots,
                 "aoe_slots": self.aoe_slots,
                 "input_mode": self.input_mode,
+                "time_to_intersection": self.include_time_to_intersection,
             },
             "actions": list(self.actions),
             "result": asdict(self.result),
@@ -96,6 +98,7 @@ class DodgeEnv:
         step_frames: int = 4,
         enemy_slots: int = 16,
         aoe_slots: int = 8,
+        include_time_to_intersection: bool = False,
         bridge_factory: BridgeFactory = PemsaStepBridge,
     ) -> None:
         if not 3 <= step_frames <= 5:
@@ -105,6 +108,7 @@ class DodgeEnv:
         self.step_frames = step_frames
         self.enemy_slots = enemy_slots
         self.aoe_slots = aoe_slots
+        self.include_time_to_intersection = include_time_to_intersection
         self._bridge_factory = bridge_factory
         self._bridge: PemsaStepBridge | None = None
         self._seed: int | None = None
@@ -167,6 +171,7 @@ class DodgeEnv:
                 max_visible_aoes=update.max_visible_aoes,
                 enemy_overflow_frames=update.enemy_overflow_frames,
                 aoe_overflow_frames=update.aoe_overflow_frames,
+                include_time_to_intersection=self.include_time_to_intersection,
             )
             reward = float(update.survival_frames - self._last_survival_frames)
             self._last_survival_frames = update.survival_frames
@@ -217,6 +222,7 @@ class DodgeEnv:
                 raw_state,
                 enemy_slots=self.enemy_slots,
                 aoe_slots=self.aoe_slots,
+                include_time_to_intersection=self.include_time_to_intersection,
             ),
         )
 
@@ -271,6 +277,11 @@ def load_episode(path: Path) -> EpisodeTrace:
                 "legacy_mouse"
                 if version == 1
                 else _input_mode(config.get("input_mode"))
+            ),
+            include_time_to_intersection=(
+                False
+                if version == 1
+                else _boolean(config.get("time_to_intersection", False))
             ),
         )
     except (KeyError, ControlInputError) as error:
@@ -331,6 +342,12 @@ def _input_mode(value: object) -> EpisodeInputMode:
     if value not in {"keyboard", "legacy_mouse"}:
         raise ControlInputError("config.input_mode must be keyboard or legacy_mouse")
     return cast(EpisodeInputMode, value)
+
+
+def _boolean(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise ControlInputError("config.time_to_intersection must be boolean")
+    return value
 
 
 def _positive(value: object, name: str) -> int:

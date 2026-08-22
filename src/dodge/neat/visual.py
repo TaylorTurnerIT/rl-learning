@@ -176,7 +176,21 @@ def _node_label(
         return f"hidden {key}"
     index = input_keys.index(key)
     player_features = ("player.x", "player.y", "player.vx", "player.vy", "player.size")
-    entity_features = ("present", "dx", "dy", "vx", "vy", "width", "height", "stage")
+    legacy_entity_features = (
+        "present",
+        "dx",
+        "dy",
+        "vx",
+        "vy",
+        "width",
+        "height",
+        "stage",
+    )
+    entity_features = (
+        ("present", "time_to_intersection", *legacy_entity_features[1:])
+        if len(input_keys) == 5 + (enemy_slots + aoe_slots) * 9
+        else legacy_entity_features
+    )
     if index < len(player_features):
         return player_features[index]
     entity_index = index - len(player_features)

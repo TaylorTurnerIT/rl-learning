@@ -12,9 +12,16 @@ ENEMY_SLOT_COUNT = 16
 AOE_SLOT_COUNT = 8
 PLAYER_FEATURE_COUNT = 5
 ENTITY_FEATURE_COUNT = 8
+ENTITY_FEATURE_COUNT_WITH_TIME_TO_INTERSECTION = 9
 OBSERVATION_SIZE = (
     PLAYER_FEATURE_COUNT + (ENEMY_SLOT_COUNT + AOE_SLOT_COUNT) * ENTITY_FEATURE_COUNT
 )
+OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION = (
+    PLAYER_FEATURE_COUNT
+    + (ENEMY_SLOT_COUNT + AOE_SLOT_COUNT)
+    * ENTITY_FEATURE_COUNT_WITH_TIME_TO_INTERSECTION
+)
+TIME_TO_INTERSECTION_HORIZON = 120.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +88,7 @@ def project_state(
     *,
     enemy_slots: int = ENEMY_SLOT_COUNT,
     aoe_slots: int = AOE_SLOT_COUNT,
+    include_time_to_intersection: bool = False,
 ) -> ProjectedObservation:
     if enemy_slots < 1 or aoe_slots < 1:
         raise ValueError("observation slot counts must be positive")
@@ -94,8 +102,22 @@ def project_state(
         state.player.vy / SCREEN_SIZE,
         state.player.size / SCREEN_SIZE,
     ]
-    values.extend(_entity_features(state.player, enemies, enemy_slots))
-    values.extend(_entity_features(state.player, aoes, aoe_slots))
+    values.extend(
+        _entity_features(
+            state.player,
+            enemies,
+            enemy_slots,
+            include_time_to_intersection=include_time_to_intersection,
+        )
+    )
+    values.extend(
+        _entity_features(
+            state.player,
+            aoes,
+            aoe_slots,
+            include_time_to_intersection=include_time_to_intersection,
+        )
+    )
     return ProjectedObservation(
         tuple(values),
         enemy_overflow=len(enemies) > enemy_slots,
@@ -180,12 +202,16 @@ def _entity_features(
     player: PlayerState,
     entities: tuple[EntityState, ...],
     slot_count: int,
+    *,
+    include_time_to_intersection: bool,
 ) -> list[float]:
     values: list[float] = []
     for entity in entities[:slot_count]:
+        values.append(1.0)
+        if include_time_to_intersection:
+            values.append(_normalized_time_to_intersection(player, entity))
         values.extend(
             (
-                1.0,
                 (entity.x - player.x) / SCREEN_SIZE,
                 (entity.y - player.y) / SCREEN_SIZE,
                 entity.vx / SCREEN_SIZE,
@@ -195,7 +221,17 @@ def _entity_features(
                 entity.stage / 2,
             )
         )
-    values.extend(
-        [0.0] * ENTITY_FEATURE_COUNT * (slot_count - min(len(entities), slot_count))
+    feature_count = (
+        ENTITY_FEATURE_COUNT_WITH_TIME_TO_INTERSECTION
+        if include_time_to_intersection
+        else ENTITY_FEATURE_COUNT
     )
+    values.extend([0.0] * feature_count * (slot_count - min(len(entities), slot_count)))
     return values
+
+
+def _normalized_time_to_intersection(player: PlayerState, entity: EntityState) -> float:
+    time_to_intersection = _time_to_intersection(player, entity)
+    if time_to_intersection == inf:
+        return 1.0
+    return min(time_to_intersection / TIME_TO_INTERSECTION_HORIZON, 1.0)

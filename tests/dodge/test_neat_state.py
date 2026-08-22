@@ -3,6 +3,7 @@ from __future__ import annotations
 from dodge.neat.state import (
     ENTITY_FEATURE_COUNT,
     OBSERVATION_SIZE,
+    OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION,
     RawState,
     parse_raw_state,
     project_state,
@@ -47,6 +48,36 @@ def test_project_state_danger_orders_and_zero_pads_slots() -> None:
     assert projected.enemy_overflow is False
     assert projected.aoe_overflow is False
     assert OBSERVATION_SIZE == 197
+
+    with_intersection = project_state(
+        state,
+        enemy_slots=2,
+        aoe_slots=1,
+        include_time_to_intersection=True,
+    )
+    assert with_intersection.values[5] == 1.0
+    assert with_intersection.values[6] == 6 / 120
+    assert with_intersection.values[-(ENTITY_FEATURE_COUNT + 1) :] == (0.0,) * (
+        ENTITY_FEATURE_COUNT + 1
+    )
+    assert OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION == 221
+
+
+def test_v27_time_to_intersection_is_bounded_for_overlap_and_no_collision() -> None:
+    state = parse_raw_state(
+        "__x__0|0,0,0,0,4|1,0,1,0,4,4,0,0;10,0,1,0,4,4,0,0|",
+        prefix="__x__",
+    )
+
+    projected = project_state(
+        state,
+        enemy_slots=2,
+        aoe_slots=1,
+        include_time_to_intersection=True,
+    )
+
+    assert projected.values[6] == 0.0
+    assert projected.values[5 + (ENTITY_FEATURE_COUNT + 1) + 1] == 1.0
 
 
 def test_project_state_reports_overflow_without_failing() -> None:

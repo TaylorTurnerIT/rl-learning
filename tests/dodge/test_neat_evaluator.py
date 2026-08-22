@@ -18,6 +18,7 @@ from dodge.neat.environment import (
 from dodge.neat.evaluator import (
     DodgeEvaluator,
     GenomeEvaluationTask,
+    SeedBankSchedule,
     action_from_outputs,
     compact_network_summary,
 )
@@ -139,6 +140,33 @@ def test_evaluator_gives_all_genomes_same_three_seed_bank_then_rotates() -> None
     assert evaluator.last_generation is not None
     assert evaluator.last_generation.seeds == (21, 22, 23)
     assert FakeEnvironment.actions == ["up_right"] * 12
+
+
+def test_v7_seed_schedule_holds_training_bank_and_reports_unselected_validation() -> (
+    None
+):
+    schedule = SeedBankSchedule(123)
+    assert schedule.training_bank(1) == schedule.training_bank(5)
+    assert schedule.training_bank(5) != schedule.training_bank(6)
+    assert schedule.training_bank(1) != schedule.validation_bank(1)
+    assert SeedBankSchedule(123).validation_bank(1) == schedule.validation_bank(1)
+
+    FakeEnvironment.seeds.clear()
+    evaluator = DodgeEvaluator(
+        environment_factory=FakeEnvironment,  # type: ignore[arg-type]
+        network_factory=lambda _genome, _config: FakeNetwork(),
+        seed_bank_schedule=schedule,
+    )
+    genomes = [Genome(), Genome()]
+    evaluator(enumerate(genomes), object())
+
+    training = schedule.training_bank(1)
+    validation = schedule.validation_bank(1)
+    assert FakeEnvironment.seeds == [*training, *training, *validation]
+    assert [genome.fitness for genome in genomes] == [sum(training) / 3] * 2
+    assert evaluator.last_generation is not None
+    assert evaluator.last_generation.validation_seeds == validation
+    assert evaluator.last_generation.validation_fitness == sum(validation) / 3
 
 
 def test_action_from_outputs_requires_nine_actions() -> None:

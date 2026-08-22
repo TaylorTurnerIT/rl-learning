@@ -41,9 +41,9 @@ def test_final_generation_table_shows_average_and_best_fitness() -> None:
         (_generation(1, first=100, second=300), _generation(2, first=200, second=500))
     )
 
-    assert "Gen  Population  Average  Best   Best ID  Seeds" in table
-    assert "1    2           200.0    300.0  11       1,2,3" in table
-    assert "2    2           350.0    500.0  11       2,3,4" in table
+    assert "Gen  Population  Average  Best   Validation  Best ID  Seeds" in table
+    assert "1    2           200.0    300.0  -           11       1,2,3" in table
+    assert "2    2           350.0    500.0  -           11       2,3,4" in table
 
 
 def test_run_record_keeps_concise_generation_results(tmp_path: Path) -> None:
@@ -72,10 +72,27 @@ def test_run_record_keeps_concise_generation_results(tmp_path: Path) -> None:
     assert saved["checkpoint_retention"] == 5
 
 
+def test_v26_default_config_is_sparse_three_frame_v2() -> None:
+    import neat
+
+    config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        DEFAULT_CONFIG,
+    )
+
+    assert config.genome_config.num_inputs == 221
+    assert config.genome_config.initial_connection == "partial_direct"
+    assert config.genome_config.connection_fraction == 0.15
+
+
 def test_resume_rejects_changed_observation_settings() -> None:
     arguments = argparse.Namespace(
         config=DEFAULT_CONFIG,
         step_frames=4,
+        time_to_intersection=False,
         enemy_slots=16,
         aoe_slots=8,
     )
@@ -84,12 +101,34 @@ def test_resume_rejects_changed_observation_settings() -> None:
         "kind": "neat_run",
         "config_sha256": _config_sha256(DEFAULT_CONFIG),
         "step_frames": 4,
+        "time_to_intersection": False,
         "enemy_slots": 12,
         "aoe_slots": 8,
     }
 
     with pytest.raises(ValueError, match="enemy_slots"):
         _validate_resume(record, arguments)
+
+
+def test_v26_v1_run_record_resumes_without_time_to_intersection_flag() -> None:
+    legacy_config = DEFAULT_CONFIG.with_name("config-dodge")
+    arguments = argparse.Namespace(
+        config=legacy_config,
+        step_frames=4,
+        time_to_intersection=False,
+        enemy_slots=16,
+        aoe_slots=8,
+    )
+    record = {
+        "version": RUN_VERSION,
+        "kind": "neat_run",
+        "config_sha256": _config_sha256(legacy_config),
+        "step_frames": 4,
+        "enemy_slots": 16,
+        "aoe_slots": 8,
+    }
+
+    _validate_resume(record, arguments)
 
 
 class _FakeEvaluator:
@@ -164,4 +203,8 @@ def test_v22_main_creates_and_resumes_the_same_checkpointed_run(
     assert record["completed_generations"] == 2
     assert [row["generation"] for row in record["generations"]] == [1, 2]
     assert record["latest_checkpoint"] == "checkpoint-000002.gz"
+    assert record["config"] == str(DEFAULT_CONFIG.resolve())
+    assert record["step_frames"] == 3
+    assert record["time_to_intersection"] is True
+    assert record["seed_bank_generations"] == 5
     assert _FakeCheckpointer.restores == [run_directory / "checkpoint-000001.gz"]
