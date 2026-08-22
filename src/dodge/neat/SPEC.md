@@ -19,6 +19,7 @@ C10: overflow telemetry ! report; ⊥ fail episode.
 C11: existing uncommitted `src/dodge/neat/config-xor` + `neat-testing.py` ⊥ overwrite.
 C12: train workers default ≤8; `--workers` selects positive process count.
 C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency or external service.
+C14: retain ≤5 NEAT checkpoints per run; episode history ∉ checkpoint retention.
 
 §I
 
@@ -32,6 +33,7 @@ cli: `just dodge-neat-replay <episode.json>` → visible replay from stored acti
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
 cli: `just dodge-neat-train` end → generation table + concise final fitness summary.
+cli: `just dodge-neat-resume <run> --generations <n>` → same run + `n` generations.
 file: `generation-####/network.html` → interactive best-genome weighted graph.
 
 §R
@@ -63,6 +65,7 @@ V18: ∀ completed generation with best genome → write self-contained visual; 
 V19: train end → table row ∀ completed generation with population mean and best survival; ⊥ full genome dump.
 V20: replay holds menu `x` through transition, pauses at game-ready, releases between actions; trace retains its mouse-input mode; stored action frames → exact game updates.
 V21: transient hidden-X11 input ack → release + retry while paused; one failed episode → same-seed retry; repeat failure → error.
+V22: completed generation → atomic checkpoint + run record; resume latest → saved population/species/RNG next gen; retain ≤5 checkpoints.
 
 §T
 
@@ -79,6 +82,7 @@ T9|x|write interactive best-network generation visual|V18,I.file
 T10|x|report final NEAT generation table and summary|V19,I.cli
 T11|x|fix NEAT replay menu bootstrap timing|V5,V8,V20
 T12|x|retry transient hidden-X11 input and deterministic episode|V21
+T13|x|add NEAT checkpoint retention + resume|V22,I.cli
 
 §B
 

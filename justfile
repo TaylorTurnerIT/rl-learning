@@ -51,5 +51,9 @@ dodge-neat-train *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train {{options}}
 
 [group("dodge")]
+dodge-neat-resume run *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train --resume {{run}} {{options}}
+
+[group("dodge")]
 dodge-neat-replay episode:
     devenv shell -- dodge-neat-replay {{episode}}
