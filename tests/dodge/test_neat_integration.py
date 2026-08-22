@@ -31,7 +31,12 @@ def test_v5_live_trace_replays_with_identical_terminal_result() -> None:
                 trace = environment.episode_trace
                 break
 
-    replayed = run_headless(trace_commands(trace), seed=trace.seed, timeout=30)
+    replayed = run_headless(
+        trace_commands(trace),
+        seed=trace.seed,
+        timeout=30,
+        wait_for_game_start=True,
+    )
     assert replayed["score"] == trace.result.score
     assert replayed["frames"] == trace.result.frames
     assert replayed["survival_frames"] == trace.result.survival_frames

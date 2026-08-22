@@ -9,10 +9,12 @@ from dodge.control import ControlInputError, ControlRuntimeError, MovementComman
 from dodge.headless import HeadlessResult, replay_commands
 from dodge.neat.environment import EpisodeTrace, load_episode
 
+_MENU_START_FRAMES = 3
+
 
 def trace_commands(trace: EpisodeTrace) -> list[MovementCommand]:
     return [
-        MovementCommand("x", _frames_to_milliseconds(trace.step_frames)),
+        MovementCommand("x", _frames_to_milliseconds(_MENU_START_FRAMES)),
         *[
             MovementCommand(action, _frames_to_milliseconds(trace.step_frames))
             for action in trace.actions
@@ -21,7 +23,12 @@ def trace_commands(trace: EpisodeTrace) -> list[MovementCommand]:
 
 
 def replay_episode(trace: EpisodeTrace) -> HeadlessResult:
-    result = replay_commands(trace_commands(trace), seed=trace.seed)
+    result = replay_commands(
+        trace_commands(trace),
+        seed=trace.seed,
+        wait_for_game_start=True,
+        legacy_mouse_input=trace.input_mode == "legacy_mouse",
+    )
     expected = trace.result
     actual = {
         "score": result["score"],

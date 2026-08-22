@@ -48,6 +48,8 @@ def instrument_cartridge(
     *,
     seed: int,
     render: bool = False,
+    wait_for_game_start: bool = False,
+    legacy_mouse_input: bool = False,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
@@ -111,6 +113,9 @@ __dodge_mask=0
 __dodge_previous_mask=0
 __dodge_frames=0
 __dodge_survival_frames=0
+__dodge_wait_for_game_start={str(wait_for_game_start).lower()}
+__dodge_mouse_x={64 if legacy_mouse_input else 0}
+__dodge_mouse_y={64 if legacy_mouse_input else 0}
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -122,7 +127,9 @@ end
 
 __dodge_game_stat=stat
 function stat(i)
- if i==32 or i==33 or i==34 then return 0 end
+ if i==32 then return __dodge_mouse_x end
+ if i==33 then return __dodge_mouse_y end
+ if i==34 then return 0 end
  return __dodge_game_stat(i)
 end
 
@@ -138,6 +145,15 @@ end
 function _update60()
  local command=__dodge_commands[__dodge_command]
  __dodge_mask=command and command[1] or 0
+ if __dodge_wait_for_game_start and _upd==updategame then
+  __dodge_wait_for_game_start=false
+  __dodge_mask=0
+  __dodge_previous_mask=0
+  __dodge_command+=1
+  local next_command=__dodge_commands[__dodge_command]
+  if next_command then __dodge_remaining=next_command[2] end
+  return
+ end
  local game_frame=_upd==updategame and not isdead
  __dodge_game_update60()
  if game_frame and not isdead then
@@ -149,9 +165,11 @@ function _update60()
  if isdead then
   __dodge_finish()
  end
- if command then
+ if command and not __dodge_wait_for_game_start then
   __dodge_remaining-=1
   if __dodge_remaining<=0 then
+   __dodge_mask=0
+   __dodge_previous_mask=0
    __dodge_command+=1
    local next_command=__dodge_commands[__dodge_command]
    if next_command then
@@ -173,11 +191,18 @@ def run_headless(
     runner: Runner = subprocess.run,
     timeout: float | None = None,
     render: bool = False,
+    wait_for_game_start: bool = False,
+    legacy_mouse_input: bool = False,
 ) -> HeadlessResult:
     try:
         original = source.read_text(encoding="utf-8")
         instrumented = instrument_cartridge(
-            original, commands, seed=seed, render=render
+            original,
+            commands,
+            seed=seed,
+            render=render,
+            wait_for_game_start=wait_for_game_start,
+            legacy_mouse_input=legacy_mouse_input,
         )
     except OSError as error:
         raise ControlRuntimeError(f"could not read cartridge: {error}") from error
@@ -275,9 +300,19 @@ def replay_commands(
     seed: int,
     source: Path = CARTRIDGE_PATH,
     runner: Runner = subprocess.run,
+    wait_for_game_start: bool = False,
+    legacy_mouse_input: bool = False,
 ) -> HeadlessResult:
     """Show an input-simulated winner replay; physical keyboard input is ignored."""
-    return run_headless(commands, seed=seed, source=source, runner=runner, render=True)
+    return run_headless(
+        commands,
+        seed=seed,
+        source=source,
+        runner=runner,
+        render=True,
+        wait_for_game_start=wait_for_game_start,
+        legacy_mouse_input=legacy_mouse_input,
+    )
 
 
 def _timeout_text(value: str | bytes | None) -> str:

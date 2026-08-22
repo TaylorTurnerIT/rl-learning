@@ -88,6 +88,26 @@ def test_instrumented_cartridge_preserves_draw_for_visible_replay() -> None:
     assert "if _upd!=updatetransition then" in result
 
 
+def test_instrumented_neat_replay_waits_for_the_game_before_actions() -> None:
+    source = (
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\n score=0\nend\n"
+        "function _update60()\nend\n"
+        "function _draw()\nend\n__gfx__\n"
+    )
+
+    result = instrument_cartridge(source, COMMANDS, seed=42, wait_for_game_start=True)
+
+    assert "__dodge_wait_for_game_start=true" in result
+    assert "if __dodge_wait_for_game_start and _upd==updategame then" in result
+    assert "if command and not __dodge_wait_for_game_start then" in result
+    legacy_result = instrument_cartridge(
+        source, COMMANDS, seed=42, legacy_mouse_input=True
+    )
+    assert "__dodge_mouse_x=64" in legacy_result
+    assert "__dodge_mouse_y=64" in legacy_result
+
+
 def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
     tmp_path: Path,
 ) -> None:

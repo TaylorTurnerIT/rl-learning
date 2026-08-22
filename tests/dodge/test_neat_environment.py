@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -75,8 +76,16 @@ def test_environment_steps_exact_intervals_and_saves_terminal_trace(
     trace = load_episode(saved)
     assert trace.seed == 123
     assert trace.actions == ("right", "up_left")
+    assert trace.input_mode == "keyboard"
     assert trace.max_visible_enemies == 17
     assert trace.enemy_overflow_frames == 2
+
+    legacy = json.loads(saved.read_text())
+    legacy["version"] = 1
+    del legacy["config"]["input_mode"]
+    legacy_path = tmp_path / "legacy.json"
+    legacy_path.write_text(json.dumps(legacy))
+    assert load_episode(legacy_path).input_mode == "legacy_mouse"
 
 
 def test_environment_uses_entropy_when_seed_is_omitted(

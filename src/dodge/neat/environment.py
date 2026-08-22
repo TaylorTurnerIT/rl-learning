@@ -6,14 +6,15 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from dodge.control import PROJECT_ROOT, ControlInputError, parse_seed
 from dodge.neat.bridge import ACTION_KEYS, BridgeResult, Direction, PemsaStepBridge
 from dodge.neat.state import ProjectedObservation, RawState, project_state
 
 NEAT_HISTORY_DIRECTORY = PROJECT_ROOT / "history" / "dodge" / "neat"
-EPISODE_VERSION = 1
+EPISODE_VERSION = 2
+EpisodeInputMode = Literal["keyboard", "legacy_mouse"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,7 @@ class EpisodeTrace:
     max_visible_aoes: int
     enemy_overflow_frames: int
     aoe_overflow_frames: int
+    input_mode: EpisodeInputMode = "keyboard"
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -69,6 +71,7 @@ class EpisodeTrace:
                 "step_frames": self.step_frames,
                 "enemy_slots": self.enemy_slots,
                 "aoe_slots": self.aoe_slots,
+                "input_mode": self.input_mode,
             },
             "actions": list(self.actions),
             "result": asdict(self.result),
@@ -226,7 +229,8 @@ def load_episode(path: Path) -> EpisodeTrace:
     if not isinstance(value, dict):
         raise ControlInputError("NEAT episode must be an object")
     try:
-        if value["version"] != EPISODE_VERSION or value["kind"] != "neat_episode":
+        version = value["version"]
+        if version not in {1, EPISODE_VERSION} or value["kind"] != "neat_episode":
             raise ControlInputError("unsupported NEAT episode format")
         config = _object(value["config"], "config")
         result = _object(value["result"], "result")
@@ -262,6 +266,11 @@ def load_episode(path: Path) -> EpisodeTrace:
             ),
             aoe_overflow_frames=_nonnegative(
                 telemetry["aoe_overflow_frames"], "telemetry.aoe_overflow_frames"
+            ),
+            input_mode=(
+                "legacy_mouse"
+                if version == 1
+                else _input_mode(config.get("input_mode"))
             ),
         )
     except (KeyError, ControlInputError) as error:
@@ -316,6 +325,12 @@ def _step_frames(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 3 <= value <= 5:
         raise ControlInputError("step_frames must be between 3 and 5")
     return value
+
+
+def _input_mode(value: object) -> EpisodeInputMode:
+    if value not in {"keyboard", "legacy_mouse"}:
+        raise ControlInputError("config.input_mode must be keyboard or legacy_mouse")
+    return cast(EpisodeInputMode, value)
 
 
 def _positive(value: object, name: str) -> int:

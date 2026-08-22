@@ -61,6 +61,7 @@ V16: parallel worker result equals sequential per-genome 3-seed contract; parent
 V17: accepted terminal action → lost final key-release window error ! terminal result handling; pre-accept key errors ! fail.
 V18: ∀ completed generation with best genome → write self-contained visual; slider spans strongest visible edges through every enabled edge.
 V19: train end → table row ∀ completed generation with population mean and best survival; ⊥ full genome dump.
+V20: replay holds menu `x` through transition, pauses at game-ready, releases between actions; trace retains its mouse-input mode; stored action frames → exact game updates.
 
 §T
 
@@ -75,6 +76,7 @@ T7|x|parallelize NEAT genome evaluation|V7,V16,I.cli
 T8|x|tolerate terminal window teardown after accepted action|V17
 T9|x|write interactive best-network generation visual|V18,I.file
 T10|x|report final NEAT generation table and summary|V19,I.cli
+T11|x|fix NEAT replay menu bootstrap timing|V5,V8,V20
 
 §B
 
@@ -97,3 +99,4 @@ B15|2026-08-21|terminal cartridge exit destroyed X11 window before final action 
 B16|2026-08-21|embedded HTML lines exceed Python formatter width|template E501 exemption
 B17|2026-08-21|visual test expected runtime label in static HTML|assert embedded graph data
 B18|2026-08-22|final report imported `Iterable` from legacy module|mechanical format
+B19|2026-08-22|v1 NEAT bridge observed virtual mouse while replay disabled it|V20

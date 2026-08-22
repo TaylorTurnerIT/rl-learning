@@ -108,6 +108,12 @@ function btnp(i)
  return btn(i) and flr(__dodge_previous_mask/(2^i))%2!=1
 end
 
+__dodge_game_stat=stat
+function stat(i)
+ if i==32 or i==33 or i==34 then return 0 end
+ return __dodge_game_stat(i)
+end
+
 function _draw()
 end
 
