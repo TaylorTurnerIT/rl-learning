@@ -1,7 +1,7 @@
 [NEAT]
 fitness_criterion     = max
 fitness_threshold     = 10000
-pop_size              = 100
+pop_size              = 50
 reset_on_extinction   = False
 no_fitness_termination = False
 
@@ -55,7 +55,7 @@ single_structural_mutation = false
 structural_mutation_surer = default
 
 [DefaultSpeciesSet]
-compatibility_threshold = 2.45
+compatibility_threshold = 2.40
 
 [DefaultStagnation]
 species_fitness_func = max

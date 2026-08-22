@@ -97,8 +97,8 @@ def test_v28_default_config_is_sparse_three_frame_v3_with_species_room() -> None
     assert config.genome_config.num_inputs == 221
     assert config.genome_config.initial_connection == "partial_direct"
     assert config.genome_config.connection_fraction == 0.15
-    assert config.pop_size == 100
-    assert config.species_set_config.compatibility_threshold == 2.45
+    assert config.pop_size == 50
+    assert config.species_set_config.compatibility_threshold == 2.4
 
 
 def test_v32_derives_time_to_intersection_from_config_input_width() -> None:

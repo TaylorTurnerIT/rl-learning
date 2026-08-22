@@ -20,7 +20,7 @@ C11: existing uncommitted `src/dodge/neat/config-xor` + `neat-testing.py` ⊥ ov
 C12: train workers default ≤8; `--workers` selects positive process count.
 C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency or external service.
 C14: retain ≤5 NEAT checkpoints per run; episode history ∉ checkpoint retention.
-C15: v3 defaults: population 100, compatibility target 6 species, fixed 12-seed champion benchmark every 5 generations.
+C15: v3 defaults: population 50, compatibility target 6 species, fixed 12-seed champion benchmark every 5 generations.
 
 §I
 
@@ -101,6 +101,7 @@ T15|x|exclude checkpoint callback from NEAT pickle|V24
 T16|x|add latest NEAT generation replay|V25,I.cli
 T17|x|add v2 NEAT search profile, seed schedule, intersection feature|V7,V26,V27,I.json
 T18|x|add v3 speciation diagnostics, benchmark, reproducible evolution, timeout recovery|C15,V28,V29,V30,V31,V32,I.cli
+T19|x|retune v3 population for viable species at v2-scale evaluation cost|C15,V28
 
 §B
 
@@ -136,3 +137,4 @@ B28|2026-08-22|v3 NEAT tests missed Ruff lint|mechanical format
 B29|2026-08-22|explicit 197-input config inherited 221-input default mode|V32
 B30|2026-08-22|v3 config-width test missed Ruff import order|mechanical format
 B31|2026-08-22|v3 threshold calibrated on evolved genome distances fragmented fresh population|V28
+B32|2026-08-22|v3 population doubled evaluation cost without clear early gain|C15,V28
