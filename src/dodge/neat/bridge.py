@@ -342,12 +342,18 @@ class PemsaStepBridge:
             raise ControlRuntimeError("Pemsa step bridge is not started")
         keys = ACTION_KEYS[action]
         for index, key in enumerate(keys):
+            accepted = False
             self._key("keydown", key)
             try:
                 prefix = ACCEPT_PREFIX if index == len(keys) - 1 else INPUT_PREFIX
                 self._wait_for(prefix)
+                accepted = prefix == ACCEPT_PREFIX
             finally:
-                self._key("keyup", key)
+                try:
+                    self._key("keyup", key)
+                except ControlRuntimeError:
+                    if not accepted:
+                        raise
             if index != len(keys) - 1:
                 self._wait_for(RELEASE_PREFIX)
         return self._wait_for_update()

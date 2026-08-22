@@ -55,6 +55,7 @@ V13: ∀ consecutive actions → final collection press clears physical-held sta
 V14: NEAT CLI recipes launch through `uv run` so declared Python dependencies are importable.
 V15: ∀ generation → report completed genomes; end → report best fitness + compact topology and strongest edges.
 V16: parallel worker result equals sequential per-genome 3-seed contract; parent writes history after worker result.
+V17: accepted terminal action → lost final key-release window error ! terminal result handling; pre-accept key errors ! fail.
 
 §T
 
@@ -66,6 +67,7 @@ T4|x|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
 T5|x|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 T6|x|add NEAT training progress + compact network summary|V15,I.cli
 T7|x|parallelize NEAT genome evaluation|V7,V16,I.cli
+T8|x|tolerate terminal window teardown after accepted action|V17
 
 §B
 
@@ -84,3 +86,4 @@ B11|2026-08-21|final action press remained held into the next decision boundary|
 B12|2026-08-21|NEAT devenv recipes bypassed the project uv environment|V14
 B13|2026-08-21|parallel evaluator imports and test task access missed Ruff rules|mechanical format
 B14|2026-08-21|spawn test import order missed Ruff rule|mechanical format
+B15|2026-08-21|terminal cartridge exit destroyed X11 window before final action keyup|V17

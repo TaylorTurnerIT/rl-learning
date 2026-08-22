@@ -11,8 +11,10 @@ from dodge.neat.bridge import (
     RELEASE_PREFIX,
     RESULT_PREFIX,
     STATE_PREFIX,
+    PemsaStepBridge,
     instrument_step_cartridge,
 )
+from dodge.neat.state import parse_raw_state
 
 
 def test_instrument_step_cartridge_creates_exact_step_harness() -> None:
@@ -54,3 +56,44 @@ def test_instrument_step_cartridge_rejects_unsupported_step_frames(
 def test_instrument_step_cartridge_requires_cartridge_markers() -> None:
     with pytest.raises(ControlRuntimeError, match="exactly one _init"):
         instrument_step_cartridge("__gfx__\n", seed=1, step_frames=4)
+
+
+def test_v17_accepted_final_action_tolerates_destroyed_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = PemsaStepBridge(seed=1)
+    bridge._pemsa = object()  # type: ignore[assignment]
+    bridge._window_id = "window"
+    keyup_count = 0
+    state = parse_raw_state("__state__0|0,0,0,0,4||", prefix="__state__")
+
+    def key(command: str, *_: str) -> None:
+        nonlocal keyup_count
+        if command == "keyup":
+            keyup_count += 1
+            if keyup_count == 2:
+                raise ControlRuntimeError("BadWindow")
+
+    monkeypatch.setattr(bridge, "_key", key)
+    monkeypatch.setattr(bridge, "_wait_for", lambda _: None)
+    monkeypatch.setattr(bridge, "_wait_for_update", lambda: state)
+
+    assert bridge.step("neutral") == state
+
+
+def test_v17_pre_accept_key_error_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = PemsaStepBridge(seed=1)
+    bridge._pemsa = object()  # type: ignore[assignment]
+    bridge._window_id = "window"
+
+    def key(command: str, *_: str) -> None:
+        if command == "keyup":
+            raise ControlRuntimeError("BadWindow")
+
+    monkeypatch.setattr(bridge, "_key", key)
+    monkeypatch.setattr(bridge, "_wait_for", lambda _: None)
+
+    with pytest.raises(ControlRuntimeError, match="BadWindow"):
+        bridge.step("neutral")
