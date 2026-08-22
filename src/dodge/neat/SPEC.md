@@ -27,6 +27,7 @@ json: raw state → player `{x,y,vx,vy,size}` + all `enemies` + all `aoes`.
 json: projection → fixed numeric vector, zero slots use `present=0`.
 json: episode history → seed, config, action trace, result, overflow telemetry.
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
+cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 
 §R
 
@@ -50,6 +51,7 @@ V11: diagonal action → matching simultaneous directional mask across exact ste
 V12: bridge serializes action bits while game paused; completed bit mask starts next exact step.
 V13: ∀ consecutive actions → final collection press clears physical-held state before game frames advance.
 V14: NEAT CLI recipes launch through `uv run` so declared Python dependencies are importable.
+V15: ∀ generation → report completed genomes; end → report best fitness + compact topology and strongest edges.
 
 §T
 
@@ -59,6 +61,7 @@ T2|x|capture raw state + fixed danger projection|V3,V4,C9,C10
 T3|x|add `DodgeEnv` reset/step + episode history|V1,V2,V5,V6,I.py,I.json
 T4|x|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
 T5|x|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
+T6|x|add NEAT training progress + compact network summary|V15,I.cli
 
 §B
 

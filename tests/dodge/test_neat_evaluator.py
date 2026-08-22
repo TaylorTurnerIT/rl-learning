@@ -10,7 +10,11 @@ from dodge.neat.environment import (
     Observation,
     Transition,
 )
-from dodge.neat.evaluator import DodgeEvaluator, action_from_outputs
+from dodge.neat.evaluator import (
+    DodgeEvaluator,
+    action_from_outputs,
+    compact_network_summary,
+)
 from dodge.neat.state import ProjectedObservation, parse_raw_state
 
 
@@ -92,3 +96,52 @@ def test_action_from_outputs_requires_nine_actions() -> None:
     assert action_from_outputs((0.0,) * 8 + (1.0,)) == "down_right"
     with pytest.raises(ValueError, match="exactly 9"):
         action_from_outputs((0.0,))
+
+
+def test_evaluator_reports_genome_progress_and_generation_best() -> None:
+    messages: list[str] = []
+    evaluator = DodgeEvaluator(
+        environment_factory=FakeEnvironment,  # type: ignore[arg-type]
+        network_factory=lambda _genome, _config: FakeNetwork(),
+        seed_bank_factory=lambda: (11, 12, 13),
+        progress=messages.append,
+    )
+
+    evaluator(enumerate([Genome(), Genome()]), object())
+
+    assert messages[0] == "generation 1: evaluating 2 genomes on seeds [11, 12, 13]"
+    assert "genome 1/2" in messages[1]
+    assert "genome 2/2" in messages[2]
+    assert (
+        "generation 1 complete: best id=0 mean=12.0 network=unavailable" in messages[3]
+    )
+
+
+@dataclass
+class Connection:
+    weight: float
+    enabled: bool = True
+
+
+@dataclass
+class Node:
+    bias: float = 0
+
+
+class SummaryGenome:
+    nodes = {0: Node(), 1: Node(), 4: Node()}
+    connections = {(-1, 0): Connection(2.5), (-2, 1): Connection(-1.25)}
+
+
+class SummaryConfig:
+    class genome_config:
+        input_keys = (-1, -2)
+        output_keys = (0, 1)
+
+
+def test_compact_network_summary_describes_topology_and_strongest_edges() -> None:
+    summary = compact_network_summary(SummaryGenome(), SummaryConfig())
+
+    assert summary == (
+        "network=2→1→2 edges=2/2 top=[player.x→neutral:+2.50, player.y→left:-1.25]"
+    )

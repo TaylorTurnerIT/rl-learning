@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         enemy_slots=arguments.enemy_slots,
         aoe_slots=arguments.aoe_slots,
         history_directory=run_directory,
+        progress=print,
     )
     population = neat.Population(config)
     population.add_reporter(neat.StdOutReporter(True))
