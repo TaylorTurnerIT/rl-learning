@@ -6,7 +6,10 @@ from dodge.control import ControlRuntimeError
 from dodge.neat.bridge import (
     ACCEPT_PREFIX,
     ACTION_KEYS,
+    INPUT_PREFIX,
     READY_PREFIX,
+    RELEASE_PREFIX,
+    STATE_PREFIX,
     instrument_step_cartridge,
 )
 
@@ -20,14 +23,17 @@ def test_instrument_step_cartridge_creates_exact_step_harness() -> None:
     assert "__dodge_remaining=4" in result
     assert READY_PREFIX in result
     assert ACCEPT_PREFIX in result
+    assert INPUT_PREFIX in result
+    assert RELEASE_PREFIX in result
+    assert STATE_PREFIX in result
     assert "__dodge_game_btn=btn" in result
     assert "function _draw()\nend" in result
 
 
 def test_step_actions_use_dedicated_directional_key_sets() -> None:
-    assert ACTION_KEYS["up_left"] == ("Left", "Up")
-    assert ACTION_KEYS["neutral"] == ("x",)
-    assert ACTION_KEYS["down_right"] == ("Right", "Down")
+    assert ACTION_KEYS["up_left"] == ("x", "Left", "Up", "x")
+    assert ACTION_KEYS["neutral"] == ("x", "x")
+    assert ACTION_KEYS["down_right"] == ("x", "Right", "Down", "x")
 
 
 @pytest.mark.parametrize("step_frames", [2, 6])

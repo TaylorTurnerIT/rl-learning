@@ -45,12 +45,15 @@ V6: reset seed omitted → entropy seed; explicit seed preserved in result/histo
 V7: ∀ generation genomes → same 3 seeds; fitness = mean `survival_frames`; future generation → fresh bank.
 V8: stored episode trace replays visibly without physical controls.
 V9: bridge holds injected keys until Pemsa acknowledges action; release follows acknowledgement.
+V10: bridge discovers input window after game-ready boundary; ⊥ transient startup window.
+V11: diagonal action → matching simultaneous directional mask across exact step frames.
+V12: bridge serializes action bits while game paused; completed bit mask starts next exact step.
 
 §T
 
 id|status|task|cites
 T1|x|prove hidden Pemsa step bridge|V1,V2,C1,C2,C3,C4,C5
-T2|.|capture raw state + fixed danger projection|V3,V4,C9,C10
+T2|x|capture raw state + fixed danger projection|V3,V4,C9,C10
 T3|.|add `DodgeEnv` reset/step + episode history|V1,V2,V5,V6,I.py,I.json
 T4|.|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
 T5|.|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
@@ -60,3 +63,6 @@ T5|.|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 id|date|cause|fix
 B1|2026-08-21|bridge lines exceeded Ruff width|mechanical format
 B2|2026-08-21|`stat(31)` ignored targeted X11 key|V9
+B3|2026-08-21|raw-state Lua lines exceeded Ruff width|mechanical format
+B4|2026-08-21|bridge captured transient Pemsa startup window|V10
+B5|2026-08-21|Pemsa backend retains one injected button state|V11,V12

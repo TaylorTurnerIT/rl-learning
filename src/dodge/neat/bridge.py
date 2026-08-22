@@ -11,6 +11,7 @@ from threading import Thread
 from typing import Literal, TextIO
 
 from dodge.control import CARTRIDGE_PATH, PEMSA_PATH, ControlRuntimeError
+from dodge.neat.state import RawState, parse_raw_state
 
 Direction = Literal[
     "neutral",
@@ -26,16 +27,19 @@ Direction = Literal[
 
 READY_PREFIX = "__dodge_neat_ready__"
 ACCEPT_PREFIX = "__dodge_neat_accept__"
+INPUT_PREFIX = "__dodge_neat_input__"
+RELEASE_PREFIX = "__dodge_neat_release__"
+STATE_PREFIX = "__dodge_neat_state__"
 ACTION_KEYS: dict[Direction, tuple[str, ...]] = {
-    "up_left": ("Left", "Up"),
-    "up": ("Up",),
-    "up_right": ("Right", "Up"),
-    "left": ("Left",),
-    "neutral": ("x",),
-    "right": ("Right",),
-    "down_left": ("Left", "Down"),
-    "down": ("Down",),
-    "down_right": ("Right", "Down"),
+    "up_left": ("x", "Left", "Up", "x"),
+    "up": ("x", "Up", "x"),
+    "up_right": ("x", "Right", "Up", "x"),
+    "left": ("x", "Left", "x"),
+    "neutral": ("x", "x"),
+    "right": ("x", "Right", "x"),
+    "down_left": ("x", "Left", "Down", "x"),
+    "down": ("x", "Down", "x"),
+    "down_right": ("x", "Right", "Down", "x"),
 }
 
 
@@ -59,6 +63,13 @@ __dodge_waiting=false
 __dodge_remaining=0
 __dodge_started=false
 __dodge_frames=0
+__dodge_previous_px=0
+__dodge_previous_py=0
+__dodge_player_vx=0
+__dodge_player_vy=0
+__dodge_collecting=false
+__dodge_pending_mask=0
+__dodge_physical_held=false
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -88,7 +99,44 @@ function __dodge_advance_transition()
 end
 
 function __dodge_ready()
+ __dodge_emit_state()
  printh("{READY_PREFIX}"..tostr(__dodge_frames))
+end
+
+function __dodge_join(values)
+ local result=""
+ for value in all(values) do
+  result=result..(result!="" and ";" or "")..value
+ end
+ return result
+end
+
+function __dodge_entity(x,y,vx,vy,w,h,kind,stage)
+ return tostr(x)..","..tostr(y)..","..tostr(vx)..","..
+  tostr(vy)..","..tostr(w)..","..tostr(h)..","..
+  tostr(kind)..","..tostr(stage)
+end
+
+function __dodge_emit_state()
+ local enemy_state={{}}
+ local aoe_state={{}}
+ for entity in all(enemies) do
+  local width=entity.p>=2 and 8 or entity.s
+  local height=entity.p>=2 and 8 or entity.s
+  local value=__dodge_entity(
+   entity.x,entity.y,entity.vx,entity.vy,width,height,entity.p,0)
+  if entity.p==-1 then add(aoe_state,value) else add(enemy_state,value) end
+ end
+ if cp and cp.rects then
+  for rect in all(cp.rects) do
+   add(aoe_state,__dodge_entity(
+    rect.x,rect.y,rect.dx or 0,rect.dy or 0,rect.w,rect.h,-2,rect.sh or 0))
+  end
+ end
+ local player=tostr(px)..","..tostr(py)..","..tostr(__dodge_player_vx)..","..
+  tostr(__dodge_player_vy)..","..tostr(size)
+ printh("{STATE_PREFIX}"..tostr(__dodge_frames).."|"..player.."|"..
+  __dodge_join(enemy_state).."|"..__dodge_join(aoe_state))
 end
 
 function _update60()
@@ -103,6 +151,8 @@ function _update60()
 
  if not __dodge_started then
   __dodge_started=true
+  __dodge_previous_px=px
+  __dodge_previous_py=py
   __dodge_waiting=true
   __dodge_mask=0
   __dodge_ready()
@@ -111,14 +161,39 @@ function _update60()
 
  if __dodge_waiting then
   local physical_mask=__dodge_game_btn()
-  if physical_mask==0 then return end
-  __dodge_mask=physical_mask==32 and 0 or physical_mask
-  __dodge_remaining={step_frames}
-  __dodge_waiting=false
-  printh("{ACCEPT_PREFIX}"..tostr(__dodge_frames))
+  if physical_mask==0 then
+   if __dodge_physical_held then
+    __dodge_physical_held=false
+    printh("{RELEASE_PREFIX}"..tostr(__dodge_frames))
+   end
+   return
+  end
+  if __dodge_physical_held then return end
+  __dodge_physical_held=true
+  if physical_mask==32 then
+   if __dodge_collecting then
+    __dodge_mask=__dodge_pending_mask
+    __dodge_remaining={step_frames}
+    __dodge_waiting=false
+    __dodge_collecting=false
+    printh("{ACCEPT_PREFIX}"..tostr(__dodge_frames))
+   else
+    __dodge_collecting=true
+    __dodge_pending_mask=0
+    printh("{INPUT_PREFIX}"..tostr(__dodge_frames))
+   end
+  elseif __dodge_collecting then
+   __dodge_pending_mask+=physical_mask
+   printh("{INPUT_PREFIX}"..tostr(__dodge_frames))
+  end
+  if __dodge_waiting then return end
  end
 
  __dodge_game_update60()
+ __dodge_player_vx=px-__dodge_previous_px
+ __dodge_player_vy=py-__dodge_previous_py
+ __dodge_previous_px=px
+ __dodge_previous_py=py
  __dodge_previous_mask=__dodge_mask
  __dodge_frames+=1
  __dodge_remaining-=1
@@ -155,7 +230,7 @@ class PemsaStepBridge:
         self._display_value: str | None = None
         self._lines: queue.Queue[str] = queue.Queue()
 
-    def start(self) -> int:
+    def start(self) -> RawState:
         if self._pemsa is not None:
             raise ControlRuntimeError("Pemsa step bridge already started")
         try:
@@ -191,21 +266,26 @@ class PemsaStepBridge:
                 errors="replace",
             )
             self._start_reader()
+            state = self._wait_for_ready()
             self._window_id = self._wait_for_window(display)
-            return self._wait_for_ready()
+            return state
         except Exception:
             self.close()
             raise
 
-    def step(self, action: Direction) -> int:
+    def step(self, action: Direction) -> RawState:
         if self._pemsa is None or self._window_id is None:
             raise ControlRuntimeError("Pemsa step bridge is not started")
         keys = ACTION_KEYS[action]
-        self._key("keydown", *keys)
-        try:
-            self._wait_for_accept()
-        finally:
-            self._key("keyup", *reversed(keys))
+        for index, key in enumerate(keys):
+            self._key("keydown", key)
+            try:
+                prefix = ACCEPT_PREFIX if index == len(keys) - 1 else INPUT_PREFIX
+                self._wait_for(prefix)
+            finally:
+                self._key("keyup", key)
+            if index != len(keys) - 1:
+                self._wait_for(RELEASE_PREFIX)
         return self._wait_for_ready()
 
     def close(self) -> None:
@@ -276,29 +356,38 @@ class PemsaStepBridge:
                 text=True,
             )
             if result.returncode == 0 and result.stdout.split():
-                return result.stdout.split()[0]
+                return result.stdout.split()[-1]
             self._raise_if_stopped()
             time.sleep(0.05)
         raise ControlRuntimeError("timed out waiting for hidden Pemsa window")
 
-    def _wait_for_ready(self) -> int:
+    def _wait_for_ready(self) -> RawState:
         deadline = time.monotonic() + self.startup_timeout
+        state: RawState | None = None
         while time.monotonic() < deadline:
             self._raise_if_stopped()
             try:
                 line = self._lines.get(timeout=0.05)
             except queue.Empty:
                 continue
+            if line.startswith(STATE_PREFIX):
+                state = parse_raw_state(line, prefix=STATE_PREFIX)
+                continue
             if line.startswith(READY_PREFIX):
                 try:
-                    return int(line.removeprefix(READY_PREFIX))
+                    int(line.removeprefix(READY_PREFIX))
                 except ValueError as error:
                     raise ControlRuntimeError(
                         f"invalid Pemsa ready line: {line!r}"
                     ) from error
+                if state is None:
+                    raise ControlRuntimeError(
+                        "Pemsa step boundary did not include state"
+                    )
+                return state
         raise ControlRuntimeError("timed out waiting for Pemsa step boundary")
 
-    def _wait_for_accept(self) -> None:
+    def _wait_for(self, prefix: str) -> None:
         deadline = time.monotonic() + self.startup_timeout
         while time.monotonic() < deadline:
             self._raise_if_stopped()
@@ -306,9 +395,11 @@ class PemsaStepBridge:
                 line = self._lines.get(timeout=0.05)
             except queue.Empty:
                 continue
-            if line.startswith(ACCEPT_PREFIX):
+            if line.startswith(prefix):
                 return
-        raise ControlRuntimeError("timed out waiting for Pemsa action acknowledgement")
+        raise ControlRuntimeError(
+            f"timed out waiting for Pemsa protocol line: {prefix}"
+        )
 
     def _key(self, command: str, *keys: str) -> None:
         if self._window_id is None:
