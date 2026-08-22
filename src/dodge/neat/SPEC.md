@@ -67,6 +67,7 @@ V20: replay holds menu `x` through transition, pauses at game-ready, releases be
 V21: transient hidden-X11 input ack → release + retry while paused; one failed episode → same-seed retry; repeat failure → error.
 V22: completed generation → atomic checkpoint + run record; resume latest → saved population/species/RNG next gen; retain ≤5 checkpoints.
 V23: `RunCheckpointer` ∈ full NEAT reporter lifecycle; ⊥ missing hook abort generation.
+V24: checkpoint pickle ⊥ live callback; tiny live population completes gen1 → checkpoint exists.
 
 §T
 
@@ -85,6 +86,7 @@ T11|x|fix NEAT replay menu bootstrap timing|V5,V8,V20
 T12|x|retry transient hidden-X11 input and deterministic episode|V21
 T13|x|add NEAT checkpoint retention + resume|V22,I.cli
 T14|x|make checkpoint reporter full NEAT reporter|V23
+T15|x|exclude checkpoint callback from NEAT pickle|V24
 
 §B
 
@@ -110,3 +112,4 @@ B18|2026-08-22|final report imported `Iterable` from legacy module|mechanical fo
 B19|2026-08-22|v1 NEAT bridge observed virtual mouse while replay disabled it|V20
 B20|2026-08-22|a single missed X11 key ack aborted a parallel generation|V21
 B21|2026-08-22|checkpoint reporter lacked NEAT `post_evaluate` hook|V23
+B22|2026-08-22|checkpoint pickle captured local run-record callback via species reporters|V24

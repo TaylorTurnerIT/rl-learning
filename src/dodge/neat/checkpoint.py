@@ -15,6 +15,10 @@ CHECKPOINT_PREFIX = "checkpoint-"
 CheckpointSaved = Callable[[int, Path], None]
 
 
+def _discard_checkpoint_callback(_generation: int, _path: Path) -> None:
+    """Placeholder used only inside a restored NEAT checkpoint."""
+
+
 class RunCheckpointer(BaseReporter):
     """Save the next NEAT generation state after every completed generation."""
 
@@ -31,6 +35,11 @@ class RunCheckpointer(BaseReporter):
         self.on_saved = on_saved
         self.retention = retention
         self._generation: int | None = None
+
+    def __getstate__(self) -> dict[str, object]:
+        state = self.__dict__.copy()
+        state["on_saved"] = _discard_checkpoint_callback
+        return state
 
     def start_generation(self, generation: int) -> None:
         self._generation = generation

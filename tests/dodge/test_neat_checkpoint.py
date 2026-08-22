@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import gzip
 import pickle
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import neat
+import pytest
 from neat.reporting import ReporterSet
 
-from dodge.control import PROJECT_ROOT
+from dodge.control import PEMSA_PATH, PROJECT_ROOT
 from dodge.neat.checkpoint import (
     CHECKPOINT_RETENTION,
     RunCheckpointer,
     checkpoint_paths,
     latest_checkpoint,
 )
+from dodge.neat.train import main as train_main
 
 
 def test_v22_checkpoint_retention_keeps_only_the_newest_five(tmp_path: Path) -> None:
@@ -68,6 +72,18 @@ def test_v22_checkpoint_restores_neat_population_state(tmp_path: Path) -> None:
     assert set(restored.population) == set(population.population)
 
 
+def test_v24_checkpoint_excludes_live_save_callback_from_pickle(tmp_path: Path) -> None:
+    reporter = RunCheckpointer(tmp_path, on_saved=lambda _generation, _path: None)
+    reporters = ReporterSet()
+    reporters.add(reporter)
+    species = SimpleNamespace(reporters=reporters)
+
+    reporter.start_generation(0)
+    reporter.end_generation({}, {}, species)
+
+    assert latest_checkpoint(tmp_path).is_file()
+
+
 def test_v23_checkpoint_reporter_accepts_every_neat_lifecycle_hook(
     tmp_path: Path,
 ) -> None:
@@ -83,3 +99,39 @@ def test_v23_checkpoint_reporter_accepts_every_neat_lifecycle_hook(
     reporters.complete_extinction()
     reporters.found_solution({}, 0, object())
     reporters.end_generation({}, {}, {})
+
+
+@pytest.mark.skipif(
+    not PEMSA_PATH.is_file() or shutil.which("Xvfb") is None,
+    reason="requires the checked-in Pemsa runtime and Xvfb",
+)
+def test_v24_tiny_live_population_checkpoints_after_generation_one(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tiny-config-dodge"
+    config_path.write_text(
+        (PROJECT_ROOT / "src/dodge/neat/config-dodge")
+        .read_text(encoding="utf-8")
+        .replace("pop_size              = 50", "pop_size              = 2")
+        .replace("min_species_size   = 2", "min_species_size   = 1"),
+        encoding="utf-8",
+    )
+
+    assert (
+        train_main(
+            [
+                "--config",
+                str(config_path),
+                "--history-dir",
+                str(tmp_path / "history"),
+                "--generations",
+                "1",
+                "--workers",
+                "1",
+            ]
+        )
+        == 0
+    )
+
+    run_directory = next((tmp_path / "history").iterdir())
+    assert latest_checkpoint(run_directory).name == "checkpoint-000001.gz"
