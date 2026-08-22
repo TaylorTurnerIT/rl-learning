@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from dodge.neat.environment import NEAT_HISTORY_DIRECTORY
-from dodge.neat.evaluator import DodgeEvaluator, default_worker_count
+from dodge.neat.evaluator import (
+    DodgeEvaluator,
+    GenerationEvaluation,
+    default_worker_count,
+)
 
 DEFAULT_CONFIG = Path(__file__).with_name("config-dodge")
 
@@ -49,10 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         workers=arguments.workers,
     )
     population = neat.Population(config)
-    population.add_reporter(neat.StdOutReporter(True))
-    winner = population.run(evaluator, arguments.generations)
-    _write_run_record(run_directory, arguments, evaluator, winner)
-    print(json.dumps({"run": str(run_directory), "winner": str(winner)}))
+    population.run(evaluator, arguments.generations)
+    record = _write_run_record(run_directory, arguments, evaluator)
+    print("\nGeneration results")
+    print(format_generation_table(evaluator.generation_history))
+    print("\nTraining complete")
+    print(json.dumps(record["final_generation"], indent=2))
+    print(f"run: {run_directory}")
     return 0
 
 
@@ -67,23 +75,74 @@ def _write_run_record(
     run_directory: Path,
     arguments: argparse.Namespace,
     evaluator: DodgeEvaluator,
-    winner: object,
-) -> None:
-    last_generation = evaluator.last_generation
+) -> dict[str, object]:
+    generations = [
+        generation_summary(result) for result in evaluator.generation_history
+    ]
     record = {
         "kind": "neat_run",
         "config": str(arguments.config),
-        "generations": arguments.generations,
+        "requested_generations": arguments.generations,
         "step_frames": arguments.step_frames,
         "enemy_slots": arguments.enemy_slots,
         "aoe_slots": arguments.aoe_slots,
         "workers": arguments.workers,
-        "last_seed_bank": list(last_generation.seeds) if last_generation else [],
-        "winner": str(winner),
+        "generations": generations,
+        "final_generation": generations[-1] if generations else None,
     }
     (run_directory / "run.json").write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
+    return record
+
+
+def generation_summary(result: GenerationEvaluation) -> dict[str, object]:
+    fitness = tuple(result.mean_survival_frames.values())
+    average = sum(fitness) / len(fitness) if fitness else 0.0
+    return {
+        "generation": result.generation,
+        "population": len(fitness),
+        "average_survival_frames": average,
+        "best_survival_frames": result.best_fitness,
+        "best_genome_id": result.best_genome_id,
+        "seed_bank": list(result.seeds),
+        "network_visualization": (
+            str(result.network_visualization)
+            if result.network_visualization is not None
+            else None
+        ),
+    }
+
+
+def format_generation_table(generations: Iterable[GenerationEvaluation]) -> str:
+    rows = [generation_summary(generation) for generation in generations]
+    if not rows:
+        return "(no completed generations)"
+    headers = ("Gen", "Population", "Average", "Best", "Best ID", "Seeds")
+    values = [
+        (
+            str(row["generation"]),
+            str(row["population"]),
+            f"{float(row['average_survival_frames']):.1f}",
+            f"{float(row['best_survival_frames']):.1f}",
+            str(row["best_genome_id"]),
+            ",".join(str(seed) for seed in row["seed_bank"]),
+        )
+        for row in rows
+    ]
+    widths = [
+        max(len(header), *(len(row[index]) for row in values))
+        for index, header in enumerate(headers)
+    ]
+    header = "  ".join(
+        value.ljust(widths[index]) for index, value in enumerate(headers)
+    )
+    separator = "  ".join("-" * width for width in widths)
+    body = "\n".join(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in values
+    )
+    return "\n".join((header, separator, body))
 
 
 def _positive(value: str) -> int:

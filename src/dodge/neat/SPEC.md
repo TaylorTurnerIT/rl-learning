@@ -31,6 +31,7 @@ json: episode history → seed, config, action trace, result, overflow telemetry
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
+cli: `just dodge-neat-train` end → generation table + concise final fitness summary.
 file: `generation-####/network.html` → interactive best-genome weighted graph.
 
 §R
@@ -59,6 +60,7 @@ V15: ∀ generation → report completed genomes; end → report best fitness + 
 V16: parallel worker result equals sequential per-genome 3-seed contract; parent writes history after worker result.
 V17: accepted terminal action → lost final key-release window error ! terminal result handling; pre-accept key errors ! fail.
 V18: ∀ completed generation with best genome → write self-contained visual; slider spans strongest visible edges through every enabled edge.
+V19: train end → table row ∀ completed generation with population mean and best survival; ⊥ full genome dump.
 
 §T
 
@@ -72,6 +74,7 @@ T6|x|add NEAT training progress + compact network summary|V15,I.cli
 T7|x|parallelize NEAT genome evaluation|V7,V16,I.cli
 T8|x|tolerate terminal window teardown after accepted action|V17
 T9|x|write interactive best-network generation visual|V18,I.file
+T10|x|report final NEAT generation table and summary|V19,I.cli
 
 §B
 
@@ -93,3 +96,4 @@ B14|2026-08-21|spawn test import order missed Ruff rule|mechanical format
 B15|2026-08-21|terminal cartridge exit destroyed X11 window before final action keyup|V17
 B16|2026-08-21|embedded HTML lines exceed Python formatter width|template E501 exemption
 B17|2026-08-21|visual test expected runtime label in static HTML|assert embedded graph data
+B18|2026-08-22|final report imported `Iterable` from legacy module|mechanical format

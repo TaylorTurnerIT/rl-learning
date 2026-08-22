@@ -96,6 +96,7 @@ class DodgeEvaluator:
         self.workers = workers
         self.generation = 0
         self.last_generation: GenerationEvaluation | None = None
+        self.generation_history: list[GenerationEvaluation] = []
 
     def __call__(self, genomes: Iterable[tuple[int, object]], config: object) -> None:
         genome_items = tuple(genomes)
@@ -165,6 +166,7 @@ class DodgeEvaluator:
             network_summary=summary,
             network_visualization=visualization,
         )
+        self.generation_history.append(self.last_generation)
 
     def _evaluate_episode(self, network: Network, seed: int) -> EpisodeTrace:
         environment = self._environment_factory(
