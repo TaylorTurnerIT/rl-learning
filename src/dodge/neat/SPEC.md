@@ -57,7 +57,7 @@ T1|x|prove hidden Pemsa step bridge|V1,V2,C1,C2,C3,C4,C5
 T2|x|capture raw state + fixed danger projection|V3,V4,C9,C10
 T3|x|add `DodgeEnv` reset/step + episode history|V1,V2,V5,V6,I.py,I.json
 T4|x|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
-T5|.|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
+T5|x|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 
 §B
 
