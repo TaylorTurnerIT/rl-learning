@@ -7,6 +7,7 @@
     pkgs.ruff
     pkgs.SDL2
     pkgs.xdotool
+    pkgs.xorg.xorgserver
     pkgs.zlib
   ];
 
