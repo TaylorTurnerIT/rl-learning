@@ -34,6 +34,15 @@ wheels = [
 ]
 
 [[package]]
+name = "neat-python"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/2d/6d3d96cde074bcbdc3fae08383bb6a9b2da2f98c405d16acceccc36c14c3/neat_python-2.0.0.tar.gz", hash = "sha256:fcfb5020aa3df5c12638865296589159939db08e9aa4191d9cf4e5b242a5d9cf", size = 126031, upload-time = "2026-03-02T17:13:16.587Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/a6/e85e39f593e3bd8ccc2dc57abf60c9a51fbc542616531629d988c05de484/neat_python-2.0.0-py3-none-any.whl", hash = "sha256:4ba18bec7b1d1dfa659348e28156f36007ebc111d46eb4ddc07a128377b459f7", size = 54056, upload-time = "2026-03-02T17:13:15.233Z" },
+]
+
+[[package]]
 name = "numpy"
 version = "2.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -356,6 +365,7 @@ name = "rl-learning"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "neat-python" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
@@ -369,6 +379,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "neat-python", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pydantic", specifier = ">=2.0.0" },
 ]
