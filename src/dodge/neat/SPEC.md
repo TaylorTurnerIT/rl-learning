@@ -18,6 +18,7 @@ C9: fixed NEAT projection = player + 16 enemies + 8 AOEs; raw state retains all 
 C10: overflow telemetry ! report; ⊥ fail episode.
 C11: existing uncommitted `src/dodge/neat/config-xor` + `neat-testing.py` ⊥ overwrite.
 C12: train workers default ≤8; `--workers` selects positive process count.
+C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency or external service.
 
 §I
 
@@ -30,6 +31,7 @@ json: episode history → seed, config, action trace, result, overflow telemetry
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
+file: `generation-####/network.html` → interactive best-genome weighted graph.
 
 §R
 
@@ -56,6 +58,7 @@ V14: NEAT CLI recipes launch through `uv run` so declared Python dependencies ar
 V15: ∀ generation → report completed genomes; end → report best fitness + compact topology and strongest edges.
 V16: parallel worker result equals sequential per-genome 3-seed contract; parent writes history after worker result.
 V17: accepted terminal action → lost final key-release window error ! terminal result handling; pre-accept key errors ! fail.
+V18: ∀ completed generation with best genome → write self-contained visual; slider spans strongest visible edges through every enabled edge.
 
 §T
 
@@ -68,6 +71,7 @@ T5|x|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 T6|x|add NEAT training progress + compact network summary|V15,I.cli
 T7|x|parallelize NEAT genome evaluation|V7,V16,I.cli
 T8|x|tolerate terminal window teardown after accepted action|V17
+T9|x|write interactive best-network generation visual|V18,I.file
 
 §B
 
@@ -87,3 +91,5 @@ B12|2026-08-21|NEAT devenv recipes bypassed the project uv environment|V14
 B13|2026-08-21|parallel evaluator imports and test task access missed Ruff rules|mechanical format
 B14|2026-08-21|spawn test import order missed Ruff rule|mechanical format
 B15|2026-08-21|terminal cartridge exit destroyed X11 window before final action keyup|V17
+B16|2026-08-21|embedded HTML lines exceed Python formatter width|template E501 exemption
+B17|2026-08-21|visual test expected runtime label in static HTML|assert embedded graph data

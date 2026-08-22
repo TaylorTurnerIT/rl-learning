@@ -11,6 +11,7 @@ from typing import Protocol
 
 from dodge.neat.bridge import Direction
 from dodge.neat.environment import DodgeEnv, EpisodeTrace, save_episode_trace
+from dodge.neat.visual import write_network_visualization
 
 ACTIONS: tuple[Direction, ...] = (
     "neutral",
@@ -46,6 +47,7 @@ class GenerationEvaluation:
     best_genome_id: int | None
     best_fitness: float | None
     network_summary: str
+    network_visualization: Path | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,12 +142,18 @@ class DodgeEvaluator:
             enemy_slots=self.enemy_slots,
             aoe_slots=self.aoe_slots,
         )
+        visualization = self._save_network_visualization(
+            generation,
+            best_genome,
+            config,
+        )
+        visual_suffix = f" visual={visualization}" if visualization is not None else ""
         if best_fitness is None:
             self._report(f"generation {generation} complete: no genomes")
         else:
             self._report(
                 f"generation {generation} complete: best id={best_genome_id} "
-                f"mean={best_fitness:.1f} {summary}"
+                f"mean={best_fitness:.1f} {summary}{visual_suffix}"
             )
         self.last_generation = GenerationEvaluation(
             generation=generation,
@@ -155,6 +163,7 @@ class DodgeEvaluator:
             best_genome_id=best_genome_id,
             best_fitness=best_fitness,
             network_summary=summary,
+            network_visualization=visualization,
         )
 
     def _evaluate_episode(self, network: Network, seed: int) -> EpisodeTrace:
@@ -264,6 +273,23 @@ class DodgeEvaluator:
                 directory,
                 filename=f"genome-{genome_id:04d}-seed-{trace.seed}.json",
             )
+
+    def _save_network_visualization(
+        self,
+        generation: int,
+        genome: object | None,
+        config: object,
+    ) -> Path | None:
+        if self.history_directory is None or genome is None:
+            return None
+        directory = self.history_directory / f"generation-{generation:04d}"
+        return write_network_visualization(
+            genome,
+            config,
+            directory,
+            enemy_slots=self.enemy_slots,
+            aoe_slots=self.aoe_slots,
+        )
 
     def _report(self, message: str) -> None:
         if self._progress is not None:

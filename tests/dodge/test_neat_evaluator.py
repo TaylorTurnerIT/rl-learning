@@ -198,13 +198,16 @@ def test_parallel_evaluator_preserves_three_seed_fitness_and_parent_history(
         seed_bank_factory=lambda: (11, 12, 13),
         parallel_executor_factory=ImmediateExecutor,  # type: ignore[arg-type]
     )
-    genomes = [Genome(), Genome()]
+    genomes = [SummaryGenome(), SummaryGenome()]
 
-    evaluator(enumerate(genomes), object())
+    evaluator(enumerate(genomes), SummaryConfig())
 
     assert [genome.fitness for genome in genomes] == [12, 12]
     assert evaluator.last_generation is not None
     assert evaluator.last_generation.seeds == (11, 12, 13)
+    assert evaluator.last_generation.network_visualization == (
+        tmp_path / "generation-0001/network.html"
+    )
     paths = sorted((tmp_path / "generation-0001").glob("*.json"))
     assert [path.name for path in paths] == [
         "genome-0000-seed-11.json",
@@ -215,6 +218,7 @@ def test_parallel_evaluator_preserves_three_seed_fitness_and_parent_history(
         "genome-0001-seed-13.json",
     ]
     assert load_episode(paths[0]).seed == 11
+    assert (tmp_path / "generation-0001/network.html").is_file()
 
 
 def test_parallel_evaluator_rejects_custom_unpicklable_factories() -> None:
