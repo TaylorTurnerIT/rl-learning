@@ -48,6 +48,7 @@ V9: bridge holds injected keys until Pemsa acknowledges action; release follows 
 V10: bridge discovers input window after game-ready boundary; ⊥ transient startup window.
 V11: diagonal action → matching simultaneous directional mask across exact step frames.
 V12: bridge serializes action bits while game paused; completed bit mask starts next exact step.
+V13: ∀ consecutive actions → final collection press clears physical-held state before game frames advance.
 
 §T
 
@@ -55,7 +56,7 @@ id|status|task|cites
 T1|x|prove hidden Pemsa step bridge|V1,V2,C1,C2,C3,C4,C5
 T2|x|capture raw state + fixed danger projection|V3,V4,C9,C10
 T3|x|add `DodgeEnv` reset/step + episode history|V1,V2,V5,V6,I.py,I.json
-T4|.|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
+T4|x|add 3-seed NEAT evaluation + replay command|V5,V7,V8,I.cli
 T5|.|add focused + end-to-end regression tests|V1,V2,V3,V4,V5,V6,V7,V8
 
 §B
@@ -69,3 +70,6 @@ B5|2026-08-21|Pemsa backend retains one injected button state|V11,V12
 B6|2026-08-21|new-module lint scope included user-owned starter script|narrow verification scope
 B7|2026-08-21|new environment imports were not Ruff-isort ordered|mechanical format
 B8|2026-08-21|user-modified GA mutation invalidated fixed-length elite test|exclude unrelated dirty behavior
+B9|2026-08-21|new evaluator missed Ruff import and assignment rules|mechanical format
+B10|2026-08-21|Python formatter was applied to Nix and Just files|format Python scope only
+B11|2026-08-21|final action press remained held into the next decision boundary|V13

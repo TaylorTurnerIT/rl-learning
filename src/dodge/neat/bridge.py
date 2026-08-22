@@ -231,6 +231,7 @@ function _update60()
     __dodge_remaining={step_frames}
     __dodge_waiting=false
     __dodge_collecting=false
+    __dodge_physical_held=false
     printh("{ACCEPT_PREFIX}"..tostr(__dodge_frames))
    else
     __dodge_collecting=true

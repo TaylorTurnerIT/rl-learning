@@ -45,3 +45,11 @@ dodge-replay-run history:
 [group("dodge")]
 dodge-replay-latest epoch:
     devenv shell -- dodge-replay-latest {{epoch}}
+
+[group("dodge")]
+dodge-neat-train *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train {{options}}
+
+[group("dodge")]
+dodge-neat-replay episode:
+    devenv shell -- dodge-neat-replay {{episode}}

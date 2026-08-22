@@ -30,6 +30,7 @@ def test_instrument_step_cartridge_creates_exact_step_harness() -> None:
     assert RESULT_PREFIX in result
     assert "__dodge_survival_frames" in result
     assert "__dodge_max_enemies" in result
+    assert "__dodge_collecting=false\n    __dodge_physical_held=false" in result
     assert "__dodge_game_btn=btn" in result
     assert "function _draw()\nend" in result
 
