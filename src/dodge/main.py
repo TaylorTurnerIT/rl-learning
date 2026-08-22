@@ -50,7 +50,7 @@ def breed_next_generation(
 
 def main():
     # Initialize config
-    population: int = 100
+    population: int = 50
     mutation_chance: float = 0.05
 
     # Create brain
