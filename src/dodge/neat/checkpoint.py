@@ -8,12 +8,14 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from neat.reporting import BaseReporter
+
 CHECKPOINT_RETENTION = 5
 CHECKPOINT_PREFIX = "checkpoint-"
 CheckpointSaved = Callable[[int, Path], None]
 
 
-class RunCheckpointer:
+class RunCheckpointer(BaseReporter):
     """Save the next NEAT generation state after every completed generation."""
 
     def __init__(

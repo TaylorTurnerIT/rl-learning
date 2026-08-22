@@ -5,6 +5,7 @@ import pickle
 from pathlib import Path
 
 import neat
+from neat.reporting import ReporterSet
 
 from dodge.control import PROJECT_ROOT
 from dodge.neat.checkpoint import (
@@ -65,3 +66,20 @@ def test_v22_checkpoint_restores_neat_population_state(tmp_path: Path) -> None:
 
     assert restored.generation == 1
     assert set(restored.population) == set(population.population)
+
+
+def test_v23_checkpoint_reporter_accepts_every_neat_lifecycle_hook(
+    tmp_path: Path,
+) -> None:
+    reporter = RunCheckpointer(tmp_path, on_saved=lambda _generation, _path: None)
+    reporters = ReporterSet()
+    reporters.add(reporter)
+
+    reporters.start_generation(0)
+    reporters.post_evaluate({}, {}, {}, object())
+    reporters.post_reproduction({}, {}, {})
+    reporters.species_stagnant(1, object())
+    reporters.info("checkpoint test")
+    reporters.complete_extinction()
+    reporters.found_solution({}, 0, object())
+    reporters.end_generation({}, {}, {})

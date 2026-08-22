@@ -66,6 +66,7 @@ V19: train end → table row ∀ completed generation with population mean and b
 V20: replay holds menu `x` through transition, pauses at game-ready, releases between actions; trace retains its mouse-input mode; stored action frames → exact game updates.
 V21: transient hidden-X11 input ack → release + retry while paused; one failed episode → same-seed retry; repeat failure → error.
 V22: completed generation → atomic checkpoint + run record; resume latest → saved population/species/RNG next gen; retain ≤5 checkpoints.
+V23: `RunCheckpointer` ∈ full NEAT reporter lifecycle; ⊥ missing hook abort generation.
 
 §T
 
@@ -83,6 +84,7 @@ T10|x|report final NEAT generation table and summary|V19,I.cli
 T11|x|fix NEAT replay menu bootstrap timing|V5,V8,V20
 T12|x|retry transient hidden-X11 input and deterministic episode|V21
 T13|x|add NEAT checkpoint retention + resume|V22,I.cli
+T14|x|make checkpoint reporter full NEAT reporter|V23
 
 §B
 
@@ -107,3 +109,4 @@ B17|2026-08-21|visual test expected runtime label in static HTML|assert embedded
 B18|2026-08-22|final report imported `Iterable` from legacy module|mechanical format
 B19|2026-08-22|v1 NEAT bridge observed virtual mouse while replay disabled it|V20
 B20|2026-08-22|a single missed X11 key ack aborted a parallel generation|V21
+B21|2026-08-22|checkpoint reporter lacked NEAT `post_evaluate` hook|V23
