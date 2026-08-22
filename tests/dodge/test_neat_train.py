@@ -15,6 +15,7 @@ from dodge.neat.train import (
     DEFAULT_CONFIG,
     RUN_VERSION,
     _config_sha256,
+    _configured_time_to_intersection,
     _validate_resume,
     _write_run_record,
     format_generation_table,
@@ -41,9 +42,18 @@ def test_final_generation_table_shows_average_and_best_fitness() -> None:
         (_generation(1, first=100, second=300), _generation(2, first=200, second=500))
     )
 
-    assert "Gen  Population  Average  Best   Validation  Best ID  Seeds" in table
-    assert "1    2           200.0    300.0  -           11       1,2,3" in table
-    assert "2    2           350.0    500.0  -           11       2,3,4" in table
+    assert (
+        "Gen  Population  Average  Best   Validation  Benchmark  Species  Best ID  "
+        "Seeds" in table
+    )
+    assert (
+        "1    2           200.0    300.0  -           -          -        11       "
+        "1,2,3" in table
+    )
+    assert (
+        "2    2           350.0    500.0  -           -          -        11       "
+        "2,3,4" in table
+    )
 
 
 def test_run_record_keeps_concise_generation_results(tmp_path: Path) -> None:
@@ -70,9 +80,10 @@ def test_run_record_keeps_concise_generation_results(tmp_path: Path) -> None:
     assert "winner" not in saved
     assert saved["version"] == RUN_VERSION
     assert saved["checkpoint_retention"] == 5
+    assert saved["evolution_seed"] is None
 
 
-def test_v26_default_config_is_sparse_three_frame_v2() -> None:
+def test_v28_default_config_is_sparse_three_frame_v3_with_species_room() -> None:
     import neat
 
     config = neat.Config(
@@ -86,6 +97,36 @@ def test_v26_default_config_is_sparse_three_frame_v2() -> None:
     assert config.genome_config.num_inputs == 221
     assert config.genome_config.initial_connection == "partial_direct"
     assert config.genome_config.connection_fraction == 0.15
+    assert config.pop_size == 100
+    assert config.species_set_config.compatibility_threshold == 2.45
+
+
+def test_v32_derives_time_to_intersection_from_config_input_width() -> None:
+    import neat
+
+    legacy_config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        DEFAULT_CONFIG.with_name("config-dodge"),
+    )
+    enhanced_config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        DEFAULT_CONFIG,
+    )
+
+    assert (
+        _configured_time_to_intersection(legacy_config, enemy_slots=16, aoe_slots=8)
+        is False
+    )
+    assert (
+        _configured_time_to_intersection(enhanced_config, enemy_slots=16, aoe_slots=8)
+        is True
+    )
 
 
 def test_resume_rejects_changed_observation_settings() -> None:
@@ -139,8 +180,12 @@ class _FakeEvaluator:
 
 class _FakePopulation:
     def __init__(
-        self, _config: object, state: tuple[object, ...] | None = None
+        self,
+        _config: object,
+        state: tuple[object, ...] | None = None,
+        seed: int | None = None,
     ) -> None:
+        self.seed = seed
         self.population = {1: "genome"}
         self.species = {"species": 1}
         self.generation = 0
@@ -187,7 +232,9 @@ def test_v22_main_creates_and_resumes_the_same_checkpointed_run(
         DefaultReproduction=object,
         DefaultSpeciesSet=object,
         DefaultStagnation=object,
-        Config=lambda *_args: {"config": "fake"},
+        Config=lambda *_args: SimpleNamespace(
+            genome_config=SimpleNamespace(input_keys=tuple(range(221)))
+        ),
         Population=_FakePopulation,
         Checkpointer=_FakeCheckpointer,
     )
@@ -195,7 +242,19 @@ def test_v22_main_creates_and_resumes_the_same_checkpointed_run(
     monkeypatch.setitem(sys.modules, "neat", fake_neat)
     monkeypatch.setattr("dodge.neat.train.DodgeEvaluator", _FakeEvaluator)
 
-    assert main(["--history-dir", str(tmp_path), "--generations", "1"]) == 0
+    assert (
+        main(
+            [
+                "--history-dir",
+                str(tmp_path),
+                "--generations",
+                "1",
+                "--evolution-seed",
+                "123",
+            ]
+        )
+        == 0
+    )
     run_directory = next(tmp_path.iterdir())
     assert main(["--resume", str(run_directory), "--generations", "1"]) == 0
 
@@ -207,4 +266,5 @@ def test_v22_main_creates_and_resumes_the_same_checkpointed_run(
     assert record["step_frames"] == 3
     assert record["time_to_intersection"] is True
     assert record["seed_bank_generations"] == 5
+    assert record["evolution_seed"] == 123
     assert _FakeCheckpointer.restores == [run_directory / "checkpoint-000001.gz"]

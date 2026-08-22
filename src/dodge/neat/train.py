@@ -23,11 +23,16 @@ from dodge.neat.evaluator import (
     SeedBankSchedule,
     default_worker_count,
 )
+from dodge.neat.speciation import (
+    SpeciesMetrics,
+    ensure_species_monitor,
+    format_species_metrics,
+)
 
-DEFAULT_CONFIG = Path(__file__).with_name("config-dodge-v2")
+DEFAULT_CONFIG = Path(__file__).with_name("config-dodge-v3")
 DEFAULT_STEP_FRAMES = 3
-DEFAULT_TIME_TO_INTERSECTION = True
-RUN_VERSION = 2
+RUN_VERSION = 3
+RESUMABLE_RUN_VERSIONS = (2, RUN_VERSION)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         default=default_worker_count(),
         help="concurrent genome workers (default: up to 8 CPU cores)",
     )
+    parser.add_argument(
+        "--evolution-seed",
+        type=_nonnegative,
+        help="population RNG seed; omitted new runs receive and record entropy",
+    )
     arguments = parser.parse_args(argv)
 
     existing: dict[str, object] | None = None
@@ -70,16 +80,17 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.step_frames is None
             else arguments.step_frames
         )
-        arguments.time_to_intersection = (
-            DEFAULT_TIME_TO_INTERSECTION
-            if arguments.time_to_intersection is None
-            else arguments.time_to_intersection
-        )
         schedule_seed = secrets.randbits(64)
+        evolution_seed = (
+            secrets.randbits(64)
+            if arguments.evolution_seed is None
+            else arguments.evolution_seed
+        )
     else:
         existing = _load_run_record(arguments.resume)
         _apply_resume_defaults(arguments, existing)
         schedule_seed = _schedule_seed(existing)
+        evolution_seed = _evolution_seed(existing, arguments.evolution_seed)
 
     import neat
 
@@ -90,6 +101,17 @@ def main(argv: list[str] | None = None) -> int:
         neat.DefaultStagnation,
         arguments.config,
     )
+    configured_time_to_intersection = _configured_time_to_intersection(
+        config,
+        enemy_slots=arguments.enemy_slots,
+        aoe_slots=arguments.aoe_slots,
+    )
+    if arguments.time_to_intersection is None:
+        arguments.time_to_intersection = configured_time_to_intersection
+    elif arguments.time_to_intersection != configured_time_to_intersection:
+        raise ValueError(
+            "time_to_intersection does not match the NEAT config input width"
+        )
     if arguments.resume is None:
         run_directory = _create_run_directory(arguments.history_dir)
         summaries: list[dict[str, object]] = []
@@ -98,8 +120,9 @@ def main(argv: list[str] | None = None) -> int:
             arguments,
             summaries=summaries,
             schedule_seed=schedule_seed,
+            evolution_seed=evolution_seed,
         )
-        population = neat.Population(config)
+        population = neat.Population(config, seed=evolution_seed)
     else:
         run_directory = arguments.resume
         assert existing is not None
@@ -107,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         summaries = _summaries(existing)
         checkpoint = latest_checkpoint(run_directory)
         population = neat.Checkpointer.restore_checkpoint(checkpoint)
+
+    species_monitor = ensure_species_monitor(population)
 
     evaluator = DodgeEvaluator(
         step_frames=arguments.step_frames,
@@ -124,14 +149,17 @@ def main(argv: list[str] | None = None) -> int:
         result = evaluator.last_generation
         if result is None or result.generation != generation:
             raise RuntimeError("checkpoint did not follow a completed generation")
-        summaries.append(generation_summary(result))
+        metrics = species_monitor.latest
+        summaries.append(generation_summary(result, species_metrics=metrics))
         _write_run_record(
             run_directory,
             arguments,
             summaries=summaries,
             checkpoint=checkpoint,
             schedule_seed=schedule_seed,
+            evolution_seed=evolution_seed,
         )
+        print(f"generation {generation} complete: {format_species_metrics(metrics)}")
 
     population.add_reporter(RunCheckpointer(run_directory, on_saved=checkpoint_saved))
     population.run(evaluator, arguments.generations)
@@ -141,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         summaries=summaries,
         checkpoint=_latest_checkpoint_or_none(run_directory),
         schedule_seed=schedule_seed,
+        evolution_seed=evolution_seed,
     )
     print("\nGeneration results")
     print(format_generation_summaries(summaries))
@@ -165,6 +194,7 @@ def _write_run_record(
     summaries: list[dict[str, object]] | None = None,
     checkpoint: Path | None = None,
     schedule_seed: int | None = None,
+    evolution_seed: int | None = None,
 ) -> dict[str, object]:
     generations = summaries
     if generations is None:
@@ -187,6 +217,7 @@ def _write_run_record(
         "workers": arguments.workers,
         "seed_bank_generations": SEED_BANK_GENERATIONS,
         "seed_schedule_seed": schedule_seed,
+        "evolution_seed": evolution_seed,
         "checkpoint_retention": CHECKPOINT_RETENTION,
         "latest_checkpoint": checkpoint.name if checkpoint is not None else None,
         "completed_generations": len(generations),
@@ -210,7 +241,10 @@ def _load_run_record(run_directory: Path) -> dict[str, object]:
 def _validate_resume(
     record: Mapping[str, object], arguments: argparse.Namespace
 ) -> None:
-    if record.get("version") != RUN_VERSION or record.get("kind") != "neat_run":
+    if (
+        record.get("version") not in RESUMABLE_RUN_VERSIONS
+        or record.get("kind") != "neat_run"
+    ):
         raise ValueError("run does not support checkpoint resume")
     expected = {
         "config_sha256": _config_sha256(arguments.config),
@@ -250,11 +284,42 @@ def _schedule_seed(record: Mapping[str, object]) -> int:
     return secrets.randbits(64)
 
 
+def _evolution_seed(record: Mapping[str, object], requested: int | None) -> int | None:
+    stored = record.get("evolution_seed")
+    if stored is None:
+        if requested is not None:
+            raise ValueError("legacy run has no reproducible evolution seed")
+        return None
+    if isinstance(stored, bool) or not isinstance(stored, int) or stored < 0:
+        raise ValueError("run record has invalid evolution_seed")
+    if requested is not None and requested != stored:
+        raise ValueError("resume setting differs: evolution_seed")
+    return stored
+
+
 def _record_step_frames(record: Mapping[str, object]) -> int:
     value = record.get("step_frames")
     if isinstance(value, bool) or not isinstance(value, int) or not 3 <= value <= 5:
         raise ValueError("run record has invalid step_frames setting")
     return value
+
+
+def _configured_time_to_intersection(
+    config: object, *, enemy_slots: int, aoe_slots: int
+) -> bool:
+    input_keys = tuple(
+        getattr(getattr(config, "genome_config", None), "input_keys", ())
+    )
+    legacy_size = 5 + (enemy_slots + aoe_slots) * 8
+    enhanced_size = 5 + (enemy_slots + aoe_slots) * 9
+    if len(input_keys) == legacy_size:
+        return False
+    if len(input_keys) == enhanced_size:
+        return True
+    raise ValueError(
+        f"NEAT config expects {len(input_keys)} inputs, but Dodge projection has "
+        f"{legacy_size} or {enhanced_size}"
+    )
 
 
 def _summaries(record: Mapping[str, object]) -> list[dict[str, object]]:
@@ -294,7 +359,11 @@ def _write_json(path: Path, value: Mapping[str, object]) -> None:
         raise
 
 
-def generation_summary(result: GenerationEvaluation) -> dict[str, object]:
+def generation_summary(
+    result: GenerationEvaluation,
+    *,
+    species_metrics: SpeciesMetrics | None = None,
+) -> dict[str, object]:
     fitness = tuple(result.mean_survival_frames.values())
     average = sum(fitness) / len(fitness) if fitness else 0.0
     return {
@@ -306,6 +375,14 @@ def generation_summary(result: GenerationEvaluation) -> dict[str, object]:
         "seed_bank": list(result.seeds),
         "validation_survival_frames": result.validation_fitness,
         "validation_seed_bank": list(result.validation_seeds),
+        "benchmark_survival_frames": result.benchmark_fitness,
+        "benchmark_seed_bank": list(result.benchmark_seeds),
+        "species": (
+            species_metrics.as_json()
+            if species_metrics is not None
+            and species_metrics.generation == result.generation
+            else None
+        ),
         "network_visualization": (
             str(result.network_visualization)
             if result.network_visualization is not None
@@ -324,7 +401,17 @@ def format_generation_summaries(rows: Iterable[Mapping[str, object]]) -> str:
     rows = list(rows)
     if not rows:
         return "(no completed generations)"
-    headers = ("Gen", "Population", "Average", "Best", "Validation", "Best ID", "Seeds")
+    headers = (
+        "Gen",
+        "Population",
+        "Average",
+        "Best",
+        "Validation",
+        "Benchmark",
+        "Species",
+        "Best ID",
+        "Seeds",
+    )
     values = [
         (
             str(row["generation"]),
@@ -336,6 +423,12 @@ def format_generation_summaries(rows: Iterable[Mapping[str, object]]) -> str:
                 if row.get("validation_survival_frames") is None
                 else f"{float(row['validation_survival_frames']):.1f}"
             ),
+            (
+                "-"
+                if row.get("benchmark_survival_frames") is None
+                else f"{float(row['benchmark_survival_frames']):.1f}"
+            ),
+            _species_cell(row.get("species")),
             str(row["best_genome_id"]),
             ",".join(str(seed) for seed in row["seed_bank"]),
         )
@@ -371,6 +464,26 @@ def _step_frames(value: str) -> int:
     if not 3 <= parsed <= 5:
         raise argparse.ArgumentTypeError("must be between 3 and 5")
     return parsed
+
+
+def _nonnegative(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a non-negative integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
+
+
+def _species_cell(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return "-"
+    count = value.get("count")
+    sizes = value.get("sizes")
+    if not isinstance(count, int) or not isinstance(sizes, (list, tuple)):
+        return "-"
+    return f"{count}[{','.join(str(size) for size in sizes)}]"
 
 
 if __name__ == "__main__":

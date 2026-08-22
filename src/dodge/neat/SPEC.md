@@ -20,6 +20,7 @@ C11: existing uncommitted `src/dodge/neat/config-xor` + `neat-testing.py` ⊥ ov
 C12: train workers default ≤8; `--workers` selects positive process count.
 C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency or external service.
 C14: retain ≤5 NEAT checkpoints per run; episode history ∉ checkpoint retention.
+C15: v3 defaults: population 100, compatibility target 6 species, fixed 12-seed champion benchmark every 5 generations.
 
 §I
 
@@ -33,6 +34,7 @@ cli: `just dodge-neat-replay <episode.json>` → visible replay from stored acti
 cli: `just dodge-neat-replay-latest <epoch>` → visible replay selected generation winner from newest NEAT run.
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
+cli: `just dodge-neat-train --evolution-seed <n>` → reproducible population evolution; game seed banks remain varied.
 cli: `just dodge-neat-train` end → generation table + concise final fitness summary.
 cli: `just dodge-neat-resume <run> --generations <n>` → same run + `n` generations.
 file: `generation-####/network.html` → interactive best-genome weighted graph.
@@ -72,6 +74,11 @@ V24: checkpoint pickle ⊥ live callback; tiny live population completes gen1 �
 V25: NEAT replay-latest selects newest `run-*`; epoch → recorded best genome trace with greatest `survival_frames`; absent run, epoch, or trace → fail before Pemsa.
 V26: v2 default → 3-frame decisions, sparse direct initial graph, local weight/bias mutation; v1 config remains resume-compatible.
 V27: v2 entity feature `time_to_intersection` ∈ [0,1]; overlap → 0; no future intersection → 1; visual labels identify feature.
+V28: v3 generation record → species count/sizes, compatibility threshold, hidden-node stats; adaptive threshold targets 6 species within `4..8`.
+V29: v3 champion benchmark uses same 12 held-out seeds every 5 generations; benchmark ∉ selection fitness.
+V30: new run records entropy-generated `evolution_seed`; same seed/config/game banks → reproducible population trajectory.
+V31: transient `InputAcknowledgementTimeout` retries same-seed episode 3 times; only exhausted retries fail worker task.
+V32: CLI time-to-intersection omitted → derive config input width; explicit mode/input-width mismatch → fail before Pemsa.
 
 §T
 
@@ -93,6 +100,7 @@ T14|x|make checkpoint reporter full NEAT reporter|V23
 T15|x|exclude checkpoint callback from NEAT pickle|V24
 T16|x|add latest NEAT generation replay|V25,I.cli
 T17|x|add v2 NEAT search profile, seed schedule, intersection feature|V7,V26,V27,I.json
+T18|x|add v3 speciation diagnostics, benchmark, reproducible evolution, timeout recovery|C15,V28,V29,V30,V31,V32,I.cli
 
 §B
 
@@ -122,3 +130,9 @@ B22|2026-08-22|checkpoint pickle captured local run-record callback via species 
 B23|2026-08-22|latest NEAT replay test + CLI exceeded Ruff format|mechanical format
 B24|2026-08-22|v2 scheduler import missed Ruff order|mechanical format
 B25|2026-08-22|v1 report + resume tests omitted v2 validation metadata|V7,V26
+B26|2026-08-22|repeated hidden Pemsa input timeout aborted parallel generation|V31
+B27|2026-08-22|v3 NEAT additions missed Ruff formatter|mechanical format
+B28|2026-08-22|v3 NEAT tests missed Ruff lint|mechanical format
+B29|2026-08-22|explicit 197-input config inherited 221-input default mode|V32
+B30|2026-08-22|v3 config-width test missed Ruff import order|mechanical format
+B31|2026-08-22|v3 threshold calibrated on evolved genome distances fragmented fresh population|V28

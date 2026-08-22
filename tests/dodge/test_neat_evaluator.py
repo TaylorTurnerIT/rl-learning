@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dodge.control import PROJECT_ROOT, ControlRuntimeError
+from dodge.neat.bridge import InputAcknowledgementTimeout
 from dodge.neat.environment import (
     EpisodeResult,
     EpisodeTrace,
@@ -16,9 +17,11 @@ from dodge.neat.environment import (
     load_episode,
 )
 from dodge.neat.evaluator import (
+    BENCHMARK_GENERATIONS,
     DodgeEvaluator,
     GenomeEvaluationTask,
     SeedBankSchedule,
+    _evaluate_genome_with_retries,
     action_from_outputs,
     compact_network_summary,
 )
@@ -169,6 +172,29 @@ def test_v7_seed_schedule_holds_training_bank_and_reports_unselected_validation(
     assert evaluator.last_generation.validation_fitness == sum(validation) / 3
 
 
+def test_v29_fixed_benchmark_reports_same_held_out_bank_every_five_generations() -> (
+    None
+):
+    FakeEnvironment.seeds.clear()
+    schedule = SeedBankSchedule(123)
+    evaluator = DodgeEvaluator(
+        environment_factory=FakeEnvironment,  # type: ignore[arg-type]
+        network_factory=lambda _genome, _config: FakeNetwork(),
+        seed_bank_schedule=schedule,
+    )
+    genome = Genome()
+
+    for _ in range(BENCHMARK_GENERATIONS):
+        evaluator([(1, genome)], object())
+
+    assert evaluator.last_generation is not None
+    assert evaluator.last_generation.benchmark_seeds == schedule.benchmark_bank()
+    assert evaluator.last_generation.benchmark_fitness == (
+        sum(schedule.benchmark_bank()) / len(schedule.benchmark_bank())
+    )
+    assert set(schedule.benchmark_bank()).isdisjoint(evaluator.last_generation.seeds)
+
+
 def test_action_from_outputs_requires_nine_actions() -> None:
     assert action_from_outputs((0.0,) * 8 + (1.0,)) == "down_right"
     with pytest.raises(ValueError, match="exactly 9"):
@@ -212,6 +238,50 @@ def test_v21_retries_a_transient_episode_with_the_same_seed() -> None:
 
     assert FakeEnvironment.seeds == [11, 11, 12, 13]
     assert genome.fitness == 12
+
+
+def test_v31_retries_three_transient_timeouts_with_same_seed() -> None:
+    FakeEnvironment.seeds.clear()
+    FakeEnvironment.actions.clear()
+    FlakyEnvironment.failures_remaining = 2
+    evaluator = DodgeEvaluator(
+        environment_factory=FlakyEnvironment,  # type: ignore[arg-type]
+        network_factory=lambda _genome, _config: FakeNetwork(),
+        seed_bank_factory=lambda: (11, 12, 13),
+    )
+    genome = Genome()
+
+    evaluator([(0, genome)], object())
+
+    assert FakeEnvironment.seeds == [11, 11, 11, 12, 13]
+    assert genome.fitness == 12
+
+
+def test_v31_retries_whole_genome_after_worker_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def evaluate(_network: object, seed: int, **_: object) -> EpisodeTrace:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise InputAcknowledgementTimeout("lost Pemsa acknowledgement")
+        return _trace(seed)
+
+    monkeypatch.setattr("dodge.neat.evaluator._evaluate_default_episode", evaluate)
+
+    traces = _evaluate_genome_with_retries(
+        FakeNetwork(),
+        (11, 12, 13),
+        step_frames=4,
+        enemy_slots=16,
+        aoe_slots=8,
+        include_time_to_intersection=False,
+    )
+
+    assert [trace.seed for trace in traces] == [11, 12, 13]
+    assert calls == 5
 
 
 @dataclass

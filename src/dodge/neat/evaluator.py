@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from dodge.control import ControlRuntimeError
-from dodge.neat.bridge import Direction
+from dodge.neat.bridge import Direction, InputAcknowledgementTimeout
 from dodge.neat.environment import DodgeEnv, EpisodeTrace, save_episode_trace
 from dodge.neat.state import (
     OBSERVATION_SIZE,
@@ -31,8 +31,11 @@ ACTIONS: tuple[Direction, ...] = (
     "down_right",
 )
 SEED_BANK_SIZE = 3
-EPISODE_ATTEMPTS = 2
+BENCHMARK_SEED_BANK_SIZE = 12
+EPISODE_ATTEMPTS = 3
+GENOME_ATTEMPTS = 2
 SEED_BANK_GENERATIONS = 5
+BENCHMARK_GENERATIONS = 5
 
 
 class Network(Protocol):
@@ -58,6 +61,8 @@ class GenerationEvaluation:
     network_visualization: Path | None
     validation_seeds: tuple[int, int, int] = ()
     validation_fitness: float | None = None
+    benchmark_seeds: tuple[int, ...] = ()
+    benchmark_fitness: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,12 +76,17 @@ class SeedBankSchedule:
     def validation_bank(self, generation: int) -> tuple[int, int, int]:
         return self._bank("validation", generation)
 
-    def _bank(self, purpose: str, index: int) -> tuple[int, int, int]:
+    def benchmark_bank(self) -> tuple[int, ...]:
+        return self._bank("benchmark", 0, size=BENCHMARK_SEED_BANK_SIZE)
+
+    def _bank(
+        self, purpose: str, index: int, *, size: int = SEED_BANK_SIZE
+    ) -> tuple[int, ...]:
         if index < 0:
             raise ValueError("seed-bank index must be non-negative")
         random_source = random.Random(f"{self.seed}:{purpose}:{index}")
         seeds: set[int] = set()
-        while len(seeds) < SEED_BANK_SIZE:
+        while len(seeds) < size:
             seeds.add(random_source.randrange(32_768))
         return tuple(sorted(seeds))
 
@@ -178,6 +188,8 @@ class DodgeEvaluator:
         )
         validation_seeds: tuple[int, int, int] = ()
         validation_fitness: float | None = None
+        benchmark_seeds: tuple[int, ...] = ()
+        benchmark_fitness: float | None = None
         if best_genome is not None and self._seed_bank_schedule is not None:
             validation_seeds = self._seed_bank_schedule.validation_bank(generation)
             network = self._network_factory(best_genome, config)
@@ -189,6 +201,17 @@ class DodgeEvaluator:
                 / SEED_BANK_SIZE
             )
             self._save_validation_traces(generation, best_genome_id, validation_traces)
+            if generation % BENCHMARK_GENERATIONS == 0:
+                benchmark_seeds = self._seed_bank_schedule.benchmark_bank()
+                benchmark_traces = tuple(
+                    self._evaluate_episode(network, seed) for seed in benchmark_seeds
+                )
+                benchmark_fitness = sum(
+                    trace.result.survival_frames for trace in benchmark_traces
+                ) / len(benchmark_seeds)
+                self._save_benchmark_traces(
+                    generation, best_genome_id, benchmark_traces
+                )
         summary = compact_network_summary(
             best_genome,
             config,
@@ -209,9 +232,15 @@ class DodgeEvaluator:
                 if validation_fitness is not None
                 else ""
             )
+            benchmark_suffix = (
+                f" benchmark={benchmark_fitness:.1f}"
+                if benchmark_fitness is not None
+                else ""
+            )
             self._report(
                 f"generation {generation} complete: best id={best_genome_id} "
-                f"mean={best_fitness:.1f}{validation_suffix} {summary}{visual_suffix}"
+                f"mean={best_fitness:.1f}{validation_suffix}{benchmark_suffix} "
+                f"{summary}{visual_suffix}"
             )
         self.last_generation = GenerationEvaluation(
             generation=generation,
@@ -224,6 +253,8 @@ class DodgeEvaluator:
             network_visualization=visualization,
             validation_seeds=validation_seeds,
             validation_fitness=validation_fitness,
+            benchmark_seeds=benchmark_seeds,
+            benchmark_fitness=benchmark_fitness,
         )
         self.generation_history.append(self.last_generation)
 
@@ -342,6 +373,22 @@ class DodgeEvaluator:
                 filename=f"genome-{genome_id:04d}-validation-seed-{trace.seed}.json",
             )
 
+    def _save_benchmark_traces(
+        self,
+        generation: int,
+        genome_id: int | None,
+        traces: tuple[EpisodeTrace, ...],
+    ) -> None:
+        if self.history_directory is None or genome_id is None:
+            return
+        directory = self.history_directory / f"generation-{generation:04d}"
+        for trace in traces:
+            save_episode_trace(
+                trace,
+                directory,
+                filename=f"genome-{genome_id:04d}-benchmark-seed-{trace.seed}.json",
+            )
+
     def _save_network_visualization(
         self,
         generation: int,
@@ -386,22 +433,48 @@ def _evaluate_genome_task(
     task: GenomeEvaluationTask,
 ) -> tuple[int, tuple[EpisodeTrace, ...]]:
     network = _neat_network(task.genome, task.config)
-    traces = tuple(
-        _evaluate_default_episode(
-            network,
-            seed,
-            step_frames=task.step_frames,
-            enemy_slots=task.enemy_slots,
-            aoe_slots=task.aoe_slots,
-            include_time_to_intersection=_uses_time_to_intersection(
-                task.config,
-                enemy_slots=task.enemy_slots,
-                aoe_slots=task.aoe_slots,
-            ),
-        )
-        for seed in task.seeds
+    include_time_to_intersection = _uses_time_to_intersection(
+        task.config,
+        enemy_slots=task.enemy_slots,
+        aoe_slots=task.aoe_slots,
+    )
+    traces = _evaluate_genome_with_retries(
+        network,
+        task.seeds,
+        step_frames=task.step_frames,
+        enemy_slots=task.enemy_slots,
+        aoe_slots=task.aoe_slots,
+        include_time_to_intersection=include_time_to_intersection,
     )
     return task.genome_id, traces
+
+
+def _evaluate_genome_with_retries(
+    network: Network,
+    seeds: tuple[int, int, int],
+    *,
+    step_frames: int,
+    enemy_slots: int,
+    aoe_slots: int,
+    include_time_to_intersection: bool,
+) -> tuple[EpisodeTrace, ...]:
+    for attempt in range(GENOME_ATTEMPTS):
+        try:
+            return tuple(
+                _evaluate_default_episode(
+                    network,
+                    seed,
+                    step_frames=step_frames,
+                    enemy_slots=enemy_slots,
+                    aoe_slots=aoe_slots,
+                    include_time_to_intersection=include_time_to_intersection,
+                )
+                for seed in seeds
+            )
+        except InputAcknowledgementTimeout:
+            if attempt == GENOME_ATTEMPTS - 1:
+                raise
+    raise AssertionError("genome retry loop exhausted")
 
 
 def _evaluate_default_episode(
