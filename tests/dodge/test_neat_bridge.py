@@ -9,6 +9,7 @@ from dodge.neat.bridge import (
     INPUT_PREFIX,
     READY_PREFIX,
     RELEASE_PREFIX,
+    RESULT_PREFIX,
     STATE_PREFIX,
     instrument_step_cartridge,
 )
@@ -26,6 +27,9 @@ def test_instrument_step_cartridge_creates_exact_step_harness() -> None:
     assert INPUT_PREFIX in result
     assert RELEASE_PREFIX in result
     assert STATE_PREFIX in result
+    assert RESULT_PREFIX in result
+    assert "__dodge_survival_frames" in result
+    assert "__dodge_max_enemies" in result
     assert "__dodge_game_btn=btn" in result
     assert "function _draw()\nend" in result
 

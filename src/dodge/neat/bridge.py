@@ -6,6 +6,7 @@ import select
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
 from typing import Literal, TextIO
@@ -30,6 +31,7 @@ ACCEPT_PREFIX = "__dodge_neat_accept__"
 INPUT_PREFIX = "__dodge_neat_input__"
 RELEASE_PREFIX = "__dodge_neat_release__"
 STATE_PREFIX = "__dodge_neat_state__"
+RESULT_PREFIX = "__dodge_neat_result__"
 ACTION_KEYS: dict[Direction, tuple[str, ...]] = {
     "up_left": ("x", "Left", "Up", "x"),
     "up": ("x", "Up", "x"),
@@ -43,9 +45,31 @@ ACTION_KEYS: dict[Direction, tuple[str, ...]] = {
 }
 
 
-def instrument_step_cartridge(source: str, *, seed: int, step_frames: int) -> str:
+@dataclass(frozen=True, slots=True)
+class BridgeResult:
+    state: RawState
+    score: float
+    frames: int
+    survival_frames: int
+    seed: int
+    max_visible_enemies: int
+    max_visible_aoes: int
+    enemy_overflow_frames: int
+    aoe_overflow_frames: int
+
+
+def instrument_step_cartridge(
+    source: str,
+    *,
+    seed: int,
+    step_frames: int,
+    enemy_slots: int = 16,
+    aoe_slots: int = 8,
+) -> str:
     if not 3 <= step_frames <= 5:
         raise ValueError("step_frames must be between 3 and 5")
+    if enemy_slots < 1 or aoe_slots < 1:
+        raise ValueError("observation slot counts must be positive")
 
     init_marker = "function _init()\n"
     gfx_marker = "__gfx__\n"
@@ -63,6 +87,7 @@ __dodge_waiting=false
 __dodge_remaining=0
 __dodge_started=false
 __dodge_frames=0
+__dodge_survival_frames=0
 __dodge_previous_px=0
 __dodge_previous_py=0
 __dodge_player_vx=0
@@ -70,6 +95,10 @@ __dodge_player_vy=0
 __dodge_collecting=false
 __dodge_pending_mask=0
 __dodge_physical_held=false
+__dodge_max_enemies=0
+__dodge_max_aoes=0
+__dodge_enemy_overflow_frames=0
+__dodge_aoe_overflow_frames=0
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -101,6 +130,32 @@ end
 function __dodge_ready()
  __dodge_emit_state()
  printh("{READY_PREFIX}"..tostr(__dodge_frames))
+end
+
+function __dodge_observe_counts()
+ local enemy_count=0
+ local aoe_count=0
+ for entity in all(enemies) do
+  if entity.p==-1 then aoe_count+=1 else enemy_count+=1 end
+ end
+ if cp and cp.rects then
+  for rect in all(cp.rects) do aoe_count+=1 end
+ end
+ __dodge_max_enemies=max(__dodge_max_enemies,enemy_count)
+ __dodge_max_aoes=max(__dodge_max_aoes,aoe_count)
+ if enemy_count>{enemy_slots} then __dodge_enemy_overflow_frames+=1 end
+ if aoe_count>{aoe_slots} then __dodge_aoe_overflow_frames+=1 end
+end
+
+function __dodge_finish()
+ __dodge_emit_state()
+ local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
+ result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
+ result=result.."|"..tostr(__dodge_max_enemies).."|"..tostr(__dodge_max_aoes)
+ result=result.."|"..tostr(__dodge_enemy_overflow_frames)
+ result=result.."|"..tostr(__dodge_aoe_overflow_frames)
+ printh(result)
+ exit()
 end
 
 function __dodge_join(values)
@@ -194,10 +249,12 @@ function _update60()
  __dodge_player_vy=py-__dodge_previous_py
  __dodge_previous_px=px
  __dodge_previous_py=py
+ __dodge_observe_counts()
  __dodge_previous_mask=__dodge_mask
  __dodge_frames+=1
+ if not isdead then __dodge_survival_frames+=1 end
  __dodge_remaining-=1
- if isdead then exit() end
+ if isdead then __dodge_finish() end
  if __dodge_remaining<=0 then
   __dodge_mask=0
   __dodge_previous_mask=0
@@ -216,11 +273,15 @@ class PemsaStepBridge:
         *,
         seed: int,
         step_frames: int = 4,
+        enemy_slots: int = 16,
+        aoe_slots: int = 8,
         source: Path = CARTRIDGE_PATH,
         startup_timeout: float = 10.0,
     ) -> None:
         self.seed = seed
         self.step_frames = step_frames
+        self.enemy_slots = enemy_slots
+        self.aoe_slots = aoe_slots
         self.source = source
         self.startup_timeout = startup_timeout
         self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
@@ -239,6 +300,8 @@ class PemsaStepBridge:
                 original,
                 seed=self.seed,
                 step_frames=self.step_frames,
+                enemy_slots=self.enemy_slots,
+                aoe_slots=self.aoe_slots,
             )
             self._temporary_directory = tempfile.TemporaryDirectory(
                 prefix="dodge-neat-"
@@ -273,7 +336,7 @@ class PemsaStepBridge:
             self.close()
             raise
 
-    def step(self, action: Direction) -> RawState:
+    def step(self, action: Direction) -> RawState | BridgeResult:
         if self._pemsa is None or self._window_id is None:
             raise ControlRuntimeError("Pemsa step bridge is not started")
         keys = ACTION_KEYS[action]
@@ -286,7 +349,7 @@ class PemsaStepBridge:
                 self._key("keyup", key)
             if index != len(keys) - 1:
                 self._wait_for(RELEASE_PREFIX)
-        return self._wait_for_ready()
+        return self._wait_for_update()
 
     def close(self) -> None:
         self._terminate(self._pemsa)
@@ -362,13 +425,19 @@ class PemsaStepBridge:
         raise ControlRuntimeError("timed out waiting for hidden Pemsa window")
 
     def _wait_for_ready(self) -> RawState:
+        update = self._wait_for_update()
+        if isinstance(update, BridgeResult):
+            raise ControlRuntimeError("Pemsa ended before it reached a step boundary")
+        return update
+
+    def _wait_for_update(self) -> RawState | BridgeResult:
         deadline = time.monotonic() + self.startup_timeout
         state: RawState | None = None
         while time.monotonic() < deadline:
-            self._raise_if_stopped()
             try:
                 line = self._lines.get(timeout=0.05)
             except queue.Empty:
+                self._raise_if_stopped()
                 continue
             if line.startswith(STATE_PREFIX):
                 state = parse_raw_state(line, prefix=STATE_PREFIX)
@@ -385,6 +454,10 @@ class PemsaStepBridge:
                         "Pemsa step boundary did not include state"
                     )
                 return state
+            if line.startswith(RESULT_PREFIX):
+                if state is None:
+                    raise ControlRuntimeError("Pemsa result did not include state")
+                return self._parse_result(line, state)
         raise ControlRuntimeError("timed out waiting for Pemsa step boundary")
 
     def _wait_for(self, prefix: str) -> None:
@@ -400,6 +473,46 @@ class PemsaStepBridge:
         raise ControlRuntimeError(
             f"timed out waiting for Pemsa protocol line: {prefix}"
         )
+
+    @staticmethod
+    def _parse_result(line: str, state: RawState) -> BridgeResult:
+        values = line.removeprefix(RESULT_PREFIX).split("|")
+        if len(values) != 8:
+            raise ControlRuntimeError("invalid Pemsa terminal result field count")
+        try:
+            (
+                score_raw,
+                frames_raw,
+                survival_frames_raw,
+                seed_raw,
+                max_enemies_raw,
+                max_aoes_raw,
+                enemy_overflow_raw,
+                aoe_overflow_raw,
+            ) = values
+            result = BridgeResult(
+                state=state,
+                score=float(score_raw),
+                frames=int(frames_raw),
+                survival_frames=int(survival_frames_raw),
+                seed=int(seed_raw),
+                max_visible_enemies=int(max_enemies_raw),
+                max_visible_aoes=int(max_aoes_raw),
+                enemy_overflow_frames=int(enemy_overflow_raw),
+                aoe_overflow_frames=int(aoe_overflow_raw),
+            )
+        except ValueError as error:
+            raise ControlRuntimeError("invalid Pemsa terminal result values") from error
+        if (
+            result.frames < 0
+            or result.survival_frames < 0
+            or result.max_visible_enemies < 0
+            or result.max_visible_aoes < 0
+            or result.enemy_overflow_frames < 0
+            or result.aoe_overflow_frames < 0
+        ):
+            raise ControlRuntimeError("Pemsa terminal result cannot be negative")
+        return result
 
     def _key(self, command: str, *keys: str) -> None:
         if self._window_id is None:
