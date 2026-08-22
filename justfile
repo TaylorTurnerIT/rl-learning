@@ -57,3 +57,7 @@ dodge-neat-resume run *options:
 [group("dodge")]
 dodge-neat-replay episode:
     devenv shell -- dodge-neat-replay {{episode}}
+
+[group("dodge")]
+dodge-neat-replay-latest epoch:
+    devenv shell -- dodge-neat-replay-latest {{epoch}}

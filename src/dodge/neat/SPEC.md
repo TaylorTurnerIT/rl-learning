@@ -30,6 +30,7 @@ json: raw state → player `{x,y,vx,vy,size}` + all `enemies` + all `aoes`.
 json: projection → fixed numeric vector, zero slots use `present=0`.
 json: episode history → seed, config, action trace, result, overflow telemetry.
 cli: `just dodge-neat-replay <episode.json>` → visible replay from stored action trace + seed.
+cli: `just dodge-neat-replay-latest <epoch>` → visible replay selected generation winner from newest NEAT run.
 cli: `just dodge-neat-train` → genome progress + generation-best compact network summary.
 cli: `just dodge-neat-train --workers <n>` → up to `n` concurrent genome evaluations.
 cli: `just dodge-neat-train` end → generation table + concise final fitness summary.
@@ -68,6 +69,7 @@ V21: transient hidden-X11 input ack → release + retry while paused; one failed
 V22: completed generation → atomic checkpoint + run record; resume latest → saved population/species/RNG next gen; retain ≤5 checkpoints.
 V23: `RunCheckpointer` ∈ full NEAT reporter lifecycle; ⊥ missing hook abort generation.
 V24: checkpoint pickle ⊥ live callback; tiny live population completes gen1 → checkpoint exists.
+V25: NEAT replay-latest selects newest `run-*`; epoch → recorded best genome trace with greatest `survival_frames`; absent run, epoch, or trace → fail before Pemsa.
 
 §T
 
@@ -87,6 +89,7 @@ T12|x|retry transient hidden-X11 input and deterministic episode|V21
 T13|x|add NEAT checkpoint retention + resume|V22,I.cli
 T14|x|make checkpoint reporter full NEAT reporter|V23
 T15|x|exclude checkpoint callback from NEAT pickle|V24
+T16|x|add latest NEAT generation replay|V25,I.cli
 
 §B
 
@@ -113,3 +116,4 @@ B19|2026-08-22|v1 NEAT bridge observed virtual mouse while replay disabled it|V2
 B20|2026-08-22|a single missed X11 key ack aborted a parallel generation|V21
 B21|2026-08-22|checkpoint reporter lacked NEAT `post_evaluate` hook|V23
 B22|2026-08-22|checkpoint pickle captured local run-record callback via species reporters|V24
+B23|2026-08-22|latest NEAT replay test + CLI exceeded Ruff format|mechanical format

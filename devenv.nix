@@ -66,6 +66,11 @@
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run python -m dodge.neat.replay "$@"
     '';
+    dodge-neat-replay-latest.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run python -m dodge.neat.replay replay-latest "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell
