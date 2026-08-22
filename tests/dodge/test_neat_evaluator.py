@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dodge.control import PROJECT_ROOT
+from dodge.control import PROJECT_ROOT, ControlRuntimeError
 from dodge.neat.environment import (
     EpisodeResult,
     EpisodeTrace,
@@ -54,6 +54,16 @@ class FakeEnvironment:
 class FakeNetwork:
     def activate(self, _: tuple[float, ...]) -> tuple[float, ...]:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+class FlakyEnvironment(FakeEnvironment):
+    failures_remaining = 1
+
+    def step(self, action: str) -> Transition:
+        if self.failures_remaining:
+            type(self).failures_remaining -= 1
+            raise ControlRuntimeError("transient bridge input timeout")
+        return super().step(action)
 
 
 @dataclass
@@ -157,6 +167,23 @@ def test_evaluator_reports_genome_progress_and_generation_best() -> None:
     assert (
         "generation 1 complete: best id=0 mean=12.0 network=unavailable" in messages[3]
     )
+
+
+def test_v21_retries_a_transient_episode_with_the_same_seed() -> None:
+    FakeEnvironment.seeds.clear()
+    FakeEnvironment.actions.clear()
+    FlakyEnvironment.failures_remaining = 1
+    evaluator = DodgeEvaluator(
+        environment_factory=FlakyEnvironment,  # type: ignore[arg-type]
+        network_factory=lambda _genome, _config: FakeNetwork(),
+        seed_bank_factory=lambda: (11, 12, 13),
+    )
+    genome = Genome()
+
+    evaluator([(0, genome)], object())
+
+    assert FakeEnvironment.seeds == [11, 11, 12, 13]
+    assert genome.fitness == 12
 
 
 @dataclass

@@ -9,6 +9,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Protocol
 
+from dodge.control import ControlRuntimeError
 from dodge.neat.bridge import Direction
 from dodge.neat.environment import DodgeEnv, EpisodeTrace, save_episode_trace
 from dodge.neat.visual import write_network_visualization
@@ -25,6 +26,7 @@ ACTIONS: tuple[Direction, ...] = (
     "down_right",
 )
 SEED_BANK_SIZE = 3
+EPISODE_ATTEMPTS = 2
 
 
 class Network(Protocol):
@@ -169,24 +171,14 @@ class DodgeEvaluator:
         self.generation_history.append(self.last_generation)
 
     def _evaluate_episode(self, network: Network, seed: int) -> EpisodeTrace:
-        environment = self._environment_factory(
+        return _evaluate_episode_with_retries(
+            network,
+            seed,
+            environment_factory=self._environment_factory,
             step_frames=self.step_frames,
             enemy_slots=self.enemy_slots,
             aoe_slots=self.aoe_slots,
         )
-        try:
-            observation = environment.reset(seed=seed)
-            while True:
-                action = action_from_outputs(
-                    network.activate(observation.projected.values)
-                )
-                transition = environment.step(action)
-                observation = transition.observation
-                if transition.done:
-                    break
-            return environment.episode_trace
-        finally:
-            environment.close()
 
     def _evaluate_parallel(
         self,
@@ -341,21 +333,47 @@ def _evaluate_default_episode(
     enemy_slots: int,
     aoe_slots: int,
 ) -> EpisodeTrace:
-    environment = DodgeEnv(
+    return _evaluate_episode_with_retries(
+        network,
+        seed,
+        environment_factory=DodgeEnv,
         step_frames=step_frames,
         enemy_slots=enemy_slots,
         aoe_slots=aoe_slots,
     )
-    try:
-        observation = environment.reset(seed=seed)
-        while True:
-            action = action_from_outputs(network.activate(observation.projected.values))
-            transition = environment.step(action)
-            observation = transition.observation
-            if transition.done:
-                return environment.episode_trace
-    finally:
-        environment.close()
+
+
+def _evaluate_episode_with_retries(
+    network: Network,
+    seed: int,
+    *,
+    environment_factory: EnvironmentFactory,
+    step_frames: int,
+    enemy_slots: int,
+    aoe_slots: int,
+) -> EpisodeTrace:
+    for attempt in range(EPISODE_ATTEMPTS):
+        environment = environment_factory(
+            step_frames=step_frames,
+            enemy_slots=enemy_slots,
+            aoe_slots=aoe_slots,
+        )
+        try:
+            observation = environment.reset(seed=seed)
+            while True:
+                action = action_from_outputs(
+                    network.activate(observation.projected.values)
+                )
+                transition = environment.step(action)
+                observation = transition.observation
+                if transition.done:
+                    return environment.episode_trace
+        except ControlRuntimeError:
+            if attempt == EPISODE_ATTEMPTS - 1:
+                raise
+        finally:
+            environment.close()
+    raise AssertionError("episode retry loop exhausted")
 
 
 def compact_network_summary(

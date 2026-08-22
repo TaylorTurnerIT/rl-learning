@@ -62,6 +62,7 @@ V17: accepted terminal action → lost final key-release window error ! terminal
 V18: ∀ completed generation with best genome → write self-contained visual; slider spans strongest visible edges through every enabled edge.
 V19: train end → table row ∀ completed generation with population mean and best survival; ⊥ full genome dump.
 V20: replay holds menu `x` through transition, pauses at game-ready, releases between actions; trace retains its mouse-input mode; stored action frames → exact game updates.
+V21: transient hidden-X11 input ack → release + retry while paused; one failed episode → same-seed retry; repeat failure → error.
 
 §T
 
@@ -77,6 +78,7 @@ T8|x|tolerate terminal window teardown after accepted action|V17
 T9|x|write interactive best-network generation visual|V18,I.file
 T10|x|report final NEAT generation table and summary|V19,I.cli
 T11|x|fix NEAT replay menu bootstrap timing|V5,V8,V20
+T12|x|retry transient hidden-X11 input and deterministic episode|V21
 
 §B
 
@@ -100,3 +102,4 @@ B16|2026-08-21|embedded HTML lines exceed Python formatter width|template E501 e
 B17|2026-08-21|visual test expected runtime label in static HTML|assert embedded graph data
 B18|2026-08-22|final report imported `Iterable` from legacy module|mechanical format
 B19|2026-08-22|v1 NEAT bridge observed virtual mouse while replay disabled it|V20
+B20|2026-08-22|a single missed X11 key ack aborted a parallel generation|V21

@@ -11,6 +11,7 @@ from dodge.neat.bridge import (
     RELEASE_PREFIX,
     RESULT_PREFIX,
     STATE_PREFIX,
+    InputAcknowledgementTimeout,
     PemsaStepBridge,
     instrument_step_cartridge,
 )
@@ -75,7 +76,7 @@ def test_v17_accepted_final_action_tolerates_destroyed_window(
                 raise ControlRuntimeError("BadWindow")
 
     monkeypatch.setattr(bridge, "_key", key)
-    monkeypatch.setattr(bridge, "_wait_for", lambda _: None)
+    monkeypatch.setattr(bridge, "_wait_for", lambda _prefix, **_: None)
     monkeypatch.setattr(bridge, "_wait_for_update", lambda: state)
 
     assert bridge.step("neutral") == state
@@ -93,7 +94,38 @@ def test_v17_pre_accept_key_error_still_fails(
             raise ControlRuntimeError("BadWindow")
 
     monkeypatch.setattr(bridge, "_key", key)
-    monkeypatch.setattr(bridge, "_wait_for", lambda _: None)
+    monkeypatch.setattr(bridge, "_wait_for", lambda _prefix, **_: None)
 
     with pytest.raises(ControlRuntimeError, match="BadWindow"):
         bridge.step("neutral")
+
+
+def test_v21_retries_one_missing_input_acknowledgement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = PemsaStepBridge(seed=1)
+    bridge._pemsa = object()  # type: ignore[assignment]
+    bridge._window_id = "window"
+    keys: list[tuple[str, str]] = []
+    waits = 0
+
+    def key(command: str, value: str) -> None:
+        keys.append((command, value))
+
+    def wait(prefix: str, **_: object) -> None:
+        nonlocal waits
+        waits += 1
+        if waits == 1:
+            raise InputAcknowledgementTimeout(f"timed out: {prefix}")
+
+    monkeypatch.setattr(bridge, "_key", key)
+    monkeypatch.setattr(bridge, "_wait_for", wait)
+
+    bridge._send_key_and_wait("x", INPUT_PREFIX)
+
+    assert keys == [
+        ("keydown", "x"),
+        ("keyup", "x"),
+        ("keydown", "x"),
+        ("keyup", "x"),
+    ]

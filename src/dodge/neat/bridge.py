@@ -43,6 +43,11 @@ ACTION_KEYS: dict[Direction, tuple[str, ...]] = {
     "down": ("x", "Down", "x"),
     "down_right": ("x", "Right", "Down", "x"),
 }
+KEY_ACK_ATTEMPTS = 3
+
+
+class InputAcknowledgementTimeout(ControlRuntimeError):
+    """A key event was not observed by the paused Pemsa bridge."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,21 +353,34 @@ class PemsaStepBridge:
             raise ControlRuntimeError("Pemsa step bridge is not started")
         keys = ACTION_KEYS[action]
         for index, key in enumerate(keys):
-            accepted = False
+            prefix = ACCEPT_PREFIX if index == len(keys) - 1 else INPUT_PREFIX
+            self._send_key_and_wait(key, prefix)
+            if index != len(keys) - 1:
+                self._wait_for(RELEASE_PREFIX)
+        return self._wait_for_update()
+
+    def _send_key_and_wait(self, key: str, prefix: str) -> None:
+        timeout = self.startup_timeout / KEY_ACK_ATTEMPTS
+        for attempt in range(KEY_ACK_ATTEMPTS):
+            acknowledged = False
+            terminal_accepted = False
             self._key("keydown", key)
             try:
-                prefix = ACCEPT_PREFIX if index == len(keys) - 1 else INPUT_PREFIX
-                self._wait_for(prefix)
-                accepted = prefix == ACCEPT_PREFIX
+                self._wait_for(prefix, timeout=timeout)
+                acknowledged = True
+                terminal_accepted = prefix == ACCEPT_PREFIX
+            except InputAcknowledgementTimeout:
+                if attempt == KEY_ACK_ATTEMPTS - 1:
+                    raise
             finally:
                 try:
                     self._key("keyup", key)
                 except ControlRuntimeError:
-                    if not accepted:
+                    if not terminal_accepted:
                         raise
-            if index != len(keys) - 1:
-                self._wait_for(RELEASE_PREFIX)
-        return self._wait_for_update()
+            if acknowledged:
+                return
+        raise AssertionError("input acknowledgement retry loop exhausted")
 
     def close(self) -> None:
         self._terminate(self._pemsa)
@@ -473,8 +491,9 @@ class PemsaStepBridge:
                 return self._parse_result(line, state)
         raise ControlRuntimeError("timed out waiting for Pemsa step boundary")
 
-    def _wait_for(self, prefix: str) -> None:
-        deadline = time.monotonic() + self.startup_timeout
+    def _wait_for(self, prefix: str, *, timeout: float | None = None) -> None:
+        wait_timeout = self.startup_timeout if timeout is None else timeout
+        deadline = time.monotonic() + wait_timeout
         while time.monotonic() < deadline:
             self._raise_if_stopped()
             try:
@@ -483,7 +502,7 @@ class PemsaStepBridge:
                 continue
             if line.startswith(prefix):
                 return
-        raise ControlRuntimeError(
+        raise InputAcknowledgementTimeout(
             f"timed out waiting for Pemsa protocol line: {prefix}"
         )
 
