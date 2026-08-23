@@ -25,7 +25,7 @@ from dodge.headless import (
 from dodge.neat.bridge import Direction
 from dodge.neat.state import RawState, project_state
 
-DATASET_VERSION = 2
+DATASET_VERSION = 3
 DEFAULT_DATABASE = Path("history/dodge/dataset.sqlite3")
 STEP_FRAMES = 8
 TARGET_SURVIVAL_FRAMES = 1_800
@@ -34,7 +34,9 @@ PILOT_SEED_COUNT = 5
 PILOT_GENERATIONS_PER_SEED = 100
 DEFAULT_POPULATION = 50
 ELITE_COUNT = 5
-MUTATION_RATE = 0.05
+EARLY_MUTATION_RATE = 0.02
+TAIL_MUTATION_RATE = 0.20
+TAIL_MUTATION_FRACTION = 0.25
 EVALUATION_SEEDS = tuple(range(30_001, 30_011))
 TRAINING_SEED_MAX = 30_000
 BootstrapAction = Direction | Literal["x"]
@@ -81,6 +83,9 @@ class CollectorConfig:
             "step_frames": STEP_FRAMES,
             "target_survival_frames": TARGET_SURVIVAL_FRAMES,
             "traces_per_seed": TRACES_PER_SEED,
+            "early_mutation_rate": EARLY_MUTATION_RATE,
+            "tail_mutation_rate": TAIL_MUTATION_RATE,
+            "tail_mutation_fraction": TAIL_MUTATION_FRACTION,
             "bootstrap": list(BOOTSTRAP),
             "train_seeds": list(self.train_seeds),
             "evaluation_seeds": list(EVALUATION_SEEDS),
@@ -113,11 +118,15 @@ class Champion:
 def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSummary:
     _validate_config(config)
     LOGGER.info(
-        "collect start seeds=%d population=%d generations_per_seed=%d target=%d",
+        "collect start seeds=%d population=%d generations_per_seed=%d target=%d "
+        "mutation=%.0f%%/%.0f%% tail=%.0f%%",
         len(config.train_seeds),
         config.population,
         config.generations_per_seed,
         TARGET_SURVIVAL_FRAMES,
+        EARLY_MUTATION_RATE * 100,
+        TAIL_MUTATION_RATE * 100,
+        TAIL_MUTATION_FRACTION * 100,
     )
     connection = _open_database(config.database)
     try:
@@ -376,12 +385,19 @@ def _breed_population(
         population.append(
             tuple(
                 random_source.choice(ACTION_CHOICES)
-                if random_source.random() < MUTATION_RATE
+                if random_source.random() < _mutation_rate(index, len(parent))
                 else action
-                for action in parent
+                for index, action in enumerate(parent)
             )
         )
     return population
+
+
+def _mutation_rate(index: int, genome_length: int) -> float:
+    if index < 0 or index >= genome_length:
+        raise ValueError("mutation index must be within genome")
+    tail_start = int(genome_length * (1 - TAIL_MUTATION_FRACTION))
+    return TAIL_MUTATION_RATE if index >= tail_start else EARLY_MUTATION_RATE
 
 
 def _accept_episode(

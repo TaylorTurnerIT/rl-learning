@@ -28,6 +28,7 @@ C19: pilot defaults = 5 train seeds × 100 generations; exhausted seed → unsol
 C20: one SQLite DB; stdlib only; episode rows retain config/version + raw state; projected observation stored packed float32.
 C21: generation + accepted episode checkpoint ! atomic; resume restores seed index, population, RNG, accepted hashes.
 C22: collector stores per-seed historical champion; replay loads champion genome; reconstruct recovers missing champion from deterministic search.
+C23: mutation preserves early survival prefix; final 25% genome receives higher exploration rate.
 
 §I
 
@@ -114,6 +115,7 @@ V48: `Genome` = `tuple[Direction, ...]`; collector action sets, population, chec
 V49: ∀ completed generation → DB champion retains greatest survival genome seen for seed; ties retain earlier champion.
 V50: champion replay → stored genome + stored seed; reconstruction uses stored collector config + deterministic evolution seed.
 V51: bootstrap neutral phase ends on first normal enemy spawn; evolved action starts after enemy-visible state.
+V52: mutation rate = 2% first 75% genome, 20% final 25%; ranked elites unchanged.
 
 §T
 
@@ -144,6 +146,7 @@ T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46
 T24|x|add collector recipe + focused behavior tests|V39,V40,V41,V42,V43,V44,V45,V46,V47,I.cli
 T25|x|persist/replay/reconstruct per-seed champion|V49,V50,C22,I.cli,I.db
 T26|x|increase action horizon + delay genes until first enemy|V39,V46,V51,C17
+T27|x|bias mutation toward late-game actions|V52,C23
 
 §B
 

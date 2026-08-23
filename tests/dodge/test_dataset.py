@@ -179,6 +179,24 @@ def test_collect_logs_generation_scores_and_seed_progress(
     assert "collect complete seeds=1 accepted_episodes=0 deferred=1" in caplog.text
 
 
+def test_v52_breeding_concentrates_mutation_in_genome_tail() -> None:
+    class TailMutationRandom:
+        def random(self) -> float:
+            return 0.03
+
+        def choice(self, _choices: tuple[str, ...]) -> str:
+            return "right"
+
+    config = CollectorConfig(population=6)
+    parent: Genome = ("left", "left", "left", "left")
+    ranked = [(10 - index, parent) for index in range(5)]
+
+    population = dataset._breed_population(ranked, TailMutationRandom(), config)  # type: ignore[arg-type]
+
+    assert population[:5] == [parent] * 5
+    assert population[5] == ("left", "left", "left", "right")
+
+
 def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
