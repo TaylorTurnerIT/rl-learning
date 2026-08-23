@@ -154,3 +154,5 @@ B11|2026-08-23|checkpoint test imports unsorted|ruff fix
 B12|2026-08-23|checkpoint test wrote before schema init|fixture init
 B13|2026-08-23|justfile interpolation spacing stale|just fmt
 B14|2026-08-23|collector genome widened `Direction` to `str`|V48
+B15|2026-08-23|collector log line + test imports violate Ruff format|mechanical format
+B16|2026-08-23|progress test mocked 5 scores for 50 genomes|fixture population=5

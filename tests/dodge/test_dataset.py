@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 import sqlite3
 
@@ -88,6 +89,31 @@ def test_v45_checkpoint_restores_pending_population_and_rng(tmp_path) -> None:
         assert restored.random() == random_source.random()
     finally:
         connection.close()
+
+
+def test_collect_logs_generation_scores_and_seed_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = CollectorConfig(
+        database=tmp_path / "dataset.sqlite3",
+        train_seeds=(0,),
+        generations_per_seed=1,
+        population=5,
+    )
+    monkeypatch.setattr(
+        dataset, "_evaluate_population", lambda *_args: [40, 30, 20, 10, 5]
+    )
+
+    with caplog.at_level(logging.INFO, logger="dodge.dataset"):
+        summary = dataset.collect(config)
+
+    assert summary.unsolved_seeds == (0,)
+    assert (
+        "seed=0 generation=1/1 best=40 median=20 target=1800 accepted=0/5"
+        in caplog.text
+    )
+    assert "seed=0 deferred after 1 generations best_below_target" in caplog.text
+    assert "collect complete seeds=1 accepted_episodes=0 deferred=1" in caplog.text
 
 
 def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction(

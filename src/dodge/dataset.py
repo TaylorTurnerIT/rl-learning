@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import pickle
 import random
 import sqlite3
+import statistics
 import struct
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -51,6 +53,7 @@ ACTION_CHOICES: tuple[Direction, ...] = (
     "down_left",
     "down_right",
 )
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +94,13 @@ class CollectionSummary:
 
 def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSummary:
     _validate_config(config)
+    LOGGER.info(
+        "collect start seeds=%d population=%d generations_per_seed=%d target=%d",
+        len(config.train_seeds),
+        config.population,
+        config.generations_per_seed,
+        TARGET_SURVIVAL_FRAMES,
+    )
     connection = _open_database(config.database)
     try:
         _initialize_database(connection, config, resume=resume)
@@ -98,10 +108,22 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
         random_source, seed_index, generation, population = _restore_or_initialize(
             checkpoint, config
         )
+        if checkpoint is not None:
+            LOGGER.info(
+                "collect resume seed_index=%d generation=%d", seed_index, generation
+            )
         unsolved: list[int] = []
         while seed_index < len(config.train_seeds):
             seed = config.train_seeds[seed_index]
             accepted_hashes = _accepted_hashes(connection, seed)
+            LOGGER.info(
+                "seed=%d start accepted=%d/%d generation=%d/%d",
+                seed,
+                len(accepted_hashes),
+                TRACES_PER_SEED,
+                generation,
+                config.generations_per_seed,
+            )
             if len(accepted_hashes) >= TRACES_PER_SEED:
                 seed_index += 1
                 generation = 0
@@ -116,6 +138,18 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                 generation = next_generation
                 results = _evaluate_population(seed, population, config)
                 ranked = sorted(zip(results, population, strict=True), reverse=True)
+                LOGGER.info(
+                    "seed=%d generation=%d/%d best=%d median=%d target=%d "
+                    "accepted=%d/%d",
+                    seed,
+                    generation,
+                    config.generations_per_seed,
+                    ranked[0][0],
+                    int(statistics.median(results)),
+                    TARGET_SURVIVAL_FRAMES,
+                    len(accepted_hashes),
+                    TRACES_PER_SEED,
+                )
                 for fitness, genome in ranked:
                     if fitness < TARGET_SURVIVAL_FRAMES:
                         break
@@ -126,6 +160,14 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                         continue
                     _accept_episode(connection, seed, genome, digest, config)
                     accepted_hashes.add(digest)
+                    LOGGER.info(
+                        "seed=%d accepted=%d/%d survival=%d hash=%s",
+                        seed,
+                        len(accepted_hashes),
+                        TRACES_PER_SEED,
+                        fitness,
+                        digest[:12],
+                    )
                 if len(accepted_hashes) >= TRACES_PER_SEED:
                     break
                 population = _breed_population(ranked, random_source, config)
@@ -134,15 +176,27 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                 )
             else:
                 unsolved.append(seed)
+                LOGGER.info(
+                    "seed=%d deferred after %d generations best_below_target",
+                    seed,
+                    config.generations_per_seed,
+                )
             seed_index += 1
             generation = 0
             population = _new_population(random_source, config)
             _checkpoint(connection, random_source, seed_index, generation, population)
-        return CollectionSummary(
+        summary = CollectionSummary(
             completed_seeds=len(config.train_seeds),
             accepted_episodes=_episode_count(connection),
             unsolved_seeds=tuple(unsolved),
         )
+        LOGGER.info(
+            "collect complete seeds=%d accepted_episodes=%d deferred=%d",
+            summary.completed_seeds,
+            summary.accepted_episodes,
+            len(summary.unsolved_seeds),
+        )
+        return summary
     finally:
         connection.close()
 
@@ -401,6 +455,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evolution-seed", type=int, default=42)
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     try:
         config = CollectorConfig(
             database=arguments.database,
