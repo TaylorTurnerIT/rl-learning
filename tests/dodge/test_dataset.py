@@ -54,6 +54,35 @@ def test_database_refuses_different_resume_configuration(tmp_path) -> None:
         connection.close()
 
 
+def test_v55_resume_loads_saved_collector_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    expected = CollectorConfig(
+        database=path,
+        train_seeds=(0,),
+        generations_per_seed=500,
+        population=5,
+        workers=2,
+        evolution_seed=9,
+    )
+    connection = sqlite3.connect(path)
+    try:
+        _initialize_database(connection, expected, resume=False)
+    finally:
+        connection.close()
+    received: list[tuple[CollectorConfig, bool]] = []
+
+    def capture(config: CollectorConfig, *, resume: bool) -> dataset.CollectionSummary:
+        received.append((config, resume))
+        return dataset.CollectionSummary(0, 0, ())
+
+    monkeypatch.setattr(dataset, "collect", capture)
+
+    assert dataset.main(["--database", str(path), "--resume"]) == 0
+    assert received == [(expected, True)]
+
+
 def test_v43_allows_matching_action_hashes_on_different_training_seeds(
     tmp_path,
 ) -> None:

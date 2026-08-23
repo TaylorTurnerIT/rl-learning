@@ -30,6 +30,7 @@ C21: generation + accepted episode checkpoint ! atomic; resume restores seed ind
 C22: collector stores per-seed historical champion; replay loads champion genome; reconstruct recovers missing champion from deterministic search.
 C23: mutation preserves early survival prefix; final 25% genome receives higher exploration rate.
 C24: explicit reset clears collector records in one SQLite DB; schema retained; confirmation required outside `just` recipe.
+C25: collector `--resume` loads saved campaign configuration from its database; defaults/option values do not redefine a campaign.
 
 §I
 
@@ -55,6 +56,7 @@ cli: `just dodge-dataset-collect [options]` → resumable GA demonstration colle
 cli: `just dodge-dataset-replay <database> <seed>` → visible replay stored champion.
 cli: `just dodge-dataset-reconstruct [options] --seed N` → recover historical champion for configured seed.
 cli: `just dodge-dataset-reset [--database path]` → delete collector records; stdout removed-row counts.
+cli: `just dodge-dataset-collect --resume` → continue with the database's saved collector configuration.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
@@ -120,6 +122,7 @@ V51: bootstrap neutral phase ends on first normal enemy spawn; evolved action st
 V52: mutation rate = 2% first 75% genome, 20% final 25%; ranked elites unchanged.
 V53: reset without `--yes` → fail; confirmed reset deletes episodes, steps, champions, checkpoint, seeds, metadata; schema retained.
 V54: accepted trace rows pair only states with next scheduled action; ⊥ terminal or post-script idle state rows.
+V55: `dodge-dataset-collect --resume` → loads and validates stored collector config before `collect`; ⊥ CLI default configuration comparison.
 
 §T
 
@@ -153,6 +156,7 @@ T26|x|increase action horizon + delay genes until first enemy|V39,V46,V51,C17
 T27|x|bias mutation toward late-game actions|V52,C23
 T28|x|add explicit collector reset command|V53,C24,I.cli,I.db
 T29|x|exclude terminal/post-script trace states from accepted rows|V54,V44
+T30|x|load stored collector configuration for bare resume|V55,C25,I.cli
 
 §B
 
@@ -176,3 +180,4 @@ B16|2026-08-23|progress test mocked 5 scores for 50 genomes|fixture population=5
 B17|2026-08-23|champion SQL + test import violate Ruff|mechanical format
 B18|2026-08-23|new replay recipe bypassed `uv run` console script|recipe wrapper
 B19|2026-08-23|post-script trace state had no action label|V54
+B20|2026-08-23|bare resume rebuilt CLI defaults instead of loading database campaign|V55

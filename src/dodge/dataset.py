@@ -326,6 +326,39 @@ def _initialize_database(
         raise ValueError("collector configuration differs from existing dataset")
 
 
+def _load_resume_config(database: Path) -> CollectorConfig:
+    if not database.is_file():
+        raise ControlInputError(f"dataset database does not exist: {database}")
+    connection = _open_database(database)
+    try:
+        stored = connection.execute(
+            "SELECT value FROM metadata WHERE key='config'"
+        ).fetchone()
+    finally:
+        connection.close()
+    if stored is None:
+        raise ControlInputError("dataset has no stored collector configuration")
+    try:
+        values = json.loads(stored[0])
+        if not isinstance(values, dict):
+            raise ValueError
+        config = CollectorConfig(
+            database=database,
+            train_seeds=tuple(values["train_seeds"]),
+            generations_per_seed=values["generations_per_seed"],
+            population=values["population"],
+            workers=values["workers"],
+            evolution_seed=values["evolution_seed"],
+        )
+        _validate_config(config)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ControlInputError("stored collector configuration is invalid") from error
+    encoded = json.dumps(config.to_json(), sort_keys=True, separators=(",", ":"))
+    if stored[0] != encoded:
+        raise ControlInputError("stored collector configuration is incompatible")
+    return config
+
+
 def reset_database(database: Path) -> dict[str, int]:
     if not database.is_file():
         raise ControlInputError(f"dataset database does not exist: {database}")
@@ -665,7 +698,11 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     try:
-        config = _config_from_arguments(arguments)
+        config = (
+            _load_resume_config(arguments.database)
+            if arguments.resume
+            else _config_from_arguments(arguments)
+        )
         print(
             json.dumps(
                 asdict(collect(config, resume=arguments.resume)), separators=(",", ":")
