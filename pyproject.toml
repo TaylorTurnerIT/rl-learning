@@ -18,6 +18,7 @@ dev = [
 
 [project.scripts]
 rl-learning = "rl_learning.main:main"
+dodge-dataset-collect = "dodge.dataset:main"
 
 [build-system]
 requires = ["hatchling"]

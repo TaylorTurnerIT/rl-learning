@@ -21,6 +21,12 @@ C12: ∀ headless run → unique temp cartridge + cwd + `.cartdata`; safe proces
 C13: headless harness runs unpaced; visible replay retains Pemsa 60 Hz cadence.
 C14: full visible world-state JSON deferred to T10.
 C15: headless episode ends only on cartridge death; post-command input → neutral.
+C16: collector train seeds ∈ `0..30000`; exactly 10 fixed eval seeds ∈ `30001..32767`; sets disjoint.
+C17: teacher genome open-loop; game-ready bootstrap = `x:3`, `neutral:18`, `up:6`, `down:6`; no neutral settle; gene action = 4 game frames.
+C18: accepted trace survival ≥1800 frames + deterministic replay match; retain ≤5 unique action hashes/train seed.
+C19: pilot defaults = 5 train seeds × 100 generations; exhausted seed → unsolved/deferred.
+C20: one SQLite DB; stdlib only; episode rows retain config/version + raw state; projected observation stored packed float32.
+C21: generation + accepted episode checkpoint ! atomic; resume restores seed index, population, RNG, accepted hashes.
 
 §I
 
@@ -42,6 +48,8 @@ cli: `just dodge-replay <history.json>` → visible controls-disabled replay fro
 history: `history/dodge/run-*/epoch-*.json` → per-epoch winner + headless result.
 cli: `just dodge-replay-run <history-dir>` → visible per-epoch replay sequence.
 cli: `just dodge-replay-latest <epoch>` → visible replay requested epoch from newest saved run.
+cli: `just dodge-dataset-collect [options]` → resumable GA demonstration collection into SQLite.
+db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
 
@@ -90,6 +98,15 @@ V35: replay-latest selects newest valid `run-*` directory; absent run → fail b
 V36: replay-latest `<epoch>` → only matching saved epoch; invalid or absent epoch → fail before Pemsa.
 V37: next generation retains 5 epoch-ranked brains; remaining agents round-robin clone 1 then mutate.
 V38: headless run repeats exact frame routine until terminal; visible replay invokes routine once per Pemsa tick.
+V39: collector genome action → exactly 4 game updates; ⊥ millisecond duration gene.
+V40: bootstrap starts after game-ready; `up:6` leaves center-idle box before evolved action; no bootstrap neutral settle.
+V41: train seed ≤30000; eval seed >30000; exactly 10 eval seeds; ∀ run → no overlap.
+V42: only replay-verified trace with survival ≥1800 → accepted dataset episode.
+V43: ∀ train seed → ≤5 accepted distinct action hashes; bootstrap ∉ hash.
+V44: accepted episode + ordered raw/projected state-action rows → one SQLite transaction; ⊥ partial episode.
+V45: resume → same pending seed, generation, population, RNG, accepted hashes as interrupted run.
+V46: accepted `steps` → action labels `neutral,up,down,*genome`; bootstrap rows=3; `observation_f32`=221 little-endian f32 values.
+V47: same action hash ∈ multiple training seeds; hash unique only within seed.
 
 §T
 
@@ -115,6 +132,9 @@ T18|x|replay newest run command|V35,I.cli
 T19|x|replay requested epoch from newest run|V36,I.cli
 T20|x|retain five ranked elite lineages|V37
 T21|~|unpace headless simulation; retain visible 60 Hz replay|V31,V38,C13
+T22|x|capture headless game-ready state/action trace|V39,V40,I.json
+T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46,V47,C16,C17,C18,C19,C20,C21,I.cli,I.db
+T24|x|add collector recipe + focused behavior tests|V39,V40,V41,V42,V43,V44,V45,V46,V47,I.cli
 
 §B
 
@@ -125,6 +145,10 @@ B3|2026-08-19|`main` renamed `control`; control tests/import callers broke|V24
 B4|2026-08-19|no-op headless `_draw` froze cartridge draw-driven transitions|V25
 B5|2026-08-20|visible draw-driven transition clock diverged from headless update clock|V31
 B6|2026-08-20|visible draw consumed gameplay RNG + host mouse state|V32
+B7|2026-08-23|legacy 197 projection + bootstrap labels omitted neutral|V46
+B8|2026-08-23|checkpoint test imports unsorted|ruff fix
+B9|2026-08-23|checkpoint test wrote before schema init|fixture init
+B10|2026-08-23|justfile interpolation spacing stale|just fmt
 B7|2026-08-20|new replay lines exceeded Ruff width|mechanical wrap
 B8|2026-08-20|new elite lines exceeded Ruff width|mechanical wrap
 B9|2026-08-20|new elite print bypassed Ruff formatter|mechanical format

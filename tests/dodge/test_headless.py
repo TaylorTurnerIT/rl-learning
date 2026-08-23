@@ -10,10 +10,12 @@ from dodge.control import ControlRuntimeError, MovementCommand
 from dodge.headless import (
     COMMAND_MASKS,
     RESULT_PREFIX,
+    STATE_PREFIX,
     duration_to_frames,
     instrument_cartridge,
     replay_commands,
     run_headless,
+    run_headless_trace,
 )
 
 COMMANDS = [
@@ -202,6 +204,34 @@ def test_run_headless_rejects_missing_result(tmp_path: Path) -> None:
 
     with pytest.raises(ControlRuntimeError, match="did not produce a result"):
         run_headless(COMMANDS, seed=42, source=source, runner=runner)
+
+
+def test_run_headless_trace_captures_game_ready_raw_states(tmp_path: Path) -> None:
+    source = tmp_path / "source.p8"
+    source.write_text(
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\nend\nfunction _update60()\nend\n__gfx__\n"
+    )
+
+    def runner(
+        arguments: list[object], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        instrumented = Path(arguments[1]).read_text()
+        assert "__dodge_capture_started=true" in instrumented
+        assert STATE_PREFIX in instrumented
+        stdout = "\n".join(
+            (
+                f"{STATE_PREFIX}20|64,64,0,0,4||",
+                f"{STATE_PREFIX}24|62,64,-1,0,4||",
+                f"{RESULT_PREFIX}0|24|4|42|true|true",
+            )
+        )
+        return subprocess.CompletedProcess(arguments, 0, stdout, "")
+
+    trace = run_headless_trace(COMMANDS, seed=42, source=source, runner=runner)
+
+    assert trace.result["survival_frames"] == 4
+    assert [state.frame for state in trace.states] == [20, 24]
 
 
 def test_headless_result_is_json_serializable() -> None:

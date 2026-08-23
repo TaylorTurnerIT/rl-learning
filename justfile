@@ -28,36 +28,40 @@ dodge-run:
 
 [group("dodge")]
 dodge-control commands *options:
-    devenv shell -- dodge-control {{commands}} {{options}}
+    devenv shell -- dodge-control {{ commands }} {{ options }}
 
 [group("dodge")]
 dodge-headless commands *options:
-    @DODGE_HEADLESS=1 devenv -q shell -- dodge-headless {{commands}} {{options}}
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-headless {{ commands }} {{ options }}
+
+[group("dodge")]
+dodge-dataset-collect *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-collect {{ options }}
 
 [group("dodge")]
 dodge-replay history:
-    devenv shell -- dodge-replay {{history}}
+    devenv shell -- dodge-replay {{ history }}
 
 [group("dodge")]
 dodge-replay-run history:
-    devenv shell -- dodge-replay-run {{history}}
+    devenv shell -- dodge-replay-run {{ history }}
 
 [group("dodge")]
 dodge-replay-latest epoch:
-    devenv shell -- dodge-replay-latest {{epoch}}
+    devenv shell -- dodge-replay-latest {{ epoch }}
 
 [group("dodge")]
 dodge-neat-train *options:
-    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train {{options}}
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train {{ options }}
 
 [group("dodge")]
 dodge-neat-resume run *options:
-    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train --resume {{run}} {{options}}
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-neat-train --resume {{ run }} {{ options }}
 
 [group("dodge")]
 dodge-neat-replay episode:
-    devenv shell -- dodge-neat-replay {{episode}}
+    devenv shell -- dodge-neat-replay {{ episode }}
 
 [group("dodge")]
 dodge-neat-replay-latest epoch:
-    devenv shell -- dodge-neat-replay-latest {{epoch}}
+    devenv shell -- dodge-neat-replay-latest {{ epoch }}

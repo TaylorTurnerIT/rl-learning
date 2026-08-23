@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from dodge.control import (
@@ -18,8 +19,10 @@ from dodge.control import (
     load_commands,
     parse_seed,
 )
+from dodge.neat.state import RawState, parse_raw_state
 
 RESULT_PREFIX = "__dodge_result__"
+STATE_PREFIX = "__dodge_state__"
 
 COMMAND_MASKS: dict[str, int] = {
     "x": 32,
@@ -38,6 +41,12 @@ HeadlessResult = dict[str, int | float | bool]
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+@dataclass(frozen=True, slots=True)
+class HeadlessTrace:
+    result: HeadlessResult
+    states: tuple[RawState, ...]
+
+
 def duration_to_frames(duration_ms: int) -> int:
     return max(1, (duration_ms * 60 + 999) // 1_000)
 
@@ -50,6 +59,7 @@ def instrument_cartridge(
     render: bool = False,
     wait_for_game_start: bool = False,
     legacy_mouse_input: bool = False,
+    capture_states: bool = False,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
@@ -105,6 +115,62 @@ end
     transition_tick = (
         " if _upd==updatetransition then\n  __dodge_advance_transition()\n end\n"
     )
+    state_harness = (
+        f'''function __dodge_join(values)
+ local result=""
+ for value in all(values) do
+  result=result..(result!="" and ";" or "")..value
+ end
+ return result
+end
+
+function __dodge_entity(x,y,vx,vy,w,h,kind,stage)
+ return tostr(x)..","..tostr(y)..","..tostr(vx)..","..
+  tostr(vy)..","..tostr(w)..","..tostr(h)..","..
+  tostr(kind)..","..tostr(stage)
+end
+
+function __dodge_emit_state()
+ local enemy_state={{}}
+ local aoe_state={{}}
+ for entity in all(enemies) do
+  local width=entity.p>=2 and 8 or entity.s
+  local height=entity.p>=2 and 8 or entity.s
+  local value=__dodge_entity(
+   entity.x,entity.y,entity.vx,entity.vy,width,height,entity.p,0)
+  if entity.p==-1 then add(aoe_state,value) else add(enemy_state,value) end
+ end
+ if cp and cp.rects then
+  for rect in all(cp.rects) do
+   add(aoe_state,__dodge_entity(
+    rect.x,rect.y,rect.dx or 0,rect.dy or 0,rect.w,rect.h,-2,rect.sh or 0))
+  end
+ end
+ local player=tostr(px)..","..tostr(py)..","..tostr(dpx)..","..
+  tostr(dpy)..","..tostr(size)
+ printh("{STATE_PREFIX}"..tostr(__dodge_frames).."|"..player.."|"..
+  __dodge_join(enemy_state).."|"..__dodge_join(aoe_state))
+end
+
+'''
+        if capture_states
+        else ""
+    )
+    capture_terminal = (
+        " if __dodge_capture_started then __dodge_emit_state() end\n"
+        if capture_states
+        else ""
+    )
+    capture_game_start = (
+        "  __dodge_capture_started=true\n  __dodge_emit_state()\n"
+        if capture_states
+        else ""
+    )
+    capture_action_complete = (
+        "   if __dodge_capture_started then __dodge_emit_state() end\n"
+        if capture_states
+        else ""
+    )
     harness = f'''__dodge_game_update60=_update60
 __dodge_commands={{{encoded_commands}}}
 __dodge_command=1
@@ -117,6 +183,7 @@ __dodge_wait_for_game_start={str(wait_for_game_start).lower()}
 __dodge_mouse_x={64 if legacy_mouse_input else 0}
 __dodge_mouse_y={64 if legacy_mouse_input else 0}
 __dodge_fast_forward={str(not render).lower()}
+__dodge_capture_started=false
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -134,8 +201,8 @@ function stat(i)
  return __dodge_game_stat(i)
 end
 
-{draw_override}{transition_harness}function __dodge_finish()
- local started=hasplayed and "true" or "false"
+{draw_override}{transition_harness}{state_harness}function __dodge_finish()
+{capture_terminal} local started=hasplayed and "true" or "false"
  local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
  result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
  result=result.."|"..started.."|true"
@@ -153,7 +220,7 @@ function __dodge_step()
   __dodge_command+=1
   local next_command=__dodge_commands[__dodge_command]
   if next_command then __dodge_remaining=next_command[2] end
-  return
+{capture_game_start}  return
  end
  local game_frame=_upd==updategame and not isdead
  __dodge_game_update60()
@@ -176,6 +243,7 @@ function __dodge_step()
    if next_command then
     __dodge_remaining=next_command[2]
    end
+{capture_action_complete}
   end
  end
 end
@@ -218,6 +286,92 @@ def run_headless(
     except OSError as error:
         raise ControlRuntimeError(f"could not read cartridge: {error}") from error
 
+    stdout = _run_pemsa(instrumented, render=render, runner=runner, timeout=timeout)
+
+    result_lines = [
+        line.strip()
+        for line in stdout.splitlines()
+        if line.strip().startswith(RESULT_PREFIX)
+    ]
+    if len(result_lines) != 1:
+        raise ControlRuntimeError("headless Pemsa did not produce a result")
+
+    payload = result_lines[0][len(RESULT_PREFIX) :].strip()
+    try:
+        (
+            score_raw,
+            frames_raw,
+            survival_frames_raw,
+            seed_raw,
+            started_raw,
+            died_raw,
+        ) = payload.split("|")
+        score = json.loads(score_raw)
+        frames = int(frames_raw)
+        survival_frames = int(survival_frames_raw)
+        result_seed = int(seed_raw)
+        if isinstance(score, bool) or not isinstance(score, int | float):
+            raise ValueError("score is not numeric")
+        if survival_frames < 0:
+            raise ValueError("survival_frames is negative")
+        if started_raw not in {"true", "false"}:
+            raise ValueError("started is not boolean")
+        if died_raw != "true":
+            raise ValueError("died is not true")
+    except (ValueError, json.JSONDecodeError) as error:
+        message = "headless Pemsa produced an invalid result"
+        raise ControlRuntimeError(message) from error
+
+    return {
+        "score": score,
+        "frames": frames,
+        "survival_frames": survival_frames,
+        "seed": result_seed,
+        "started": started_raw == "true",
+        "died": True,
+    }
+
+
+def run_headless_trace(
+    commands: list[MovementCommand],
+    *,
+    seed: int,
+    source: Path = CARTRIDGE_PATH,
+    runner: Runner = subprocess.run,
+    timeout: float | None = None,
+) -> HeadlessTrace:
+    """Run an unpaced command trace and capture states at game-ready boundaries."""
+    try:
+        original = source.read_text(encoding="utf-8")
+        instrumented = instrument_cartridge(
+            original,
+            commands,
+            seed=seed,
+            wait_for_game_start=True,
+            capture_states=True,
+        )
+    except OSError as error:
+        raise ControlRuntimeError(f"could not read cartridge: {error}") from error
+
+    stdout = _run_pemsa(instrumented, render=False, runner=runner, timeout=timeout)
+    result = _parse_result(stdout)
+    states = tuple(
+        parse_raw_state(line.strip(), prefix=STATE_PREFIX)
+        for line in stdout.splitlines()
+        if line.strip().startswith(STATE_PREFIX)
+    )
+    if len(states) < 2:
+        raise ControlRuntimeError("headless Pemsa did not produce a state trace")
+    return HeadlessTrace(result, states)
+
+
+def _run_pemsa(
+    instrumented: str,
+    *,
+    render: bool,
+    runner: Runner,
+    timeout: float | None,
+) -> str:
     environment = os.environ.copy()
     environment["SDL_VIDEODRIVER"] = "x11" if render else "dummy"
     if render:
@@ -252,18 +406,22 @@ def run_headless(
                 f"Dodge run timed out after {timeout_text}s{suffix}"
             ) from error
         except OSError as error:
-            message = f"could not run headless Pemsa: {error}"
-            raise ControlRuntimeError(message) from error
+            raise ControlRuntimeError(
+                f"could not run headless Pemsa: {error}"
+            ) from error
 
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise ControlRuntimeError(
             f"headless Pemsa exited {completed.returncode}: {detail}"
         )
+    return completed.stdout
 
+
+def _parse_result(stdout: str) -> HeadlessResult:
     result_lines = [
         line.strip()
-        for line in completed.stdout.splitlines()
+        for line in stdout.splitlines()
         if line.strip().startswith(RESULT_PREFIX)
     ]
     if len(result_lines) != 1:
@@ -292,9 +450,9 @@ def run_headless(
         if died_raw != "true":
             raise ValueError("died is not true")
     except (ValueError, json.JSONDecodeError) as error:
-        message = "headless Pemsa produced an invalid result"
-        raise ControlRuntimeError(message) from error
-
+        raise ControlRuntimeError(
+            "headless Pemsa produced an invalid result"
+        ) from error
     return {
         "score": score,
         "frames": frames,
