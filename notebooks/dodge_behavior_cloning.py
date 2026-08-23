@@ -58,16 +58,18 @@ def _(
     dataset_path,
     epochs,
     load_demonstrations,
+    mo,
     output_path,
     save_training_result,
     torch,
     train,
     train_behavior_cloning,
 ):
-    if not train.value:
-        return None
-    if not torch.cuda.is_available():
-        raise RuntimeError("Attach a CUDA GPU before running Dodge training")
+    mo.stop(not train.value)
+    mo.stop(
+        not torch.cuda.is_available(),
+        mo.md("Attach a CUDA GPU before running Dodge training."),
+    )
     result = train_behavior_cloning(
         load_demonstrations(Path(dataset_path.value)),
         epochs=int(epochs.value),
@@ -81,9 +83,10 @@ def _(
 
 @app.cell
 def _(mo, output, result):
-    if result is None:
-        return mo.md("Set paths, attach a GPU, then press **Train on GPU**.")
-    return mo.md(
+    mo.stop(
+        result is None, mo.md("Set paths, attach a GPU, then press **Train on GPU**.")
+    )
+    mo.md(
         f"Trained {result.examples:,} decisions on `{result.device}`. "
         f"Final loss: `{result.final_loss:.4f}`. Artifact: `{output}`."
     )
