@@ -9,10 +9,12 @@ import pytest
 import dodge.dataset as dataset
 from dodge.dataset import (
     EVALUATION_SEEDS,
+    Champion,
     CollectorConfig,
     Genome,
     _checkpoint,
     _initialize_database,
+    _load_champion,
     _load_checkpoint,
     _restore_or_initialize,
     _validate_config,
@@ -89,6 +91,52 @@ def test_v45_checkpoint_restores_pending_population_and_rng(tmp_path) -> None:
         assert restored.random() == random_source.random()
     finally:
         connection.close()
+
+
+def test_champion_persists_best_genome_with_checkpoint(tmp_path) -> None:
+    config = CollectorConfig(database=tmp_path / "dataset.sqlite3", train_seeds=(0,))
+    connection = sqlite3.connect(config.database)
+    champion = Champion(0, 7, 1_213, ("left",))
+    try:
+        _initialize_database(connection, config, resume=False)
+        _checkpoint(
+            connection,
+            random.Random(9),
+            0,
+            7,
+            [("left",), ("right",), ("up",), ("down",), ("neutral",)],
+            champion=champion,
+        )
+        assert _load_champion(connection, 0) == champion
+    finally:
+        connection.close()
+
+
+def test_reconstruct_champion_restores_recorded_high_score(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    config = CollectorConfig(
+        database=tmp_path / "dataset.sqlite3",
+        train_seeds=(0, 1),
+        generations_per_seed=1,
+        population=5,
+    )
+    connection = sqlite3.connect(config.database)
+    try:
+        _initialize_database(connection, config, resume=False)
+    finally:
+        connection.close()
+    monkeypatch.setattr(
+        dataset,
+        "_evaluate_population",
+        lambda seed, *_args: [10, 9, 8, 7, 6] if seed == 0 else [99, 8, 7, 6, 5],
+    )
+
+    champion = dataset.reconstruct_champion(config, 1)
+
+    assert champion.seed == 1
+    assert champion.generation == 1
+    assert champion.survival_frames == 99
 
 
 def test_collect_logs_generation_scores_and_seed_progress(

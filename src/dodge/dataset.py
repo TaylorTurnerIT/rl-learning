@@ -13,10 +13,15 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from dodge.control import ControlInputError, ControlRuntimeError, MovementCommand
-from dodge.headless import run_headless, run_headless_trace
+from dodge.headless import (
+    HeadlessResult,
+    replay_commands,
+    run_headless,
+    run_headless_trace,
+)
 from dodge.neat.bridge import Direction
 from dodge.neat.state import RawState, project_state
 
@@ -92,6 +97,18 @@ class CollectionSummary:
     unsolved_seeds: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class Champion:
+    seed: int
+    generation: int
+    survival_frames: int
+    genome: Genome
+
+    @property
+    def action_hash(self) -> str:
+        return _genome_hash(self.genome)
+
+
 def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSummary:
     _validate_config(config)
     LOGGER.info(
@@ -116,6 +133,7 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
         while seed_index < len(config.train_seeds):
             seed = config.train_seeds[seed_index]
             accepted_hashes = _accepted_hashes(connection, seed)
+            champion: Champion | None = None
             LOGGER.info(
                 "seed=%d start accepted=%d/%d generation=%d/%d",
                 seed,
@@ -138,6 +156,7 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                 generation = next_generation
                 results = _evaluate_population(seed, population, config)
                 ranked = sorted(zip(results, population, strict=True), reverse=True)
+                champion = Champion(seed, generation, ranked[0][0], ranked[0][1])
                 LOGGER.info(
                     "seed=%d generation=%d/%d best=%d median=%d target=%d "
                     "accepted=%d/%d",
@@ -172,7 +191,12 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                     break
                 population = _breed_population(ranked, random_source, config)
                 _checkpoint(
-                    connection, random_source, seed_index, generation, population
+                    connection,
+                    random_source,
+                    seed_index,
+                    generation,
+                    population,
+                    champion=champion,
                 )
             else:
                 unsolved.append(seed)
@@ -184,7 +208,14 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
             seed_index += 1
             generation = 0
             population = _new_population(random_source, config)
-            _checkpoint(connection, random_source, seed_index, generation, population)
+            _checkpoint(
+                connection,
+                random_source,
+                seed_index,
+                generation,
+                population,
+                champion=champion,
+            )
         summary = CollectionSummary(
             completed_seeds=len(config.train_seeds),
             accepted_episodes=_episode_count(connection),
@@ -256,6 +287,13 @@ def _initialize_database(
         CREATE TABLE IF NOT EXISTS checkpoints (
           id INTEGER PRIMARY KEY CHECK(id=1),
           state BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS champions (
+          seed INTEGER PRIMARY KEY REFERENCES seeds(seed),
+          generation INTEGER NOT NULL,
+          survival_frames INTEGER NOT NULL,
+          action_hash TEXT NOT NULL,
+          genome_json TEXT NOT NULL
         );
         """
     )
@@ -424,6 +462,8 @@ def _checkpoint(
     seed_index: int,
     generation: int,
     population: Population,
+    *,
+    champion: Champion | None = None,
 ) -> None:
     state = pickle.dumps(
         {
@@ -434,6 +474,8 @@ def _checkpoint(
         }
     )
     with connection:
+        if champion is not None:
+            _store_champion(connection, champion)
         connection.execute("INSERT OR REPLACE INTO checkpoints VALUES (1, ?)", (state,))
 
 
@@ -442,8 +484,102 @@ def _load_checkpoint(connection: sqlite3.Connection) -> bytes | None:
     return None if row is None else row[0]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="dodge-dataset-collect")
+def _store_champion(connection: sqlite3.Connection, champion: Champion) -> None:
+    connection.execute(
+        "INSERT INTO champions("
+        "seed, generation, survival_frames, action_hash, genome_json) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(seed) DO UPDATE SET "
+        "generation=excluded.generation, survival_frames=excluded.survival_frames, "
+        "action_hash=excluded.action_hash, genome_json=excluded.genome_json "
+        "WHERE excluded.survival_frames > champions.survival_frames",
+        (
+            champion.seed,
+            champion.generation,
+            champion.survival_frames,
+            champion.action_hash,
+            json.dumps(champion.genome, separators=(",", ":")),
+        ),
+    )
+
+
+def _load_champion(connection: sqlite3.Connection, seed: int) -> Champion:
+    row = connection.execute(
+        "SELECT generation, survival_frames, genome_json FROM champions WHERE seed=?",
+        (seed,),
+    ).fetchone()
+    if row is None:
+        raise ControlInputError(f"no champion recorded for seed {seed}")
+    try:
+        values = json.loads(row[2])
+        if not isinstance(values, list) or any(
+            action not in ACTION_CHOICES for action in values
+        ):
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ControlRuntimeError(f"invalid champion genome for seed {seed}") from error
+    return Champion(seed, int(row[0]), int(row[1]), cast(Genome, tuple(values)))
+
+
+def replay_champion(database: Path, seed: int) -> HeadlessResult:
+    connection = _open_database(database)
+    try:
+        champion = _load_champion(connection, seed)
+    finally:
+        connection.close()
+    LOGGER.info(
+        "replay seed=%d generation=%d survival=%d hash=%s",
+        champion.seed,
+        champion.generation,
+        champion.survival_frames,
+        champion.action_hash[:12],
+    )
+    return replay_commands(
+        _commands(champion.genome), seed=seed, wait_for_game_start=True
+    )
+
+
+def reconstruct_champion(config: CollectorConfig, target_seed: int) -> Champion:
+    _validate_config(config)
+    if target_seed not in config.train_seeds:
+        raise ControlInputError(f"seed {target_seed} is not configured for training")
+    connection = _open_database(config.database)
+    try:
+        _initialize_database(connection, config, resume=True)
+        random_source = random.Random(config.evolution_seed)
+        population = _new_population(random_source, config)
+        for seed in config.train_seeds:
+            accepted_hashes = _accepted_hashes(connection, seed)
+            for generation in range(1, config.generations_per_seed + 1):
+                results = _evaluate_population(seed, population, config)
+                ranked = sorted(zip(results, population, strict=True), reverse=True)
+                champion = Champion(seed, generation, ranked[0][0], ranked[0][1])
+                LOGGER.info(
+                    "reconstruct seed=%d generation=%d/%d best=%d",
+                    seed,
+                    generation,
+                    config.generations_per_seed,
+                    champion.survival_frames,
+                )
+                if seed == target_seed:
+                    with connection:
+                        _store_champion(connection, champion)
+                for fitness, genome in ranked:
+                    if fitness < TARGET_SURVIVAL_FRAMES:
+                        break
+                    accepted_hashes.add(_genome_hash(genome))
+                if len(accepted_hashes) >= TRACES_PER_SEED:
+                    break
+                population = _breed_population(ranked, random_source, config)
+            if seed == target_seed:
+                champion = _load_champion(connection, seed)
+                return champion
+            population = _new_population(random_source, config)
+    finally:
+        connection.close()
+    raise AssertionError("configured target seed was not reconstructed")
+
+
+def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--seed-count", type=int, default=PILOT_SEED_COUNT)
@@ -453,20 +589,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--population", type=int, default=DEFAULT_POPULATION)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--evolution-seed", type=int, default=42)
+
+
+def _config_from_arguments(arguments: argparse.Namespace) -> CollectorConfig:
+    return CollectorConfig(
+        database=arguments.database,
+        train_seeds=tuple(
+            range(arguments.seed_start, arguments.seed_start + arguments.seed_count)
+        ),
+        generations_per_seed=arguments.generations_per_seed,
+        population=arguments.population,
+        workers=arguments.workers,
+        evolution_seed=arguments.evolution_seed,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="dodge-dataset-collect")
+    _add_collection_arguments(parser)
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     try:
-        config = CollectorConfig(
-            database=arguments.database,
-            train_seeds=tuple(
-                range(arguments.seed_start, arguments.seed_start + arguments.seed_count)
-            ),
-            generations_per_seed=arguments.generations_per_seed,
-            population=arguments.population,
-            workers=arguments.workers,
-            evolution_seed=arguments.evolution_seed,
-        )
+        config = _config_from_arguments(arguments)
         print(
             json.dumps(
                 asdict(collect(config, resume=arguments.resume)), separators=(",", ":")
@@ -474,6 +619,47 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (ControlInputError, ControlRuntimeError, ValueError) as error:
         print(f"dodge-dataset-collect: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def replay_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="dodge-dataset-replay")
+    parser.add_argument("database", type=Path)
+    parser.add_argument("--seed", type=int, required=True)
+    arguments = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    try:
+        print(json.dumps(replay_champion(arguments.database, arguments.seed)))
+    except (ControlInputError, ControlRuntimeError, OSError, sqlite3.Error) as error:
+        print(f"dodge-dataset-replay: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def reconstruct_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="dodge-dataset-reconstruct")
+    _add_collection_arguments(parser)
+    parser.add_argument("--seed", type=int, required=True)
+    arguments = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    try:
+        champion = reconstruct_champion(
+            _config_from_arguments(arguments), arguments.seed
+        )
+        print(
+            json.dumps(
+                {
+                    "seed": champion.seed,
+                    "generation": champion.generation,
+                    "survival_frames": champion.survival_frames,
+                    "action_hash": champion.action_hash,
+                },
+                separators=(",", ":"),
+            )
+        )
+    except (ControlInputError, ControlRuntimeError, ValueError, sqlite3.Error) as error:
+        print(f"dodge-dataset-reconstruct: {error}", file=sys.stderr)
         return 1
     return 0
 

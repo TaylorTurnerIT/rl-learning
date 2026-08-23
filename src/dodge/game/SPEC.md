@@ -27,6 +27,7 @@ C18: accepted trace survival ≥1800 frames + deterministic replay match; retain
 C19: pilot defaults = 5 train seeds × 100 generations; exhausted seed → unsolved/deferred.
 C20: one SQLite DB; stdlib only; episode rows retain config/version + raw state; projected observation stored packed float32.
 C21: generation + accepted episode checkpoint ! atomic; resume restores seed index, population, RNG, accepted hashes.
+C22: collector stores per-seed historical champion; replay loads champion genome; reconstruct recovers missing champion from deterministic search.
 
 §I
 
@@ -49,6 +50,8 @@ history: `history/dodge/run-*/epoch-*.json` → per-epoch winner + headless resu
 cli: `just dodge-replay-run <history-dir>` → visible per-epoch replay sequence.
 cli: `just dodge-replay-latest <epoch>` → visible replay requested epoch from newest saved run.
 cli: `just dodge-dataset-collect [options]` → resumable GA demonstration collection into SQLite.
+cli: `just dodge-dataset-replay <database> <seed>` → visible replay stored champion.
+cli: `just dodge-dataset-reconstruct [options] --seed N` → recover historical champion for configured seed.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
@@ -108,6 +111,8 @@ V45: resume → same pending seed, generation, population, RNG, accepted hashes 
 V46: accepted `steps` → action labels `neutral,up,down,*genome`; bootstrap rows=3; `observation_f32`=221 little-endian f32 values.
 V47: same action hash ∈ multiple training seeds; hash unique only within seed.
 V48: `Genome` = `tuple[Direction, ...]`; collector action sets, population, checkpoint, trace labels preserve `Direction`.
+V49: ∀ completed generation → DB champion retains greatest survival genome seen for seed; ties retain earlier champion.
+V50: champion replay → stored genome + stored seed; reconstruction uses stored collector config + deterministic evolution seed.
 
 §T
 
@@ -136,6 +141,7 @@ T21|~|unpace headless simulation; retain visible 60 Hz replay|V31,V38,C13
 T22|x|capture headless game-ready state/action trace|V39,V40,I.json
 T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46,V47,V48,C16,C17,C18,C19,C20,C21,I.cli,I.db
 T24|x|add collector recipe + focused behavior tests|V39,V40,V41,V42,V43,V44,V45,V46,V47,I.cli
+T25|x|persist/replay/reconstruct per-seed champion|V49,V50,C22,I.cli,I.db
 
 §B
 
@@ -156,3 +162,4 @@ B13|2026-08-23|justfile interpolation spacing stale|just fmt
 B14|2026-08-23|collector genome widened `Direction` to `str`|V48
 B15|2026-08-23|collector log line + test imports violate Ruff format|mechanical format
 B16|2026-08-23|progress test mocked 5 scores for 50 genomes|fixture population=5
+B17|2026-08-23|champion SQL + test import violate Ruff|mechanical format

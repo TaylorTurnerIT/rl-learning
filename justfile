@@ -39,6 +39,14 @@ dodge-dataset-collect *options:
     @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-collect {{ options }}
 
 [group("dodge")]
+dodge-dataset-replay database seed:
+    devenv shell -- dodge-dataset-replay {{ database }} --seed {{ seed }}
+
+[group("dodge")]
+dodge-dataset-reconstruct *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-reconstruct {{ options }}
+
+[group("dodge")]
 dodge-replay history:
     devenv shell -- dodge-replay {{ history }}
 
