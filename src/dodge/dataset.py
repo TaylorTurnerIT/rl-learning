@@ -27,6 +27,7 @@ from dodge.neat.state import RawState, project_state
 
 DATASET_VERSION = 3
 DEFAULT_DATABASE = Path("history/dodge/dataset.sqlite3")
+RESET_TABLES = ("steps", "episodes", "champions", "checkpoints", "seeds", "metadata")
 STEP_FRAMES = 8
 TARGET_SURVIVAL_FRAMES = 1_800
 TRACES_PER_SEED = 5
@@ -323,6 +324,35 @@ def _initialize_database(
         raise ValueError("dataset exists; use --resume")
     elif stored[0] != encoded:
         raise ValueError("collector configuration differs from existing dataset")
+
+
+def reset_database(database: Path) -> dict[str, int]:
+    if not database.is_file():
+        raise ControlInputError(f"dataset database does not exist: {database}")
+    connection = _open_database(database)
+    try:
+        known_tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        missing = set(RESET_TABLES) - known_tables
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise ControlInputError(f"dataset database is missing tables: {names}")
+        removed = {
+            table: int(
+                connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            )
+            for table in RESET_TABLES
+        }
+        with connection:
+            for table in RESET_TABLES:
+                connection.execute(f"DELETE FROM {table}")
+        return removed
+    finally:
+        connection.close()
 
 
 def _restore_or_initialize(
@@ -684,6 +714,25 @@ def reconstruct_main(argv: list[str] | None = None) -> int:
     except (ControlInputError, ControlRuntimeError, ValueError, sqlite3.Error) as error:
         print(f"dodge-dataset-reconstruct: {error}", file=sys.stderr)
         return 1
+    return 0
+
+
+def reset_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="dodge-dataset-reset")
+    parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    parser.add_argument("--yes", action="store_true", help="delete collector data")
+    arguments = parser.parse_args(argv)
+    if not arguments.yes:
+        print(
+            "dodge-dataset-reset: pass --yes to delete collector data", file=sys.stderr
+        )
+        return 1
+    try:
+        removed = reset_database(arguments.database)
+    except (ControlInputError, OSError, sqlite3.Error) as error:
+        print(f"dodge-dataset-reset: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps({"database": str(arguments.database), "removed": removed}))
     return 0
 
 

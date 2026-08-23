@@ -47,6 +47,10 @@ dodge-dataset-reconstruct *options:
     @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-reconstruct {{ options }}
 
 [group("dodge")]
+dodge-dataset-reset *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-reset --yes {{ options }}
+
+[group("dodge")]
 dodge-replay history:
     devenv shell -- dodge-replay {{ history }}
 

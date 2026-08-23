@@ -18,6 +18,7 @@ from dodge.dataset import (
     _load_checkpoint,
     _restore_or_initialize,
     _validate_config,
+    reset_database,
 )
 from dodge.headless import HeadlessResult, HeadlessTrace
 from dodge.neat.state import PlayerState, RawState
@@ -108,6 +109,42 @@ def test_champion_persists_best_genome_with_checkpoint(tmp_path) -> None:
             champion=champion,
         )
         assert _load_champion(connection, 0) == champion
+    finally:
+        connection.close()
+
+
+def test_v53_reset_requires_confirmation_and_clears_collector_data(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    config = CollectorConfig(database=path, train_seeds=(0,))
+    connection = sqlite3.connect(path)
+    try:
+        _initialize_database(connection, config, resume=False)
+        _checkpoint(
+            connection,
+            random.Random(9),
+            0,
+            1,
+            [("left",), ("right",), ("up",), ("down",), ("neutral",)],
+            champion=Champion(0, 1, 100, ("left",)),
+        )
+    finally:
+        connection.close()
+
+    assert dataset.reset_main(["--database", str(path)]) == 1
+    assert "pass --yes" in capsys.readouterr().err
+    assert reset_database(path) == {
+        "steps": 0,
+        "episodes": 0,
+        "champions": 1,
+        "checkpoints": 1,
+        "seeds": 11,
+        "metadata": 1,
+    }
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("SELECT count(*) FROM metadata").fetchone()[0] == 0
     finally:
         connection.close()
 
