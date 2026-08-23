@@ -40,7 +40,7 @@ dodge-dataset-collect *options:
 
 [group("dodge")]
 dodge-dataset-replay database seed:
-    devenv shell -- dodge-dataset-replay {{ database }} --seed {{ seed }}
+    devenv shell -- uv run dodge-dataset-replay {{ database }} --seed {{ seed }}
 
 [group("dodge")]
 dodge-dataset-reconstruct *options:

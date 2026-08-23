@@ -163,3 +163,4 @@ B14|2026-08-23|collector genome widened `Direction` to `str`|V48
 B15|2026-08-23|collector log line + test imports violate Ruff format|mechanical format
 B16|2026-08-23|progress test mocked 5 scores for 50 genomes|fixture population=5
 B17|2026-08-23|champion SQL + test import violate Ruff|mechanical format
+B18|2026-08-23|new replay recipe bypassed `uv run` console script|recipe wrapper
