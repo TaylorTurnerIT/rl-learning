@@ -31,6 +31,7 @@ C22: collector stores per-seed historical champion; replay loads champion genome
 C23: mutation preserves early survival prefix; final 25% genome receives higher exploration rate.
 C24: explicit reset clears collector records in one SQLite DB; schema retained; confirmation required outside `just` recipe.
 C25: collector `--resume` loads saved campaign configuration from its database; defaults/option values do not redefine a campaign.
+C26: append mode extends only the stored train-seed list; all collection/evolution parameters remain unchanged.
 
 §I
 
@@ -57,6 +58,7 @@ cli: `just dodge-dataset-replay <database> <seed>` → visible replay stored cha
 cli: `just dodge-dataset-reconstruct [options] --seed N` → recover historical champion for configured seed.
 cli: `just dodge-dataset-reset [--database path]` → delete collector records; stdout removed-row counts.
 cli: `just dodge-dataset-collect --resume` → continue with the database's saved collector configuration.
+cli: `just dodge-dataset-collect --resume --append-seeds N` → append N sequential training seeds and continue at the first new seed.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
@@ -123,6 +125,7 @@ V52: mutation rate = 2% first 75% genome, 20% final 25%; ranked elites unchanged
 V53: reset without `--yes` → fail; confirmed reset deletes episodes, steps, champions, checkpoint, seeds, metadata; schema retained.
 V54: accepted trace rows pair only states with next scheduled action; ⊥ terminal or post-script idle state rows.
 V55: `dodge-dataset-collect --resume` → loads and validates stored collector config before `collect`; ⊥ CLI default configuration comparison.
+V56: append mode atomically records only sequential new training seeds + enlarged config; checkpoint/RNG/population retained and next run starts at its existing seed index.
 
 §T
 
@@ -157,6 +160,7 @@ T27|x|bias mutation toward late-game actions|V52,C23
 T28|x|add explicit collector reset command|V53,C24,I.cli,I.db
 T29|x|exclude terminal/post-script trace states from accepted rows|V54,V44
 T30|x|load stored collector configuration for bare resume|V55,C25,I.cli
+T31|x|append training seeds to completed collector campaign|V56,C26,I.cli,I.db
 
 §B
 
@@ -181,3 +185,4 @@ B17|2026-08-23|champion SQL + test import violate Ruff|mechanical format
 B18|2026-08-23|new replay recipe bypassed `uv run` console script|recipe wrapper
 B19|2026-08-23|post-script trace state had no action label|V54
 B20|2026-08-23|bare resume rebuilt CLI defaults instead of loading database campaign|V55
+B21|2026-08-23|completed campaign had no way to extend stored seed set without changing parameters|V56

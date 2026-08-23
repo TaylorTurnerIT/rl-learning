@@ -83,6 +83,71 @@ def test_v55_resume_loads_saved_collector_configuration(
     assert received == [(expected, True)]
 
 
+def test_v56_resume_appends_new_seeds_with_stored_parameters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    previous = CollectorConfig(
+        database=path,
+        train_seeds=(0,),
+        generations_per_seed=500,
+        population=5,
+        workers=2,
+        evolution_seed=9,
+    )
+    population: list[Genome] = [
+        ("left",),
+        ("right",),
+        ("up",),
+        ("down",),
+        ("neutral",),
+    ]
+    connection = sqlite3.connect(path)
+    try:
+        _initialize_database(connection, previous, resume=False)
+        _checkpoint(connection, random.Random(9), 1, 0, population)
+    finally:
+        connection.close()
+    received: list[CollectorConfig] = []
+
+    def capture(config: CollectorConfig, *, resume: bool) -> dataset.CollectionSummary:
+        assert resume
+        received.append(config)
+        return dataset.CollectionSummary(0, 0, ())
+
+    monkeypatch.setattr(dataset, "collect", capture)
+
+    assert (
+        dataset.main(["--database", str(path), "--resume", "--append-seeds", "2"]) == 0
+    )
+    expected = CollectorConfig(
+        database=path,
+        train_seeds=(0, 1, 2),
+        generations_per_seed=500,
+        population=5,
+        workers=2,
+        evolution_seed=9,
+    )
+    assert received == [expected]
+    assert dataset._load_resume_config(path) == expected
+    connection = sqlite3.connect(path)
+    try:
+        _, seed_index, generation, restored_population = dataset._restore_or_initialize(
+            _load_checkpoint(connection), expected
+        )
+        assert (seed_index, generation, restored_population) == (1, 0, population)
+        assert connection.execute(
+            "SELECT seed FROM seeds ORDER BY seed"
+        ).fetchall() == [
+            (0,),
+            (1,),
+            (2,),
+            *[(seed,) for seed in EVALUATION_SEEDS],
+        ]
+    finally:
+        connection.close()
+
+
 def test_v43_allows_matching_action_hashes_on_different_training_seeds(
     tmp_path,
 ) -> None:

@@ -359,6 +359,58 @@ def _load_resume_config(database: Path) -> CollectorConfig:
     return config
 
 
+def append_training_seeds(database: Path, count: int) -> CollectorConfig:
+    if count < 1:
+        raise ControlInputError("--append-seeds must be positive")
+    previous = _load_resume_config(database)
+    first_seed = max(previous.train_seeds, default=-1) + 1
+    added_seeds = tuple(range(first_seed, first_seed + count))
+    config = CollectorConfig(
+        database=database,
+        train_seeds=(*previous.train_seeds, *added_seeds),
+        generations_per_seed=previous.generations_per_seed,
+        population=previous.population,
+        workers=previous.workers,
+        evolution_seed=previous.evolution_seed,
+    )
+    try:
+        _validate_config(config)
+    except ValueError as error:
+        raise ControlInputError(
+            "appended seeds exceed the training seed range"
+        ) from error
+    previous_encoded = json.dumps(
+        previous.to_json(), sort_keys=True, separators=(",", ":")
+    )
+    encoded = json.dumps(config.to_json(), sort_keys=True, separators=(",", ":"))
+    connection = _open_database(database)
+    try:
+        with connection:
+            stored = connection.execute(
+                "SELECT value FROM metadata WHERE key='config'"
+            ).fetchone()
+            if stored is None or stored[0] != previous_encoded:
+                raise ControlRuntimeError(
+                    "collector configuration changed while appending"
+                )
+            connection.execute(
+                "UPDATE metadata SET value=? WHERE key='config'", (encoded,)
+            )
+            connection.executemany(
+                "INSERT INTO seeds(seed, role) VALUES (?, 'training')",
+                [(seed,) for seed in added_seeds],
+            )
+    finally:
+        connection.close()
+    LOGGER.info(
+        "collect append seeds=%d..%d total=%d",
+        added_seeds[0],
+        added_seeds[-1],
+        len(config.train_seeds),
+    )
+    return config
+
+
 def reset_database(database: Path) -> dict[str, int]:
     if not database.is_file():
         raise ControlInputError(f"dataset database does not exist: {database}")
@@ -695,6 +747,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dodge-dataset-collect")
     _add_collection_arguments(parser)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--append-seeds", type=int)
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     try:
@@ -703,6 +756,10 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.resume
             else _config_from_arguments(arguments)
         )
+        if arguments.append_seeds is not None:
+            if not arguments.resume:
+                raise ControlInputError("--append-seeds requires --resume")
+            config = append_training_seeds(arguments.database, arguments.append_seeds)
         print(
             json.dumps(
                 asdict(collect(config, resume=arguments.resume)), separators=(",", ":")
