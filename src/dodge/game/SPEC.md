@@ -18,7 +18,7 @@ C9: seeded run uses temporary cartridge; checked-in `dodge.p8` unchanged.
 C10: headless run → SDL dummy video/audio + no-op `_draw`; ⊥ display server/keyboard injection.
 C11: headless input duration → `ceil(duration_ms*60/1000)` game frames.
 C12: ∀ headless run → unique temp cartridge + cwd + `.cartdata`; safe process parallelism.
-C13: prebuilt Pemsa remains 60 Hz; ⊥ promise faster-than-real-time simulation.
+C13: headless harness runs unpaced; visible replay retains Pemsa 60 Hz cadence.
 C14: full visible world-state JSON deferred to T10.
 C15: headless episode ends only on cartridge death; post-command input → neutral.
 
@@ -89,6 +89,7 @@ V34: replay-run replays epoch files ordered by epoch and fails on visible/headle
 V35: replay-latest selects newest valid `run-*` directory; absent run → fail before replay.
 V36: replay-latest `<epoch>` → only matching saved epoch; invalid or absent epoch → fail before Pemsa.
 V37: next generation retains 5 epoch-ranked brains; remaining agents round-robin clone 1 then mutate.
+V38: headless run repeats exact frame routine until terminal; visible replay invokes routine once per Pemsa tick.
 
 §T
 
@@ -113,6 +114,7 @@ T17|x|save per-epoch winners + replay run sequence|V33,V34,I.history,I.cli
 T18|x|replay newest run command|V35,I.cli
 T19|x|replay requested epoch from newest run|V36,I.cli
 T20|x|retain five ranked elite lineages|V37
+T21|~|unpace headless simulation; retain visible 60 Hz replay|V31,V38,C13
 
 §B
 

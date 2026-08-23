@@ -61,6 +61,9 @@ def test_instrumented_cartridge_seeds_inputs_and_disables_draw() -> None:
     assert "function _init()\n srand(42)\n" in result
     assert "__dodge_game_update60=_update60" in result
     assert "__dodge_commands={{32,3},{0,45},{5,6}}" in result
+    assert "__dodge_fast_forward=true" in result
+    assert "function __dodge_step()" in result
+    assert "while not isdead do\n   __dodge_step()\n  end" in result
     assert "function __dodge_advance_transition()" in result
     assert "_upd,_drw=updategame,drawgame" in result
     assert "function _draw()\nend" in result
@@ -79,6 +82,8 @@ def test_instrumented_cartridge_preserves_draw_for_visible_replay() -> None:
     result = instrument_cartridge(source, COMMANDS, seed=42, render=True)
 
     assert result.count("function _draw()") == 2
+    assert "__dodge_fast_forward=false" in result
+    assert "else\n  __dodge_step()\n end" in result
     assert "__dodge_game_draw=_draw" in result
     assert "__dodge_game_rnd=rnd" in result
     assert "function __dodge_draw_rnd(max)" in result

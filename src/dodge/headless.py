@@ -116,6 +116,7 @@ __dodge_survival_frames=0
 __dodge_wait_for_game_start={str(wait_for_game_start).lower()}
 __dodge_mouse_x={64 if legacy_mouse_input else 0}
 __dodge_mouse_y={64 if legacy_mouse_input else 0}
+__dodge_fast_forward={str(not render).lower()}
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -142,7 +143,7 @@ end
  exit()
 end
 
-function _update60()
+function __dodge_step()
  local command=__dodge_commands[__dodge_command]
  __dodge_mask=command and command[1] or 0
  if __dodge_wait_for_game_start and _upd==updategame then
@@ -176,6 +177,16 @@ function _update60()
     __dodge_remaining=next_command[2]
    end
   end
+ end
+end
+
+function _update60()
+ if __dodge_fast_forward then
+  while not isdead do
+   __dodge_step()
+  end
+ else
+  __dodge_step()
  end
 end
 
