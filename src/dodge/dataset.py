@@ -25,9 +25,9 @@ from dodge.headless import (
 from dodge.neat.bridge import Direction
 from dodge.neat.state import RawState, project_state
 
-DATASET_VERSION = 1
+DATASET_VERSION = 2
 DEFAULT_DATABASE = Path("history/dodge/dataset.sqlite3")
-STEP_FRAMES = 4
+STEP_FRAMES = 8
 TARGET_SURVIVAL_FRAMES = 1_800
 TRACES_PER_SEED = 5
 PILOT_SEED_COUNT = 5
@@ -46,6 +46,7 @@ BOOTSTRAP: tuple[tuple[BootstrapAction, int], ...] = (
     ("neutral", 18),
     ("up", 6),
     ("down", 6),
+    ("neutral", 31),
 )
 ACTION_CHOICES: tuple[Direction, ...] = (
     "neutral",
@@ -398,7 +399,13 @@ def _accept_episode(
         or trace.result["survival_frames"] < TARGET_SURVIVAL_FRAMES
     ):
         raise ControlRuntimeError("accepted trace failed deterministic replay")
-    actions: tuple[Direction, ...] = ("neutral", "up", "down", *genome)
+    actions: tuple[Direction, ...] = (
+        "neutral",
+        "up",
+        "down",
+        "neutral",
+        *genome,
+    )
     states = trace.states[:-1]
     if not states or len(states) > len(actions):
         raise ControlRuntimeError("headless state trace does not match action trace")
@@ -422,7 +429,7 @@ def _accept_episode(
                     index,
                     state.frame,
                     action,
-                    int(index < 3),
+                    int(index < len(BOOTSTRAP) - 1),
                     _packed_observation(state),
                     json.dumps(state.to_json(), sort_keys=True, separators=(",", ":")),
                 )

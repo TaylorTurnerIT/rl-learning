@@ -22,7 +22,7 @@ C13: headless harness runs unpaced; visible replay retains Pemsa 60 Hz cadence.
 C14: full visible world-state JSON deferred to T10.
 C15: headless episode ends only on cartridge death; post-command input → neutral.
 C16: collector train seeds ∈ `0..30000`; exactly 10 fixed eval seeds ∈ `30001..32767`; sets disjoint.
-C17: teacher genome open-loop; game-ready bootstrap = `x:3`, `neutral:18`, `up:6`, `down:6`; no neutral settle; gene action = 4 game frames.
+C17: teacher genome open-loop; game-ready bootstrap = `x:3`, `neutral:18`, `up:6`, `down:6`, `neutral:31`; evolved action begins when first normal enemy spawns; gene action = 8 game frames.
 C18: accepted trace survival ≥1800 frames + deterministic replay match; retain ≤5 unique action hashes/train seed.
 C19: pilot defaults = 5 train seeds × 100 generations; exhausted seed → unsolved/deferred.
 C20: one SQLite DB; stdlib only; episode rows retain config/version + raw state; projected observation stored packed float32.
@@ -101,18 +101,19 @@ V35: replay-latest selects newest valid `run-*` directory; absent run → fail b
 V36: replay-latest `<epoch>` → only matching saved epoch; invalid or absent epoch → fail before Pemsa.
 V37: next generation retains 5 epoch-ranked brains; remaining agents round-robin clone 1 then mutate.
 V38: headless run repeats exact frame routine until terminal; visible replay invokes routine once per Pemsa tick.
-V39: collector genome action → exactly 4 game updates; ⊥ millisecond duration gene.
+V39: collector genome action → exactly 8 game updates; ⊥ millisecond duration gene.
 V40: bootstrap starts after game-ready; `up:6` leaves center-idle box before evolved action; no bootstrap neutral settle.
 V41: train seed ≤30000; eval seed >30000; exactly 10 eval seeds; ∀ run → no overlap.
 V42: only replay-verified trace with survival ≥1800 → accepted dataset episode.
 V43: ∀ train seed → ≤5 accepted distinct action hashes; bootstrap ∉ hash.
 V44: accepted episode + ordered raw/projected state-action rows → one SQLite transaction; ⊥ partial episode.
 V45: resume → same pending seed, generation, population, RNG, accepted hashes as interrupted run.
-V46: accepted `steps` → action labels `neutral,up,down,*genome`; bootstrap rows=3; `observation_f32`=221 little-endian f32 values.
+V46: accepted `steps` → action labels `neutral,up,down,neutral,*genome`; bootstrap rows=4; `observation_f32`=221 little-endian f32 values.
 V47: same action hash ∈ multiple training seeds; hash unique only within seed.
 V48: `Genome` = `tuple[Direction, ...]`; collector action sets, population, checkpoint, trace labels preserve `Direction`.
 V49: ∀ completed generation → DB champion retains greatest survival genome seen for seed; ties retain earlier champion.
 V50: champion replay → stored genome + stored seed; reconstruction uses stored collector config + deterministic evolution seed.
+V51: bootstrap neutral phase ends on first normal enemy spawn; evolved action starts after enemy-visible state.
 
 §T
 
@@ -142,6 +143,7 @@ T22|x|capture headless game-ready state/action trace|V39,V40,I.json
 T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46,V47,V48,C16,C17,C18,C19,C20,C21,I.cli,I.db
 T24|x|add collector recipe + focused behavior tests|V39,V40,V41,V42,V43,V44,V45,V46,V47,I.cli
 T25|x|persist/replay/reconstruct per-seed champion|V49,V50,C22,I.cli,I.db
+T26|x|increase action horizon + delay genes until first enemy|V39,V46,V51,C17
 
 §B
 

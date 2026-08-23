@@ -139,6 +139,21 @@ def test_reconstruct_champion_restores_recorded_high_score(
     assert champion.survival_frames == 99
 
 
+def test_v51_bootstrap_neutral_wait_ends_when_first_enemy_spawns() -> None:
+    commands = dataset._commands(("neutral",))
+    trace = dataset.run_headless_trace(commands, seed=1)
+
+    assert [command.duration_ms for command in commands] == [
+        50,
+        300,
+        100,
+        100,
+        516,
+        133,
+    ]
+    assert len(trace.states[4].enemies) == 1
+
+
 def test_collect_logs_generation_scores_and_seed_progress(
     monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -171,7 +186,7 @@ def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction
     connection = sqlite3.connect(config.database)
     states = tuple(
         RawState(frame, PlayerState(64, 64, 0, 0, 4), (), ())
-        for frame in (20, 24, 28, 32)
+        for frame in (20, 38, 44, 50, 81)
     )
     result: HeadlessResult = {
         "score": 0,
@@ -200,6 +215,7 @@ def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction
             ("neutral", 1, 884),
             ("up", 1, 884),
             ("down", 1, 884),
+            ("neutral", 1, 884),
         ]
     finally:
         connection.close()
