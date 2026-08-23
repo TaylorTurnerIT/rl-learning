@@ -25,6 +25,7 @@ class TrainingResult:
     standard_deviation: Tensor
     examples: int
     final_loss: float
+    device: str
 
 
 def train_behavior_cloning(
@@ -34,11 +35,13 @@ def train_behavior_cloning(
     batch_size: int = 128,
     learning_rate: float = 1e-3,
     seed: int = 42,
+    device: str = "auto",
 ) -> TrainingResult:
     if epochs < 1 or batch_size < 1 or learning_rate <= 0:
         raise ValueError("epochs, batch size, and learning rate must be positive")
     if demonstrations.count < 1:
         raise ValueError("at least one demonstration is required")
+    execution_device = _resolve_device(device)
     torch.manual_seed(seed)
     observations = torch.from_numpy(demonstrations.observations.copy())
     actions = torch.from_numpy(demonstrations.actions.copy())
@@ -51,7 +54,7 @@ def train_behavior_cloning(
         shuffle=True,
         generator=torch.Generator().manual_seed(seed),
     )
-    model = BehaviorCloningMLP()
+    model = BehaviorCloningMLP().to(execution_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_function = nn.CrossEntropyLoss()
     final_loss = 0.0
@@ -60,15 +63,35 @@ def train_behavior_cloning(
         total_examples = 0
         for batch_observations, batch_actions in loader:
             optimizer.zero_grad()
-            loss = loss_function(model(batch_observations), batch_actions)
+            loss = loss_function(
+                model(batch_observations.to(execution_device)),
+                batch_actions.to(execution_device),
+            )
             loss.backward()
             optimizer.step()
-            total_loss += float(loss.detach()) * len(batch_actions)
+            total_loss += float(loss.detach().cpu()) * len(batch_actions)
             total_examples += len(batch_actions)
         final_loss = total_loss / total_examples
     return TrainingResult(
-        model, mean, standard_deviation, demonstrations.count, final_loss
+        model.to("cpu"),
+        mean,
+        standard_deviation,
+        demonstrations.count,
+        final_loss,
+        execution_device.type,
     )
+
+
+def _resolve_device(device: str) -> torch.device:
+    if device == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device == "cuda":
+        if not torch.cuda.is_available():
+            raise ControlInputError("CUDA is required; run this on a GPU service")
+        return torch.device("cuda")
+    if device == "cpu":
+        return torch.device("cpu")
+    raise ValueError(f"unknown device: {device}")
 
 
 def save_training_result(result: TrainingResult, output: Path) -> None:
@@ -93,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", choices=("cuda", "cpu", "auto"), default="cuda")
     arguments = parser.parse_args(argv)
     try:
         result = train_behavior_cloning(
@@ -101,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=arguments.batch_size,
             learning_rate=arguments.learning_rate,
             seed=arguments.seed,
+            device=arguments.device,
         )
         save_training_result(result, arguments.output)
     except (ControlInputError, ControlRuntimeError, OSError, ValueError) as error:
@@ -112,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
                 "examples": result.examples,
                 "final_loss": result.final_loss,
                 "model": str(arguments.output),
+                "device": result.device,
             },
             separators=(",", ":"),
         )

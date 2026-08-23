@@ -33,6 +33,8 @@ C24: explicit reset clears collector records in one SQLite DB; schema retained; 
 C25: collector `--resume` loads saved campaign configuration from its database; defaults/option values do not redefine a campaign.
 C26: append mode extends only the stored train-seed list; all collection/evolution parameters remain unchanged.
 C27: behavior-cloning baseline reads collector DB; never mutates collector rows or running campaign state.
+C28: PyTorch/Marimo ∈ GPU dependency group; default project environment ⊥ ML runtime install.
+C29: cloud transfer uses SQLite backup snapshot; ⊥ copy live WAL main file as dataset handoff.
 
 §I
 
@@ -61,6 +63,8 @@ cli: `just dodge-dataset-reset [--database path]` → delete collector records; 
 cli: `just dodge-dataset-collect --resume` → continue with the database's saved collector configuration.
 cli: `just dodge-dataset-collect --resume --append-seeds N` → append N sequential training seeds and continue at the first new seed.
 cli: `dodge-bc-train [--database PATH] [--output PATH]` → train MLP from non-bootstrap collector steps; stdout JSON metrics.
+cli: `dodge-dataset-export OUTPUT [--database PATH]` → write consistent read-only collector SQLite snapshot.
+notebook: `notebooks/dodge_behavior_cloning.py` → Marimo GPU training UI; imports reusable `dodge.imitation` code.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
@@ -131,6 +135,8 @@ V56: append mode atomically records only sequential new training seeds + enlarge
 V57: behavior-cloning loader reads only non-bootstrap `steps`; ∀ row → 221 little-endian f32 observation + one known direction label.
 V58: MLP ∀ batch `(N,221)` → logits `(N,9)` ordered by collector action choices; invalid feature shape → fail.
 V59: legacy `Brain` mutation chance `0` → no action replacement or optional additions.
+V60: dataset export uses SQLite backup API; source collector DB unchanged; snapshot includes committed WAL state.
+V61: `dodge-bc-train` defaults to CUDA; unavailable requested CUDA → fail before training.
 
 §T
 
@@ -168,6 +174,7 @@ T30|x|load stored collector configuration for bare resume|V55,C25,I.cli
 T31|x|append training seeds to completed collector campaign|V56,C26,I.cli,I.db
 T32|x|add documented MLP behavior-cloning baseline + SQLite reader|V57,V58,C27,I.cli
 T33|x|fix zero-rate legacy Dodge brain mutation|V59
+T34|x|add Marimo GPU notebook + SQLite snapshot cloud handoff|V60,V61,C28,C29,I.cli
 
 §B
 
@@ -197,3 +204,6 @@ B22|2026-08-23|new imitation modules retained unused imports|mechanical ruff
 B23|2026-08-23|legacy zero mutation rate appended optional random actions|V59
 B24|2026-08-23|NEAT recipe test expected pre-formatter interpolation spelling|mechanical test update
 B25|2026-08-23|parallel collector delayed visible Pemsa input acknowledgement|external resource contention
+B26|2026-08-23|optional PyTorch test import precedes project imports|mechanical Ruff exception
+B27|2026-08-23|baseline `rl_learning` files retain unused imports|pre-existing full Ruff block
+B28|2026-08-23|new dataset test split `test_v53` fixture scope|mechanical test placement

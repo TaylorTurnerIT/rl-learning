@@ -18,6 +18,7 @@ from dodge.dataset import (
     _load_checkpoint,
     _restore_or_initialize,
     _validate_config,
+    export_database,
     reset_database,
 )
 from dodge.headless import HeadlessResult, HeadlessTrace
@@ -241,6 +242,38 @@ def test_v53_reset_requires_confirmation_and_clears_collector_data(
         assert connection.execute("SELECT count(*) FROM metadata").fetchone()[0] == 0
     finally:
         connection.close()
+
+
+def test_v60_export_includes_committed_wal_data_without_mutating_source(
+    tmp_path,
+) -> None:
+    source = tmp_path / "dataset.sqlite3"
+    snapshot = tmp_path / "snapshot.sqlite3"
+    connection = sqlite3.connect(source)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        _initialize_database(connection, CollectorConfig(database=source), resume=False)
+        connection.execute(
+            "INSERT INTO episodes(seed, action_hash, result_json, config_json) "
+            "VALUES (0, 'hash', '{}', '{}')"
+        )
+        connection.commit()
+        before = int(connection.execute("SELECT count(*) FROM episodes").fetchone()[0])
+        result = export_database(source, snapshot)
+        after = int(connection.execute("SELECT count(*) FROM episodes").fetchone()[0])
+    finally:
+        connection.close()
+
+    exported = sqlite3.connect(snapshot)
+    try:
+        snapshot_episodes = int(
+            exported.execute("SELECT count(*) FROM episodes").fetchone()[0]
+        )
+    finally:
+        exported.close()
+
+    assert result == {"database": str(snapshot), "episodes": 1}
+    assert before == after == snapshot_episodes == 1
 
 
 def test_reconstruct_champion_restores_recorded_high_score(

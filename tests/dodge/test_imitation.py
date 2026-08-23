@@ -1,14 +1,17 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sqlite3
 import struct
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from dodge.dataset import CollectorConfig, _initialize_database
 from dodge.imitation.data import ACTION_INDEX, load_demonstrations
 from dodge.imitation.model import BehaviorCloningMLP
+from dodge.imitation.train import main as train_main
 from dodge.imitation.train import train_behavior_cloning
 from dodge.neat.state import OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION
 
@@ -79,3 +82,26 @@ def test_behavior_cloning_trains_on_loaded_demonstrations(tmp_path) -> None:
 
     assert result.examples == 4
     assert result.final_loss > 0
+
+
+def test_v61_cli_defaults_to_cuda_and_fails_without_gpu(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    connection = sqlite3.connect(path)
+    packed = struct.pack(f"<{OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION}f", *range(221))
+    try:
+        _initialize_database(connection, CollectorConfig(database=path), resume=False)
+        episode_id = connection.execute(
+            "INSERT INTO episodes(seed, action_hash, result_json, config_json) "
+            "VALUES (0, 'hash', '{}', '{}')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO steps VALUES (?, 0, 0, 'left', 0, ?, '{}')",
+            (episode_id, packed),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    assert train_main(["--database", str(path), "--epochs", "1"]) == 1

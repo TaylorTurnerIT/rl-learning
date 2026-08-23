@@ -440,6 +440,33 @@ def reset_database(database: Path) -> dict[str, int]:
         connection.close()
 
 
+def export_database(database: Path, output: Path) -> dict[str, int | str]:
+    """Write a consistent, read-only SQLite snapshot for cloud training."""
+    if not database.is_file():
+        raise ControlInputError(f"dataset database does not exist: {database}")
+    if database.resolve() == output.resolve():
+        raise ControlInputError(
+            "dataset export output must differ from source database"
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    source = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+    destination = sqlite3.connect(output)
+    try:
+        source.execute("PRAGMA query_only=ON")
+        source.backup(destination)
+        episodes = int(
+            destination.execute("SELECT count(*) FROM episodes").fetchone()[0]
+        )
+        return {"database": str(output), "episodes": episodes}
+    except sqlite3.Error as error:
+        raise ControlRuntimeError(
+            f"unable to export dataset snapshot: {error}"
+        ) from error
+    finally:
+        destination.close()
+        source.close()
+
+
 def _restore_or_initialize(
     checkpoint: bytes | None, config: CollectorConfig
 ) -> tuple[random.Random, int, int, Population]:
@@ -828,6 +855,19 @@ def reset_main(argv: list[str] | None = None) -> int:
         print(f"dodge-dataset-reset: {error}", file=sys.stderr)
         return 1
     print(json.dumps({"database": str(arguments.database), "removed": removed}))
+    return 0
+
+
+def export_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="dodge-dataset-export")
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    arguments = parser.parse_args(argv)
+    try:
+        print(json.dumps(export_database(arguments.database, arguments.output)))
+    except (ControlInputError, ControlRuntimeError, OSError, sqlite3.Error) as error:
+        print(f"dodge-dataset-export: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

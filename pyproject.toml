@@ -8,13 +8,16 @@ dependencies = [
     "neat-python>=2.0.0",
     "numpy>=2.4.6",
     "pydantic>=2.0.0",
-    "torch>=2.7",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.16.3",
+]
+gpu = [
+    "marimo>=0.20",
+    "torch>=2.7",
 ]
 
 [project.scripts]
@@ -23,15 +26,8 @@ dodge-dataset-collect = "dodge.dataset:main"
 dodge-dataset-replay = "dodge.dataset:replay_main"
 dodge-dataset-reconstruct = "dodge.dataset:reconstruct_main"
 dodge-dataset-reset = "dodge.dataset:reset_main"
+dodge-dataset-export = "dodge.dataset:export_main"
 dodge-bc-train = "dodge.imitation.train:main"
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
 
 [build-system]
 requires = ["hatchling"]

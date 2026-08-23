@@ -51,8 +51,16 @@ dodge-dataset-reset *options:
     @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-reset --yes {{ options }}
 
 [group("dodge")]
+dodge-dataset-export output *options:
+    devenv -q shell -- uv run dodge-dataset-export {{ output }} {{ options }}
+
+[group("dodge")]
 dodge-bc-train *options:
-    devenv -q shell -- uv run dodge-bc-train {{ options }}
+    devenv -q shell -- uv run --group gpu dodge-bc-train {{ options }}
+
+[group("dodge")]
+dodge-marimo:
+    devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 
 [group("dodge")]
 dodge-replay history:

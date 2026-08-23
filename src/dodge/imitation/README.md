@@ -28,12 +28,27 @@ not tactical demonstrations.
 ## Run
 
 ```bash
-uv run dodge-bc-train --epochs 50
+just dodge-dataset-export /tmp/dodge-dataset.sqlite3
 ```
 
-The command reads SQLite in read-only mode, so it is safe while collection runs.
-It writes a local PyTorch model artifact to `history/dodge/models/behavior-cloning.pt`.
-Only load artifacts produced locally: PyTorch model loading uses serialization.
+The export uses SQLite's backup API, so it captures committed WAL data without
+mutating or stopping the running collector. Upload that snapshot to the cloud
+workspace; do not copy a live `dataset.sqlite3` file directly.
+
+Attach a GPU in [Molab](https://molab.marimo.io/), open
+`notebooks/dodge_behavior_cloning.py`, set the snapshot path, and press **Train
+on GPU**. The notebook imports this package rather than keeping a second
+training implementation. It writes a PyTorch model artifact to
+`history/dodge/models/behavior-cloning.pt` by default.
+
+The command-line trainer also defaults to CUDA:
+
+```bash
+uv run --group gpu dodge-bc-train --database /tmp/dodge-dataset.sqlite3 --epochs 50
+```
+
+It fails before training if no CUDA GPU is attached. Only load model artifacts
+you trust: PyTorch model loading uses serialization.
 
 ## What this baseline proves
 
