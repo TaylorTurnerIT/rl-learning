@@ -11,9 +11,11 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 from dodge.control import ControlInputError, ControlRuntimeError, MovementCommand
 from dodge.headless import run_headless, run_headless_trace
+from dodge.neat.bridge import Direction
 from dodge.neat.state import RawState, project_state
 
 DATASET_VERSION = 1
@@ -28,8 +30,17 @@ ELITE_COUNT = 5
 MUTATION_RATE = 0.05
 EVALUATION_SEEDS = tuple(range(30_001, 30_011))
 TRAINING_SEED_MAX = 30_000
-BOOTSTRAP = (("x", 3), ("neutral", 18), ("up", 6), ("down", 6))
-ACTION_CHOICES = (
+BootstrapAction = Direction | Literal["x"]
+Genome = tuple[Direction, ...]
+Population = list[Genome]
+
+BOOTSTRAP: tuple[tuple[BootstrapAction, int], ...] = (
+    ("x", 3),
+    ("neutral", 18),
+    ("up", 6),
+    ("down", 6),
+)
+ACTION_CHOICES: tuple[Direction, ...] = (
     "neutral",
     "left",
     "right",
@@ -214,7 +225,7 @@ def _initialize_database(
 
 def _restore_or_initialize(
     checkpoint: bytes | None, config: CollectorConfig
-) -> tuple[random.Random, int, int, list[tuple[str, ...]]]:
+) -> tuple[random.Random, int, int, Population]:
     random_source = random.Random(config.evolution_seed)
     if checkpoint is None:
         return random_source, 0, 0, _new_population(random_source, config)
@@ -225,7 +236,7 @@ def _restore_or_initialize(
 
 def _new_population(
     random_source: random.Random, config: CollectorConfig
-) -> list[tuple[str, ...]]:
+) -> Population:
     return [
         tuple(random_source.choice(ACTION_CHOICES) for _ in range(config.genome_length))
         for _ in range(config.population)
@@ -233,7 +244,7 @@ def _new_population(
 
 
 def _evaluate_population(
-    seed: int, population: list[tuple[str, ...]], config: CollectorConfig
+    seed: int, population: Population, config: CollectorConfig
 ) -> list[int]:
     with ThreadPoolExecutor(
         max_workers=min(config.workers, len(population))
@@ -241,7 +252,7 @@ def _evaluate_population(
         return list(executor.map(lambda genome: _fitness(seed, genome), population))
 
 
-def _fitness(seed: int, genome: tuple[str, ...]) -> int:
+def _fitness(seed: int, genome: Genome) -> int:
     return int(
         run_headless(_commands(genome), seed=seed, wait_for_game_start=True)[
             "survival_frames"
@@ -249,22 +260,22 @@ def _fitness(seed: int, genome: tuple[str, ...]) -> int:
     )
 
 
-def _commands(genome: tuple[str, ...]) -> list[MovementCommand]:
+def _commands(genome: Genome) -> list[MovementCommand]:
     return [
         *[_command(move, frames) for move, frames in BOOTSTRAP],
         *[_command(action, STEP_FRAMES) for action in genome],
     ]
 
 
-def _command(action: str, frames: int) -> MovementCommand:
+def _command(action: BootstrapAction, frames: int) -> MovementCommand:
     return MovementCommand(action, (frames * 1_000) // 60)
 
 
 def _breed_population(
-    ranked: list[tuple[int, tuple[str, ...]]],
+    ranked: list[tuple[int, Genome]],
     random_source: random.Random,
     config: CollectorConfig,
-) -> list[tuple[str, ...]]:
+) -> Population:
     parents = [genome for _, genome in ranked[:ELITE_COUNT]]
     population = parents.copy()
     while len(population) < config.population:
@@ -283,7 +294,7 @@ def _breed_population(
 def _accept_episode(
     connection: sqlite3.Connection,
     seed: int,
-    genome: tuple[str, ...],
+    genome: Genome,
     digest: str,
     config: CollectorConfig,
 ) -> None:
@@ -295,7 +306,7 @@ def _accept_episode(
         or trace.result["survival_frames"] < TARGET_SURVIVAL_FRAMES
     ):
         raise ControlRuntimeError("accepted trace failed deterministic replay")
-    actions = ("neutral", "up", "down", *genome)
+    actions: tuple[Direction, ...] = ("neutral", "up", "down", *genome)
     states = trace.states[:-1]
     if not states or len(states) > len(actions):
         raise ControlRuntimeError("headless state trace does not match action trace")
@@ -335,7 +346,7 @@ def _packed_observation(state: RawState) -> bytes:
     return struct.pack(f"<{len(projected.values)}f", *projected.values)
 
 
-def _genome_hash(genome: tuple[str, ...]) -> str:
+def _genome_hash(genome: Genome) -> str:
     encoded = json.dumps(genome, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -358,7 +369,7 @@ def _checkpoint(
     random_source: random.Random,
     seed_index: int,
     generation: int,
-    population: list[tuple[str, ...]],
+    population: Population,
 ) -> None:
     state = pickle.dumps(
         {

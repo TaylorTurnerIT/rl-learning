@@ -9,13 +9,14 @@ import dodge.dataset as dataset
 from dodge.dataset import (
     EVALUATION_SEEDS,
     CollectorConfig,
+    Genome,
     _checkpoint,
     _initialize_database,
     _load_checkpoint,
     _restore_or_initialize,
     _validate_config,
 )
-from dodge.headless import HeadlessTrace
+from dodge.headless import HeadlessResult, HeadlessTrace
 from dodge.neat.state import PlayerState, RawState
 
 
@@ -70,7 +71,13 @@ def test_v45_checkpoint_restores_pending_population_and_rng(tmp_path) -> None:
     config = CollectorConfig(database=tmp_path / "dataset.sqlite3", train_seeds=(0,))
     connection = sqlite3.connect(config.database)
     random_source = random.Random(9)
-    population = [("left",), ("right",), ("up",), ("down",), ("neutral",)]
+    population: list[Genome] = [
+        ("left",),
+        ("right",),
+        ("up",),
+        ("down",),
+        ("neutral",),
+    ]
     try:
         _initialize_database(connection, config, resume=False)
         _checkpoint(connection, random_source, 1, 7, population)
@@ -92,7 +99,7 @@ def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction
         RawState(frame, PlayerState(64, 64, 0, 0, 4), (), ())
         for frame in (20, 24, 28, 32)
     )
-    result = {
+    result: HeadlessResult = {
         "score": 0,
         "frames": 32,
         "survival_frames": 4,

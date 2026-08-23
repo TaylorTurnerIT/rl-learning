@@ -107,6 +107,7 @@ V44: accepted episode + ordered raw/projected state-action rows → one SQLite t
 V45: resume → same pending seed, generation, population, RNG, accepted hashes as interrupted run.
 V46: accepted `steps` → action labels `neutral,up,down,*genome`; bootstrap rows=3; `observation_f32`=221 little-endian f32 values.
 V47: same action hash ∈ multiple training seeds; hash unique only within seed.
+V48: `Genome` = `tuple[Direction, ...]`; collector action sets, population, checkpoint, trace labels preserve `Direction`.
 
 §T
 
@@ -133,7 +134,7 @@ T19|x|replay requested epoch from newest run|V36,I.cli
 T20|x|retain five ranked elite lineages|V37
 T21|~|unpace headless simulation; retain visible 60 Hz replay|V31,V38,C13
 T22|x|capture headless game-ready state/action trace|V39,V40,I.json
-T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46,V47,C16,C17,C18,C19,C20,C21,I.cli,I.db
+T23|x|add resumable open-loop collector + SQLite dataset|V41,V42,V43,V44,V45,V46,V47,V48,C16,C17,C18,C19,C20,C21,I.cli,I.db
 T24|x|add collector recipe + focused behavior tests|V39,V40,V41,V42,V43,V44,V45,V46,V47,I.cli
 
 §B
@@ -145,10 +146,11 @@ B3|2026-08-19|`main` renamed `control`; control tests/import callers broke|V24
 B4|2026-08-19|no-op headless `_draw` froze cartridge draw-driven transitions|V25
 B5|2026-08-20|visible draw-driven transition clock diverged from headless update clock|V31
 B6|2026-08-20|visible draw consumed gameplay RNG + host mouse state|V32
-B7|2026-08-23|legacy 197 projection + bootstrap labels omitted neutral|V46
-B8|2026-08-23|checkpoint test imports unsorted|ruff fix
-B9|2026-08-23|checkpoint test wrote before schema init|fixture init
-B10|2026-08-23|justfile interpolation spacing stale|just fmt
 B7|2026-08-20|new replay lines exceeded Ruff width|mechanical wrap
 B8|2026-08-20|new elite lines exceeded Ruff width|mechanical wrap
 B9|2026-08-20|new elite print bypassed Ruff formatter|mechanical format
+B10|2026-08-23|legacy 197 projection + bootstrap labels omitted neutral|V46
+B11|2026-08-23|checkpoint test imports unsorted|ruff fix
+B12|2026-08-23|checkpoint test wrote before schema init|fixture init
+B13|2026-08-23|justfile interpolation spacing stale|just fmt
+B14|2026-08-23|collector genome widened `Direction` to `str`|V48
