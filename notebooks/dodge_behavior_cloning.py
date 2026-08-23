@@ -1,4 +1,11 @@
+import sys
+from pathlib import Path
+
 import marimo
+
+PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
+if str(PROJECT_SRC) not in sys.path:
+    sys.path.insert(0, str(PROJECT_SRC))
 
 __generated_with = "0.20.0"
 app = marimo.App(width="medium")
@@ -6,8 +13,6 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    from pathlib import Path
-
     import marimo as mo
     import torch
 

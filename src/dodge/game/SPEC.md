@@ -138,6 +138,7 @@ V59: legacy `Brain` mutation chance `0` → no action replacement or optional ad
 V60: dataset export uses SQLite backup API; source collector DB unchanged; snapshot includes committed WAL state.
 V61: `dodge-bc-train` defaults to CUDA; unavailable requested CUDA → fail before training.
 V62: Marimo notebook cells ⊥ conditional `return`; notebook registers without `SyntaxError`.
+V63: notebook startup adds repository `src/` to import path before `dodge` import.
 
 §T
 
@@ -177,6 +178,7 @@ T32|x|add documented MLP behavior-cloning baseline + SQLite reader|V57,V58,C27,I
 T33|x|fix zero-rate legacy Dodge brain mutation|V59
 T34|x|add Marimo GPU notebook + SQLite snapshot cloud handoff|V60,V61,C28,C29,I.cli
 T35|x|fix Marimo conditional-return cell compile failure|V62,I.notebook
+T36|x|fix Molab repository `dodge` import path|V63,I.notebook
 
 §B
 
@@ -211,3 +213,4 @@ B27|2026-08-23|baseline `rl_learning` files retain unused imports|pre-existing f
 B28|2026-08-23|new dataset test split `test_v53` fixture scope|mechanical test placement
 B29|2026-08-23|Marimo cell `return` nested in conditional became top-level `return`|V62
 B30|2026-08-23|Marimo training cell used `mo.stop` without `mo` dependency|mechanical cell input
+B31|2026-08-23|notebook execution path omitted repository `src/`|V63
