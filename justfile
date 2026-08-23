@@ -51,6 +51,10 @@ dodge-dataset-reset *options:
     @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-reset --yes {{ options }}
 
 [group("dodge")]
+dodge-bc-train *options:
+    devenv -q shell -- uv run dodge-bc-train {{ options }}
+
+[group("dodge")]
 dodge-replay history:
     devenv shell -- dodge-replay {{ history }}
 

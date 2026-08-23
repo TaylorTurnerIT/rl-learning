@@ -11,5 +11,5 @@ def test_v14_neat_recipes_use_the_project_uv_environment() -> None:
     assert "exec uv run python -m dodge.neat.replay" in devenv
     assert "dodge.neat.replay replay-latest" in devenv
     assert "dodge-neat-resume run *options:" in justfile
-    assert "dodge-neat-train --resume {{run}} {{options}}" in justfile
+    assert "dodge-neat-train --resume {{ run }} {{ options }}" in justfile
     assert "dodge-neat-replay-latest epoch:" in justfile

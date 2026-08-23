@@ -21,13 +21,12 @@ class Brain:
             if self.mutation_chance < random.random():
                 continue
             self.actions[action] = self.get_random_move()
-        # if self.mutation_chance > random.random():
         self.add_random_move()
-        if self.mutation_chance < random.random():
+        if self.mutation_chance > random.random():
             self.add_random_move()
-        if self.mutation_chance < random.random():
+        if self.mutation_chance > random.random():
             self.add_random_move()
-        if self.mutation_chance < random.random():
+        if self.mutation_chance > random.random():
             self.add_random_move()
 
     def parse_actions(self) -> list[MovementCommand]:

@@ -32,6 +32,7 @@ C23: mutation preserves early survival prefix; final 25% genome receives higher 
 C24: explicit reset clears collector records in one SQLite DB; schema retained; confirmation required outside `just` recipe.
 C25: collector `--resume` loads saved campaign configuration from its database; defaults/option values do not redefine a campaign.
 C26: append mode extends only the stored train-seed list; all collection/evolution parameters remain unchanged.
+C27: behavior-cloning baseline reads collector DB; never mutates collector rows or running campaign state.
 
 §I
 
@@ -59,6 +60,7 @@ cli: `just dodge-dataset-reconstruct [options] --seed N` → recover historical 
 cli: `just dodge-dataset-reset [--database path]` → delete collector records; stdout removed-row counts.
 cli: `just dodge-dataset-collect --resume` → continue with the database's saved collector configuration.
 cli: `just dodge-dataset-collect --resume --append-seeds N` → append N sequential training seeds and continue at the first new seed.
+cli: `dodge-bc-train [--database PATH] [--output PATH]` → train MLP from non-bootstrap collector steps; stdout JSON metrics.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 
 §R
@@ -126,6 +128,9 @@ V53: reset without `--yes` → fail; confirmed reset deletes episodes, steps, ch
 V54: accepted trace rows pair only states with next scheduled action; ⊥ terminal or post-script idle state rows.
 V55: `dodge-dataset-collect --resume` → loads and validates stored collector config before `collect`; ⊥ CLI default configuration comparison.
 V56: append mode atomically records only sequential new training seeds + enlarged config; checkpoint/RNG/population retained and next run starts at its existing seed index.
+V57: behavior-cloning loader reads only non-bootstrap `steps`; ∀ row → 221 little-endian f32 observation + one known direction label.
+V58: MLP ∀ batch `(N,221)` → logits `(N,9)` ordered by collector action choices; invalid feature shape → fail.
+V59: legacy `Brain` mutation chance `0` → no action replacement or optional additions.
 
 §T
 
@@ -161,6 +166,8 @@ T28|x|add explicit collector reset command|V53,C24,I.cli,I.db
 T29|x|exclude terminal/post-script trace states from accepted rows|V54,V44
 T30|x|load stored collector configuration for bare resume|V55,C25,I.cli
 T31|x|append training seeds to completed collector campaign|V56,C26,I.cli,I.db
+T32|x|add documented MLP behavior-cloning baseline + SQLite reader|V57,V58,C27,I.cli
+T33|x|fix zero-rate legacy Dodge brain mutation|V59
 
 §B
 
@@ -186,3 +193,7 @@ B18|2026-08-23|new replay recipe bypassed `uv run` console script|recipe wrapper
 B19|2026-08-23|post-script trace state had no action label|V54
 B20|2026-08-23|bare resume rebuilt CLI defaults instead of loading database campaign|V55
 B21|2026-08-23|completed campaign had no way to extend stored seed set without changing parameters|V56
+B22|2026-08-23|new imitation modules retained unused imports|mechanical ruff
+B23|2026-08-23|legacy zero mutation rate appended optional random actions|V59
+B24|2026-08-23|NEAT recipe test expected pre-formatter interpolation spelling|mechanical test update
+B25|2026-08-23|parallel collector delayed visible Pemsa input acknowledgement|external resource contention
