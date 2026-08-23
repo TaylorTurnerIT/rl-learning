@@ -140,6 +140,7 @@ def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
         assert cartridge.parent == cwd
         assert environment["SDL_VIDEODRIVER"] == "dummy"
         assert environment["SDL_AUDIODRIVER"] == "dummy"
+        assert environment["SDL_RENDER_DRIVER"] == "software"
         assert kwargs["encoding"] == "utf-8"
         assert kwargs["errors"] == "replace"
         assert kwargs["timeout"] is None

@@ -84,6 +84,31 @@ def test_v55_resume_loads_saved_collector_configuration(
     assert received == [(expected, True)]
 
 
+def test_v64_resume_worker_override_preserves_stored_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    expected = CollectorConfig(database=path, train_seeds=(0,), workers=8)
+    connection = sqlite3.connect(path)
+    try:
+        _initialize_database(connection, expected, resume=False)
+    finally:
+        connection.close()
+    received: list[tuple[CollectorConfig, bool, int | None]] = []
+
+    def capture(
+        config: CollectorConfig, *, resume: bool, workers: int | None = None
+    ) -> dataset.CollectionSummary:
+        received.append((config, resume, workers))
+        return dataset.CollectionSummary(0, 0, ())
+
+    monkeypatch.setattr(dataset, "collect", capture)
+
+    assert dataset.main(["--database", str(path), "--resume", "--workers", "1"]) == 0
+    assert received == [(expected, True, 1)]
+    assert dataset._load_resume_config(path) == expected
+
+
 def test_v56_resume_appends_new_seeds_with_stored_parameters(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

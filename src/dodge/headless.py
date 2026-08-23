@@ -378,6 +378,7 @@ def _run_pemsa(
         environment.pop("SDL_AUDIODRIVER", None)
     else:
         environment["SDL_AUDIODRIVER"] = "dummy"
+        environment["SDL_RENDER_DRIVER"] = "software"
 
     mode = "replay" if render else "headless"
     with tempfile.TemporaryDirectory(prefix=f"dodge-{mode}-") as directory:

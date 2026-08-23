@@ -11,7 +11,7 @@ import statistics
 import struct
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
@@ -34,6 +34,7 @@ TRACES_PER_SEED = 5
 PILOT_SEED_COUNT = 5
 PILOT_GENERATIONS_PER_SEED = 100
 DEFAULT_POPULATION = 50
+DEFAULT_WORKERS = 8
 ELITE_COUNT = 5
 EARLY_MUTATION_RATE = 0.02
 TAIL_MUTATION_RATE = 0.20
@@ -71,7 +72,7 @@ class CollectorConfig:
     train_seeds: tuple[int, ...] = tuple(range(PILOT_SEED_COUNT))
     generations_per_seed: int = PILOT_GENERATIONS_PER_SEED
     population: int = DEFAULT_POPULATION
-    workers: int = 8
+    workers: int = DEFAULT_WORKERS
     evolution_seed: int = 42
 
     @property
@@ -116,11 +117,15 @@ class Champion:
         return _genome_hash(self.genome)
 
 
-def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSummary:
+def collect(
+    config: CollectorConfig, *, resume: bool = False, workers: int | None = None
+) -> CollectionSummary:
     _validate_config(config)
+    execution_config = config if workers is None else replace(config, workers=workers)
+    _validate_config(execution_config)
     LOGGER.info(
         "collect start seeds=%d population=%d generations_per_seed=%d target=%d "
-        "mutation=%.0f%%/%.0f%% tail=%.0f%%",
+        "mutation=%.0f%%/%.0f%% tail=%.0f%% workers=%d",
         len(config.train_seeds),
         config.population,
         config.generations_per_seed,
@@ -128,6 +133,7 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
         EARLY_MUTATION_RATE * 100,
         TAIL_MUTATION_RATE * 100,
         TAIL_MUTATION_FRACTION * 100,
+        execution_config.workers,
     )
     connection = _open_database(config.database)
     try:
@@ -165,7 +171,7 @@ def collect(config: CollectorConfig, *, resume: bool = False) -> CollectionSumma
                 generation + 1, config.generations_per_seed + 1
             ):
                 generation = next_generation
-                results = _evaluate_population(seed, population, config)
+                results = _evaluate_population(seed, population, execution_config)
                 ranked = sorted(zip(results, population, strict=True), reverse=True)
                 champion = Champion(seed, generation, ranked[0][0], ranked[0][1])
                 LOGGER.info(
@@ -753,7 +759,7 @@ def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
         "--generations-per-seed", type=int, default=PILOT_GENERATIONS_PER_SEED
     )
     parser.add_argument("--population", type=int, default=DEFAULT_POPULATION)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int)
     parser.add_argument("--evolution-seed", type=int, default=42)
 
 
@@ -765,7 +771,7 @@ def _config_from_arguments(arguments: argparse.Namespace) -> CollectorConfig:
         ),
         generations_per_seed=arguments.generations_per_seed,
         population=arguments.population,
-        workers=arguments.workers,
+        workers=DEFAULT_WORKERS if arguments.workers is None else arguments.workers,
         evolution_seed=arguments.evolution_seed,
     )
 
@@ -787,11 +793,11 @@ def main(argv: list[str] | None = None) -> int:
             if not arguments.resume:
                 raise ControlInputError("--append-seeds requires --resume")
             config = append_training_seeds(arguments.database, arguments.append_seeds)
-        print(
-            json.dumps(
-                asdict(collect(config, resume=arguments.resume)), separators=(",", ":")
-            )
-        )
+        collect_arguments: dict[str, int] = {}
+        if arguments.resume and arguments.workers is not None:
+            collect_arguments["workers"] = arguments.workers
+        summary = collect(config, resume=arguments.resume, **collect_arguments)
+        print(json.dumps(asdict(summary), separators=(",", ":")))
     except (ControlInputError, ControlRuntimeError, ValueError) as error:
         print(f"dodge-dataset-collect: {error}", file=sys.stderr)
         return 1
