@@ -234,14 +234,14 @@ def test_v52_breeding_concentrates_mutation_in_genome_tail() -> None:
     assert population[5] == ("left", "left", "left", "right")
 
 
-def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction(
+def test_v54_accepted_episode_excludes_terminal_and_idle_trace_states(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     config = CollectorConfig(database=tmp_path / "dataset.sqlite3", train_seeds=(0,))
     connection = sqlite3.connect(config.database)
     states = tuple(
         RawState(frame, PlayerState(64, 64, 0, 0, 4), (), ())
-        for frame in (20, 38, 44, 50, 81)
+        for frame in (20, 38, 44, 50, 81, 89, 90)
     )
     result: HeadlessResult = {
         "score": 0,
@@ -271,6 +271,7 @@ def test_v46_accepted_episode_writes_221_float_bootstrap_rows_in_one_transaction
             ("up", 1, 884),
             ("down", 1, 884),
             ("neutral", 1, 884),
+            ("left", 0, 884),
         ]
     finally:
         connection.close()

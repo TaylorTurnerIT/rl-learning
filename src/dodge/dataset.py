@@ -452,8 +452,9 @@ def _accept_episode(
         "neutral",
         *genome,
     )
-    states = trace.states[:-1]
-    if not states or len(states) > len(actions):
+    state_count = min(len(trace.states) - 1, len(actions))
+    states = trace.states[:state_count]
+    if not states:
         raise ControlRuntimeError("headless state trace does not match action trace")
     with connection:
         cursor = connection.execute(

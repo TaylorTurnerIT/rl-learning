@@ -119,6 +119,7 @@ V50: champion replay → stored genome + stored seed; reconstruction uses stored
 V51: bootstrap neutral phase ends on first normal enemy spawn; evolved action starts after enemy-visible state.
 V52: mutation rate = 2% first 75% genome, 20% final 25%; ranked elites unchanged.
 V53: reset without `--yes` → fail; confirmed reset deletes episodes, steps, champions, checkpoint, seeds, metadata; schema retained.
+V54: accepted trace rows pair only states with next scheduled action; ⊥ terminal or post-script idle state rows.
 
 §T
 
@@ -151,6 +152,7 @@ T25|x|persist/replay/reconstruct per-seed champion|V49,V50,C22,I.cli,I.db
 T26|x|increase action horizon + delay genes until first enemy|V39,V46,V51,C17
 T27|x|bias mutation toward late-game actions|V52,C23
 T28|x|add explicit collector reset command|V53,C24,I.cli,I.db
+T29|x|exclude terminal/post-script trace states from accepted rows|V54,V44
 
 §B
 
@@ -173,3 +175,4 @@ B15|2026-08-23|collector log line + test imports violate Ruff format|mechanical 
 B16|2026-08-23|progress test mocked 5 scores for 50 genomes|fixture population=5
 B17|2026-08-23|champion SQL + test import violate Ruff|mechanical format
 B18|2026-08-23|new replay recipe bypassed `uv run` console script|recipe wrapper
+B19|2026-08-23|post-script trace state had no action label|V54
