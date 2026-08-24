@@ -40,6 +40,7 @@ EARLY_MUTATION_RATE = 0.02
 TAIL_MUTATION_RATE = 0.20
 TAIL_MUTATION_FRACTION = 0.25
 EVALUATION_SEEDS = tuple(range(30_001, 30_011))
+DEVELOPMENT_VALIDATION_SEEDS = tuple(range(29_991, 30_001))
 TRAINING_SEED_MAX = 30_000
 BootstrapAction = Direction | Literal["x"]
 Genome = tuple[Direction, ...]
@@ -260,6 +261,8 @@ def _validate_config(config: CollectorConfig) -> None:
         seed <= TRAINING_SEED_MAX for seed in EVALUATION_SEEDS
     ):
         raise AssertionError("evaluation seed policy is invalid")
+    if set(config.train_seeds) & set(DEVELOPMENT_VALIDATION_SEEDS):
+        raise ValueError("training and validation seeds overlap")
     if set(config.train_seeds) & set(EVALUATION_SEEDS):
         raise ValueError("training and evaluation seeds overlap")
     if config.generations_per_seed < 1 or config.population < ELITE_COUNT:
@@ -322,14 +325,27 @@ def _initialize_database(
         connection.execute("INSERT INTO metadata VALUES ('config', ?)", (encoded,))
         connection.executemany(
             "INSERT INTO seeds(seed, role) VALUES (?, ?)",
-            [(seed, "training") for seed in config.train_seeds]
-            + [(seed, "evaluation") for seed in EVALUATION_SEEDS],
+            [(seed, "training") for seed in config.train_seeds] + _reserved_seed_rows(),
         )
         connection.commit()
     elif not resume:
         raise ValueError("dataset exists; use --resume")
     elif stored[0] != encoded:
         raise ValueError("collector configuration differs from existing dataset")
+    else:
+        with connection:
+            connection.executemany(
+                "INSERT INTO seeds(seed, role) VALUES (?, ?) "
+                "ON CONFLICT(seed) DO NOTHING",
+                _reserved_seed_rows(),
+            )
+
+
+def _reserved_seed_rows() -> list[tuple[int, str]]:
+    return [
+        *[(seed, "validation") for seed in DEVELOPMENT_VALIDATION_SEEDS],
+        *[(seed, "evaluation") for seed in EVALUATION_SEEDS],
+    ]
 
 
 def _load_resume_config(database: Path) -> CollectorConfig:

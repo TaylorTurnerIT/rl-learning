@@ -35,6 +35,7 @@ C26: append mode extends only the stored train-seed list; all collection/evoluti
 C27: behavior-cloning baseline reads collector DB; never mutates collector rows or running campaign state.
 C28: PyTorch/Marimo ∈ GPU dependency group; default project environment ⊥ ML runtime install.
 C29: cloud transfer uses SQLite backup snapshot; ⊥ copy live WAL main file as dataset handoff.
+C30: development-validation seeds = `29991..30000`; ⊥ collector training or MLP gradients on them.
 
 §I
 
@@ -66,6 +67,7 @@ cli: `dodge-bc-train [--database PATH] [--output PATH]` → train MLP from non-b
 cli: `dodge-dataset-export OUTPUT [--database PATH]` → write consistent read-only collector SQLite snapshot.
 notebook: `notebooks/dodge_behavior_cloning.py` → Marimo GPU training UI; imports reusable `dodge.imitation` code.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
+db: seed roles → `training|validation|evaluation`.
 
 §R
 
@@ -141,6 +143,7 @@ V62: Marimo notebook cells ⊥ conditional `return`; notebook registers without 
 V63: notebook startup adds repository `src/` to import path before `dodge` import.
 V64: `--resume --workers N` changes only collector process parallelism; stored campaign config unchanged.
 V65: ∀ headless Pemsa run → `SDL_RENDER_DRIVER=software`.
+V66: `29991..30000` ∈ validation role; train config ∩ validation = ∅; resume backfills missing validation rows.
 
 §T
 
@@ -182,6 +185,7 @@ T34|x|add Marimo GPU notebook + SQLite snapshot cloud handoff|V60,V61,C28,C29,I.
 T35|x|fix Marimo conditional-return cell compile failure|V62,I.notebook
 T36|x|fix Molab repository `dodge` import path|V63,I.notebook
 T37|x|stabilize Molab headless collector runtime|V64,V65,C10,C21,I.cli
+T38|x|reserve seed-held development validation partition|V66,C30,I.db
 
 §B
 

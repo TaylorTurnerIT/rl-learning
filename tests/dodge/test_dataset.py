@@ -8,6 +8,7 @@ import pytest
 
 import dodge.dataset as dataset
 from dodge.dataset import (
+    DEVELOPMENT_VALIDATION_SEEDS,
     EVALUATION_SEEDS,
     Champion,
     CollectorConfig,
@@ -31,6 +32,37 @@ def test_collector_reserves_exactly_ten_high_evaluation_seeds(tmp_path) -> None:
     _validate_config(config)
     assert len(EVALUATION_SEEDS) == 10
     assert min(EVALUATION_SEEDS) > 30_000
+
+
+def test_v66_collector_reserves_development_validation_seeds(tmp_path) -> None:
+    path = tmp_path / "dataset.sqlite3"
+    config = CollectorConfig(database=path, train_seeds=(0,))
+    connection = sqlite3.connect(path)
+    try:
+        _initialize_database(connection, config, resume=False)
+        rows = connection.execute(
+            "SELECT seed, role FROM seeds WHERE role='validation' ORDER BY seed"
+        ).fetchall()
+        connection.execute("DELETE FROM seeds WHERE role='validation'")
+        connection.commit()
+        _initialize_database(connection, config, resume=True)
+        restored = connection.execute(
+            "SELECT seed, role FROM seeds WHERE role='validation' ORDER BY seed"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert (
+        rows
+        == restored
+        == [(seed, "validation") for seed in DEVELOPMENT_VALIDATION_SEEDS]
+    )
+    with pytest.raises(ValueError, match="training and validation"):
+        _validate_config(
+            CollectorConfig(
+                database=path, train_seeds=(DEVELOPMENT_VALIDATION_SEEDS[0],)
+            )
+        )
 
 
 def test_collector_rejects_training_seed_outside_reserved_range(tmp_path) -> None:
@@ -168,6 +200,7 @@ def test_v56_resume_appends_new_seeds_with_stored_parameters(
             (0,),
             (1,),
             (2,),
+            *[(seed,) for seed in DEVELOPMENT_VALIDATION_SEEDS],
             *[(seed,) for seed in EVALUATION_SEEDS],
         ]
     finally:
@@ -259,7 +292,7 @@ def test_v53_reset_requires_confirmation_and_clears_collector_data(
         "episodes": 0,
         "champions": 1,
         "checkpoints": 1,
-        "seeds": 11,
+        "seeds": 21,
         "metadata": 1,
     }
     connection = sqlite3.connect(path)
