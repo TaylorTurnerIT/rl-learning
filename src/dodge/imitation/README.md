@@ -53,6 +53,9 @@ result reports the chosen `device`. Use `--device cuda` to require a GPU or
 install it with `uv sync --group gpu` when you need the notebook UI. Only load
 model artifacts you trust: PyTorch model loading uses serialization.
 
+The trainer prints `epoch=N/T loss=F` after each epoch, then emits the final
+JSON summary. This gives immediate loss progress in a terminal or Marimo logs.
+
 ## What this baseline proves
 
 It tests whether similar danger states across many seeds imply similar good

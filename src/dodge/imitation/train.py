@@ -58,7 +58,7 @@ def train_behavior_cloning(
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_function = nn.CrossEntropyLoss()
     final_loss = 0.0
-    for _ in range(epochs):
+    for epoch in range(1, epochs + 1):
         total_loss = 0.0
         total_examples = 0
         for batch_observations, batch_actions in loader:
@@ -72,6 +72,7 @@ def train_behavior_cloning(
             total_loss += float(loss.detach().cpu()) * len(batch_actions)
             total_examples += len(batch_actions)
         final_loss = total_loss / total_examples
+        print(f"epoch={epoch}/{epochs} loss={final_loss:.6f}", flush=True)
     return TrainingResult(
         model.to("cpu"),
         mean,

@@ -111,7 +111,9 @@ def test_v61_cli_auto_falls_back_to_cpu_without_cuda(
         train_main(["--database", str(path), "--epochs", "1", "--output", str(output)])
         == 0
     )
-    assert json.loads(capsys.readouterr().out)["device"] == "cpu"
+    output_lines = capsys.readouterr().out.splitlines()
+    assert output_lines[0].startswith("epoch=1/1 loss=")
+    assert json.loads(output_lines[-1])["device"] == "cpu"
     assert output.is_file()
     artifact = torch.load(output, weights_only=True)
     assert torch.isfinite(artifact["standard_deviation"]).all()
