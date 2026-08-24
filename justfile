@@ -59,6 +59,10 @@ dodge-bc-train *options:
     devenv -q shell -- uv run dodge-bc-train {{ options }}
 
 [group("dodge")]
+dodge-bc-plot history *options:
+    devenv -q shell -- uv run dodge-bc-plot {{ history }} {{ options }}
+
+[group("dodge")]
 dodge-marimo:
     devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 

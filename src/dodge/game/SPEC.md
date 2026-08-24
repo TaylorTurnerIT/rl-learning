@@ -36,6 +36,7 @@ C27: behavior-cloning baseline reads collector DB; never mutates collector rows 
 C28: PyTorch ∈ default project dependencies; Marimo ∈ GPU dependency group; trainer device=auto.
 C29: cloud transfer uses SQLite backup snapshot; ⊥ copy live WAL main file as dataset handoff.
 C30: development-validation seeds = `29991..30000`; ⊥ collector training or MLP gradients on them.
+C31: behavior-cloning validation = top 10 accepted training seed IDs; split recorded per training history; validation ⊥ gradients.
 
 §I
 
@@ -64,6 +65,7 @@ cli: `just dodge-dataset-reset [--database path]` → delete collector records; 
 cli: `just dodge-dataset-collect --resume` → continue with the database's saved collector configuration.
 cli: `just dodge-dataset-collect --resume --append-seeds N` → append N sequential training seeds and continue at the first new seed.
 cli: `dodge-bc-train [--database PATH] [--output PATH] [--device auto|cuda|cpu]` → per-epoch loss lines then final stdout JSON metrics.
+cli: `dodge-bc-plot HISTORY [--output PATH]` → PNG train/validation loss plot.
 cli: `dodge-dataset-export OUTPUT [--database PATH]` → write consistent read-only collector SQLite snapshot.
 notebook: `notebooks/dodge_behavior_cloning.py` → Marimo GPU training UI; imports reusable `dodge.imitation` code.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
@@ -145,7 +147,9 @@ V64: `--resume --workers N` changes only collector process parallelism; stored c
 V65: ∀ headless Pemsa run → `SDL_RENDER_DRIVER=software`.
 V66: `29991..30000` ∈ validation role; train config ∩ validation = ∅; resume backfills missing validation rows.
 V67: behavior-cloning observation normalization has finite positive standard deviation, including one-row datasets.
-V68: ∀ completed behavior-cloning epoch → stdout `epoch=N/T loss=F`; final JSON metrics last line.
+V68: ∀ completed behavior-cloning epoch → stdout `epoch=N/T train_loss=F [validation_loss=F]`; final JSON metrics last line.
+V69: behavior-cloning split → highest 10 accepted training seed IDs validation; validation rows ∉ optimizer; split ∈ saved history.
+V70: training history → per-epoch train/validation loss; `dodge-bc-plot` → PNG loss curves.
 
 §T
 
@@ -190,6 +194,7 @@ T37|x|stabilize Molab headless collector runtime|V64,V65,C10,C21,I.cli
 T38|x|reserve seed-held development validation partition|V66,C30,I.db
 T39|x|auto-select Dodge training CUDA or CPU; make PyTorch local dependency|V61,V67,C28,I.cli
 T40|x|log behavior-cloning loss after each epoch|V68,I.cli
+T41|x|add behavior-cloning validation loss history + plot CLI|V69,V70,C31,I.cli
 
 §B
 
@@ -228,3 +233,4 @@ B31|2026-08-23|notebook execution path omitted repository `src/`|V63
 B32|2026-08-23|concurrent Molab headless Pemsa child segfaulted|V64,V65
 B33|2026-08-24|CPU fallback test imports were not Ruff-sorted|mechanical Ruff fix
 B34|2026-08-24|one-row PyTorch `std` used unbiased estimator and produced NaN|V67
+B35|2026-08-24|validation test train imports violated Ruff ordering|mechanical Ruff fix

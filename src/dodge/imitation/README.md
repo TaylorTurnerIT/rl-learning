@@ -53,8 +53,21 @@ result reports the chosen `device`. Use `--device cuda` to require a GPU or
 install it with `uv sync --group gpu` when you need the notebook UI. Only load
 model artifacts you trust: PyTorch model loading uses serialization.
 
-The trainer prints `epoch=N/T loss=F` after each epoch, then emits the final
-JSON summary. This gives immediate loss progress in a terminal or Marimo logs.
+The trainer prints `epoch=N/T train_loss=F validation_loss=F` after each epoch,
+then emits the final JSON summary. This gives immediate loss progress in a
+terminal or Marimo logs.
+It holds out the highest ten accepted training seed IDs, logs both losses in
+`history/dodge/models/behavior-cloning.metrics.json`, and never sends those
+rows through the optimizer.
+
+Plot the saved history after training:
+
+```bash
+just dodge-bc-plot history/dodge/models/behavior-cloning.metrics.json
+```
+
+This writes `behavior-cloning.metrics.png`; rising validation loss while
+training loss falls is the overfitting signal.
 
 ## What this baseline proves
 
@@ -71,8 +84,8 @@ PPO.
 ## Follow-up experiments
 
 1. Compare this MLP with a small recent-observation stack or GRU.
-2. Add a held-out validation split of ordinary training seeds; retain the ten
-   reserved high seeds for final testing.
+2. Run closed-loop policy survival on the reserved development-validation seeds;
+   retain the ten high evaluation seeds for final testing.
 3. Store `state, action, reward, next_state, terminated` for a bounded mix of
    champions and near-misses before trying Discrete CQL.
 4. Try BC-initialized PPO once the interactive environment exists.
