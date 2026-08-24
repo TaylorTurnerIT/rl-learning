@@ -46,7 +46,7 @@ def train_behavior_cloning(
     observations = torch.from_numpy(demonstrations.observations.copy())
     actions = torch.from_numpy(demonstrations.actions.copy())
     mean = observations.mean(dim=0)
-    standard_deviation = observations.std(dim=0).clamp_min(1e-6)
+    standard_deviation = observations.std(dim=0, unbiased=False).clamp_min(1e-6)
     normalized = (observations - mean) / standard_deviation
     loader = DataLoader(
         TensorDataset(normalized, actions),
@@ -87,7 +87,9 @@ def _resolve_device(device: str) -> torch.device:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda":
         if not torch.cuda.is_available():
-            raise ControlInputError("CUDA is required; run this on a GPU service")
+            raise ControlInputError(
+                "CUDA is unavailable; use --device cpu or --device auto"
+            )
         return torch.device("cuda")
     if device == "cpu":
         return torch.device("cpu")
@@ -116,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", choices=("cuda", "cpu", "auto"), default="cuda")
+    parser.add_argument("--device", choices=("cuda", "cpu", "auto"), default="auto")
     arguments = parser.parse_args(argv)
     try:
         result = train_behavior_cloning(

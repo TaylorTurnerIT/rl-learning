@@ -1,13 +1,13 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
+import json
 import sqlite3
 import struct
 
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-
+from dodge.control import ControlInputError
 from dodge.dataset import CollectorConfig, _initialize_database
 from dodge.imitation.data import ACTION_INDEX, load_demonstrations
 from dodge.imitation.model import BehaviorCloningMLP
@@ -84,7 +84,9 @@ def test_behavior_cloning_trains_on_loaded_demonstrations(tmp_path) -> None:
     assert result.final_loss > 0
 
 
-def test_v61_cli_defaults_to_cuda_and_fails_without_gpu(monkeypatch, tmp_path) -> None:
+def test_v61_cli_auto_falls_back_to_cpu_without_cuda(
+    monkeypatch, tmp_path, capsys
+) -> None:
     path = tmp_path / "dataset.sqlite3"
     connection = sqlite3.connect(path)
     packed = struct.pack(f"<{OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION}f", *range(221))
@@ -104,4 +106,14 @@ def test_v61_cli_defaults_to_cuda_and_fails_without_gpu(monkeypatch, tmp_path) -
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
-    assert train_main(["--database", str(path), "--epochs", "1"]) == 1
+    output = tmp_path / "model.pt"
+    assert (
+        train_main(["--database", str(path), "--epochs", "1", "--output", str(output)])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["device"] == "cpu"
+    assert output.is_file()
+    artifact = torch.load(output, weights_only=True)
+    assert torch.isfinite(artifact["standard_deviation"]).all()
+    with pytest.raises(ControlInputError, match="CUDA is unavailable"):
+        train_behavior_cloning(load_demonstrations(path), device="cuda")

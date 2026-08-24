@@ -14,7 +14,6 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-    import torch
 
     from dodge.imitation.data import load_demonstrations
     from dodge.imitation.train import save_training_result, train_behavior_cloning
@@ -24,7 +23,6 @@ def _():
         load_demonstrations,
         mo,
         save_training_result,
-        torch,
         train_behavior_cloning,
     )
 
@@ -39,13 +37,14 @@ def _(mo):
     )
     epochs = mo.ui.number(value=50, start=1, step=1, label="Epochs")
     batch_size = mo.ui.number(value=128, start=1, step=1, label="Batch size")
-    train = mo.ui.run_button(label="Train on GPU")
+    train = mo.ui.run_button(label="Train")
     mo.vstack(
         [
             mo.md(
                 "# Dodge behavior cloning\n\n"
                 "Export the live collector first with `just dodge-dataset-export` "
-                "and upload that snapshot here. Attach a GPU before training."
+                "and upload that snapshot here. Training uses a GPU when one is "
+                "attached, otherwise it runs on CPU."
             ),
             dataset_path,
             output_path,
@@ -66,20 +65,15 @@ def _(
     mo,
     output_path,
     save_training_result,
-    torch,
     train,
     train_behavior_cloning,
 ):
     mo.stop(not train.value)
-    mo.stop(
-        not torch.cuda.is_available(),
-        mo.md("Attach a CUDA GPU before running Dodge training."),
-    )
     result = train_behavior_cloning(
         load_demonstrations(Path(dataset_path.value)),
         epochs=int(epochs.value),
         batch_size=int(batch_size.value),
-        device="cuda",
+        device="auto",
     )
     output = Path(output_path.value)
     save_training_result(result, output)
@@ -88,9 +82,7 @@ def _(
 
 @app.cell
 def _(mo, output, result):
-    mo.stop(
-        result is None, mo.md("Set paths, attach a GPU, then press **Train on GPU**.")
-    )
+    mo.stop(result is None, mo.md("Set paths, then press **Train**."))
     mo.md(
         f"Trained {result.examples:,} decisions on `{result.device}`. "
         f"Final loss: `{result.final_loss:.4f}`. Artifact: `{output}`."

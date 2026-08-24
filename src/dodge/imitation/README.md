@@ -35,20 +35,23 @@ The export uses SQLite's backup API, so it captures committed WAL data without
 mutating or stopping the running collector. Upload that snapshot to the cloud
 workspace; do not copy a live `dataset.sqlite3` file directly.
 
-Attach a GPU in [Molab](https://molab.marimo.io/), open
-`notebooks/dodge_behavior_cloning.py`, set the snapshot path, and press **Train
-on GPU**. The notebook imports this package rather than keeping a second
-training implementation. It writes a PyTorch model artifact to
+Open `notebooks/dodge_behavior_cloning.py` in
+[Molab](https://molab.marimo.io/), set the snapshot path, and press **Train**.
+The notebook imports this package rather than keeping a second training
+implementation. It writes a PyTorch model artifact to
 `history/dodge/models/behavior-cloning.pt` by default.
 
-The command-line trainer also defaults to CUDA:
+The same command works locally and in the cloud:
 
 ```bash
-uv run --group gpu dodge-bc-train --database /tmp/dodge-dataset.sqlite3 --epochs 50
+uv run dodge-bc-train --database /tmp/dodge-dataset.sqlite3 --epochs 50
 ```
 
-It fails before training if no CUDA GPU is attached. Only load model artifacts
-you trust: PyTorch model loading uses serialization.
+It automatically selects CUDA when PyTorch can use it, otherwise CPU. The JSON
+result reports the chosen `device`. Use `--device cuda` to require a GPU or
+`--device cpu` to force the local CPU path. Marimo itself remains optional:
+install it with `uv sync --group gpu` when you need the notebook UI. Only load
+model artifacts you trust: PyTorch model loading uses serialization.
 
 ## What this baseline proves
 

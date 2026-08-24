@@ -56,7 +56,7 @@ dodge-dataset-export output *options:
 
 [group("dodge")]
 dodge-bc-train *options:
-    devenv -q shell -- uv run --group gpu dodge-bc-train {{ options }}
+    devenv -q shell -- uv run dodge-bc-train {{ options }}
 
 [group("dodge")]
 dodge-marimo:
