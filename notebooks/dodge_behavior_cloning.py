@@ -50,7 +50,7 @@ def _(mo):
     mo.vstack(
         [
             mo.md(
-                "# Dodge behavior cloning\n\n"
+                "# Dodge board-CNN behavior cloning\n\n"
                 "Export the live collector first with `just dodge-dataset-export` "
                 "and upload that snapshot here. Training uses a GPU when one is "
                 "attached, otherwise it runs on CPU."

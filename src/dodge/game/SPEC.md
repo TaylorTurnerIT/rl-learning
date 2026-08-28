@@ -53,6 +53,8 @@ example: `src/dodge/game/movements.json` → valid runnable movement list.
 cli: `just dodge-headless <commands.json|-> [--seed N]` → stdout one JSON result.
 result: `{"score":number,"frames":int,"survival_frames":int,"seed":int,"started":bool,"died":bool}`.
 py: `replay_commands(commands, seed)` → visible Pemsa replay; command input only.
+py: `encode_board(RawState)` → float32 `(19,16,16)` spatial board tensor.
+py: `predict_action(BehaviorCloningCNN, RawState, mean, std)` → next `Direction`.
 history: `history/dodge/*.json` → winner seed, fitness, commands, epoch count, replay result.
 cli: `just dodge-replay <history.json>` → visible controls-disabled replay from saved winner.
 history: `history/dodge/run-*/epoch-*.json` → per-epoch winner + headless result.
@@ -128,7 +130,7 @@ V45: resume → same pending seed, generation, population, RNG, accepted hashes 
 V46: accepted `steps` → action labels `neutral,up,down,neutral,*genome`; bootstrap rows=4; `observation_f32`=221 little-endian f32 values.
 V47: same action hash ∈ multiple training seeds; hash unique only within seed.
 V48: `Genome` = `tuple[Direction, ...]`; collector action sets, population, checkpoint, trace labels preserve `Direction`.
-V49: ∀ completed generation → DB champion retains greatest survival genome seen for seed; ties retain earlier champion.
+V49: ∀ completed generation → DB champion retains greatest `(survival_frames, neutral_actions)` genome seen for seed; exact fitness ties retain earlier champion.
 V50: champion replay → stored genome + stored seed; reconstruction uses stored collector config + deterministic evolution seed.
 V51: bootstrap neutral phase ends on first normal enemy spawn; evolved action starts after enemy-visible state.
 V52: mutation rate = 2% first 75% genome, 20% final 25%; ranked elites unchanged.
@@ -136,8 +138,8 @@ V53: reset without `--yes` → fail; confirmed reset deletes episodes, steps, ch
 V54: accepted trace rows pair only states with next scheduled action; ⊥ terminal or post-script idle state rows.
 V55: `dodge-dataset-collect --resume` → loads and validates stored collector config before `collect`; ⊥ CLI default configuration comparison.
 V56: append mode atomically records only sequential new training seeds + enlarged config; checkpoint/RNG/population retained and next run starts at its existing seed index.
-V57: behavior-cloning loader reads only non-bootstrap `steps`; ∀ row → 221 little-endian f32 observation + one known direction label.
-V58: MLP ∀ batch `(N,221)` → logits `(N,9)` ordered by collector action choices; invalid feature shape → fail.
+V57: behavior-cloning loader reads only non-bootstrap training `steps`; ∀ row → validates 221 little-endian f32 projection, decodes raw state to float32 `(19,16,16)` board tensor, + one known direction label.
+V58: `BehaviorCloningCNN` ∀ batch `(N,19,16,16)` → logits `(N,9)` ordered by collector action choices; invalid board shape → fail.
 V59: legacy `Brain` mutation chance `0` → no action replacement or optional additions.
 V60: dataset export uses SQLite backup API; source collector DB unchanged; snapshot includes committed WAL state.
 V61: `dodge-bc-train` defaults to auto: available CUDA → CUDA; otherwise CPU; unavailable explicit CUDA → fail before training.
@@ -150,6 +152,7 @@ V67: behavior-cloning observation normalization has finite positive standard dev
 V68: ∀ completed behavior-cloning epoch → stdout `epoch=N/T train_loss=F [validation_loss=F]`; final JSON metrics last line.
 V69: behavior-cloning split → highest 10 accepted training seed IDs validation; validation rows ∉ optimizer; split ∈ saved history.
 V70: training history → per-epoch train/validation loss; `dodge-bc-plot` → PNG loss curves.
+V71: saved behavior-cloning artifact → CNN model type, board shape/channels, nine actions, state dict, mean, and standard deviation.
 
 §T
 
@@ -185,7 +188,7 @@ T28|x|add explicit collector reset command|V53,C24,I.cli,I.db
 T29|x|exclude terminal/post-script trace states from accepted rows|V54,V44
 T30|x|load stored collector configuration for bare resume|V55,C25,I.cli
 T31|x|append training seeds to completed collector campaign|V56,C26,I.cli,I.db
-T32|x|add documented MLP behavior-cloning baseline + SQLite reader|V57,V58,C27,I.cli
+T32|x|add documented board-CNN behavior-cloning baseline + raw-state SQLite reader|V57,V58,V71,C27,I.cli
 T33|x|fix zero-rate legacy Dodge brain mutation|V59
 T34|x|add Marimo GPU notebook + SQLite snapshot cloud handoff|V60,V61,C28,C29,I.cli
 T35|x|fix Marimo conditional-return cell compile failure|V62,I.notebook
@@ -234,3 +237,4 @@ B32|2026-08-23|concurrent Molab headless Pemsa child segfaulted|V64,V65
 B33|2026-08-24|CPU fallback test imports were not Ruff-sorted|mechanical Ruff fix
 B34|2026-08-24|one-row PyTorch `std` used unbiased estimator and produced NaN|V67
 B35|2026-08-24|validation test train imports violated Ruff ordering|mechanical Ruff fix
+B36|2026-08-27|CNN loader retained legacy 221-float assignment after board allocation|V57

@@ -4,15 +4,17 @@ The genetic algorithm searches open-loop action lists. This package learns a
 reactive policy from its accepted examples: at every eight-frame decision it
 sees the current projected Dodge state and selects a fresh direction.
 
-## First model: MLP classifier
+## Board CNN classifier
 
-An MLP (multi-layer perceptron) is a stack of fully connected layers. Every
-input feature contributes to every neuron in the next layer; ReLU nonlinearities
-between layers let the network combine features into rules more complex than a
-single weighted sum.
+The trainer rasterizes each raw Dodge state into a 16×16 board with separate
+channels for the player, enemies, and areas of effect. Each channel carries
+spatial presence plus the relevant velocity, size, or stage information. This
+lets convolutional filters learn local danger patterns and pooling combine them
+into a board-wide move decision.
 
 ```text
-221 projected state floats → Linear(256) → ReLU → Linear(256) → ReLU → 9 logits
+19×16×16 board tensor → Conv2d/Pool → Conv2d/Pool → Conv2d → 2×2 pooling
+→ Linear(128) → 9 logits
 ```
 
 The nine output values are **logits**: unnormalized evidence for the collector's
@@ -20,10 +22,10 @@ nine directions. `CrossEntropyLoss` compares those logits with the GA action
 label. It increases the chosen direction's score relative to all other choices;
 we take the highest-scoring direction during deterministic play.
 
-The input is the collector's packed `observation_f32` vector. It already contains
-the player and danger-ordered enemy/AOE features, including time-to-intersection.
-The fixed start/bootstrap rows are intentionally excluded: they are game setup,
-not tactical demonstrations.
+The input is reconstructed from each row's complete `raw_state_json`; the packed
+221-float projection is still validated as collector data but is not reshaped
+into an artificial image. The fixed start/bootstrap rows are intentionally
+excluded: they are game setup, not tactical demonstrations.
 
 ## Run
 
@@ -83,7 +85,7 @@ PPO.
 
 ## Follow-up experiments
 
-1. Compare this MLP with a small recent-observation stack or GRU.
+1. Compare this CNN with a small recent-observation stack or GRU.
 2. Run closed-loop policy survival on the reserved development-validation seeds;
    retain the ten high evaluation seeds for final testing.
 3. Store `state, action, reward, next_state, terminated` for a bounded mix of

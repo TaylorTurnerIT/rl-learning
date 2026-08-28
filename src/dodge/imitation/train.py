@@ -12,12 +12,13 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from dodge.control import ControlInputError, ControlRuntimeError
 from dodge.dataset import ACTION_CHOICES, DEFAULT_DATABASE
+from dodge.imitation.board import BOARD_CHANNEL_NAMES, BOARD_SHAPE
 from dodge.imitation.data import (
     Demonstrations,
     load_demonstrations,
     split_demonstrations,
 )
-from dodge.imitation.model import BehaviorCloningMLP
+from dodge.imitation.model import BehaviorCloningCNN
 
 DEFAULT_MODEL = Path("history/dodge/models/behavior-cloning.pt")
 DEFAULT_HISTORY = DEFAULT_MODEL.with_suffix(".metrics.json")
@@ -32,7 +33,7 @@ class TrainingEpoch:
 
 @dataclass(frozen=True, slots=True)
 class TrainingResult:
-    model: BehaviorCloningMLP
+    model: BehaviorCloningCNN
     mean: Tensor
     standard_deviation: Tensor
     examples: int
@@ -79,7 +80,7 @@ def train_behavior_cloning(
         shuffle=True,
         generator=torch.Generator().manual_seed(seed),
     )
-    model = BehaviorCloningMLP().to(execution_device)
+    model = BehaviorCloningCNN().to(execution_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_function = nn.CrossEntropyLoss()
     final_loss = 0.0
@@ -143,8 +144,11 @@ def save_training_result(result: TrainingResult, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "version": 1,
+            "version": 2,
+            "model_type": "BehaviorCloningCNN",
             "actions": list(ACTION_CHOICES),
+            "board_shape": list(BOARD_SHAPE),
+            "board_channels": list(BOARD_CHANNEL_NAMES),
             "state_dict": result.model.state_dict(),
             "mean": result.mean,
             "standard_deviation": result.standard_deviation,

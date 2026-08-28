@@ -25,7 +25,8 @@ from dodge.headless import (
 from dodge.neat.bridge import Direction
 from dodge.neat.state import RawState, project_state
 
-DATASET_VERSION = 3
+DATASET_VERSION = 4
+FITNESS_POLICY = "survival_frames_then_neutral_actions"
 DEFAULT_DATABASE = Path("history/dodge/dataset.sqlite3")
 RESET_TABLES = ("steps", "episodes", "champions", "checkpoints", "seeds", "metadata")
 STEP_FRAMES = 8
@@ -83,6 +84,7 @@ class CollectorConfig:
     def to_json(self) -> dict[str, object]:
         return {
             "dataset_version": DATASET_VERSION,
+            "fitness_policy": FITNESS_POLICY,
             "step_frames": STEP_FRAMES,
             "target_survival_frames": TARGET_SURVIVAL_FRAMES,
             "traces_per_seed": TRACES_PER_SEED,
@@ -106,6 +108,14 @@ class CollectionSummary:
     unsolved_seeds: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True, order=True)
+class GenomeFitness:
+    """Fitness order: survival always wins; neutral actions break ties."""
+
+    survival_frames: int
+    neutral_actions: int
+
+
 @dataclass(frozen=True, slots=True)
 class Champion:
     seed: int
@@ -116,6 +126,10 @@ class Champion:
     @property
     def action_hash(self) -> str:
         return _genome_hash(self.genome)
+
+    @property
+    def fitness(self) -> GenomeFitness:
+        return GenomeFitness(self.survival_frames, self.genome.count("neutral"))
 
 
 def collect(
@@ -173,22 +187,33 @@ def collect(
             ):
                 generation = next_generation
                 results = _evaluate_population(seed, population, execution_config)
-                ranked = sorted(zip(results, population, strict=True), reverse=True)
-                champion = Champion(seed, generation, ranked[0][0], ranked[0][1])
+                fitnesses = [
+                    _normalize_fitness(result, genome)
+                    for result, genome in zip(results, population, strict=True)
+                ]
+                ranked = sorted(zip(fitnesses, population, strict=True), reverse=True)
+                champion = Champion(
+                    seed, generation, ranked[0][0].survival_frames, ranked[0][1]
+                )
                 LOGGER.info(
                     "seed=%d generation=%d/%d best=%d median=%d target=%d "
-                    "accepted=%d/%d",
+                    "accepted=%d/%d neutral=%d",
                     seed,
                     generation,
                     config.generations_per_seed,
-                    ranked[0][0],
-                    int(statistics.median(results)),
+                    ranked[0][0].survival_frames,
+                    int(
+                        statistics.median(
+                            fitness.survival_frames for fitness in fitnesses
+                        )
+                    ),
                     TARGET_SURVIVAL_FRAMES,
                     len(accepted_hashes),
                     TRACES_PER_SEED,
+                    ranked[0][0].neutral_actions,
                 )
                 for fitness, genome in ranked:
-                    if fitness < TARGET_SURVIVAL_FRAMES:
+                    if fitness.survival_frames < TARGET_SURVIVAL_FRAMES:
                         break
                     if len(accepted_hashes) >= TRACES_PER_SEED:
                         break
@@ -202,7 +227,7 @@ def collect(
                         seed,
                         len(accepted_hashes),
                         TRACES_PER_SEED,
-                        fitness,
+                        fitness.survival_frames,
                         digest[:12],
                     )
                 if len(accepted_hashes) >= TRACES_PER_SEED:
@@ -511,18 +536,18 @@ def _new_population(
 
 def _evaluate_population(
     seed: int, population: Population, config: CollectorConfig
-) -> list[int]:
+) -> list[GenomeFitness]:
     with ThreadPoolExecutor(
         max_workers=min(config.workers, len(population))
     ) as executor:
         return list(executor.map(lambda genome: _fitness(seed, genome), population))
 
 
-def _fitness(seed: int, genome: Genome) -> int:
-    return int(
-        run_headless(_commands(genome), seed=seed, wait_for_game_start=True)[
-            "survival_frames"
-        ]
+def _fitness(seed: int, genome: Genome) -> GenomeFitness:
+    result = run_headless(_commands(genome), seed=seed, wait_for_game_start=True)
+    return GenomeFitness(
+        survival_frames=int(result["survival_frames"]),
+        neutral_actions=genome.count("neutral"),
     )
 
 
@@ -538,7 +563,7 @@ def _command(action: BootstrapAction, frames: int) -> MovementCommand:
 
 
 def _breed_population(
-    ranked: list[tuple[int, Genome]],
+    ranked: list[tuple[GenomeFitness | int, Genome]],
     random_source: random.Random,
     config: CollectorConfig,
 ) -> Population:
@@ -555,6 +580,13 @@ def _breed_population(
             )
         )
     return population
+
+
+def _normalize_fitness(value: GenomeFitness | int, genome: Genome) -> GenomeFitness:
+    """Keep survival-only test doubles compatible with the new fitness shape."""
+    if isinstance(value, GenomeFitness):
+        return value
+    return GenomeFitness(int(value), genome.count("neutral"))
 
 
 def _mutation_rate(index: int, genome_length: int) -> float:
@@ -673,13 +705,23 @@ def _load_checkpoint(connection: sqlite3.Connection) -> bytes | None:
 
 
 def _store_champion(connection: sqlite3.Connection, champion: Champion) -> None:
+    existing = connection.execute(
+        "SELECT survival_frames, genome_json FROM champions WHERE seed=?",
+        (champion.seed,),
+    ).fetchone()
+    if existing is not None:
+        existing_genome = json.loads(existing[1])
+        existing_fitness = GenomeFitness(
+            int(existing[0]), existing_genome.count("neutral")
+        )
+        if existing_fitness >= champion.fitness:
+            return
     connection.execute(
         "INSERT INTO champions("
         "seed, generation, survival_frames, action_hash, genome_json) "
         "VALUES (?, ?, ?, ?, ?) ON CONFLICT(seed) DO UPDATE SET "
         "generation=excluded.generation, survival_frames=excluded.survival_frames, "
-        "action_hash=excluded.action_hash, genome_json=excluded.genome_json "
-        "WHERE excluded.survival_frames > champions.survival_frames",
+        "action_hash=excluded.action_hash, genome_json=excluded.genome_json",
         (
             champion.seed,
             champion.generation,
@@ -739,8 +781,14 @@ def reconstruct_champion(config: CollectorConfig, target_seed: int) -> Champion:
             accepted_hashes = _accepted_hashes(connection, seed)
             for generation in range(1, config.generations_per_seed + 1):
                 results = _evaluate_population(seed, population, config)
-                ranked = sorted(zip(results, population, strict=True), reverse=True)
-                champion = Champion(seed, generation, ranked[0][0], ranked[0][1])
+                fitnesses = [
+                    _normalize_fitness(result, genome)
+                    for result, genome in zip(results, population, strict=True)
+                ]
+                ranked = sorted(zip(fitnesses, population, strict=True), reverse=True)
+                champion = Champion(
+                    seed, generation, ranked[0][0].survival_frames, ranked[0][1]
+                )
                 LOGGER.info(
                     "reconstruct seed=%d generation=%d/%d best=%d",
                     seed,
@@ -752,7 +800,7 @@ def reconstruct_champion(config: CollectorConfig, target_seed: int) -> Champion:
                     with connection:
                         _store_champion(connection, champion)
                 for fitness, genome in ranked:
-                    if fitness < TARGET_SURVIVAL_FRAMES:
+                    if fitness.survival_frames < TARGET_SURVIVAL_FRAMES:
                         break
                     accepted_hashes.add(_genome_hash(genome))
                 if len(accepted_hashes) >= TRACES_PER_SEED:

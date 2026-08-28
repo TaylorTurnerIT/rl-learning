@@ -13,11 +13,13 @@ from dodge.dataset import (
     Champion,
     CollectorConfig,
     Genome,
+    GenomeFitness,
     _checkpoint,
     _initialize_database,
     _load_champion,
     _load_checkpoint,
     _restore_or_initialize,
+    _store_champion,
     _validate_config,
     export_database,
     reset_database,
@@ -262,6 +264,42 @@ def test_champion_persists_best_genome_with_checkpoint(tmp_path) -> None:
             champion=champion,
         )
         assert _load_champion(connection, 0) == champion
+    finally:
+        connection.close()
+
+
+def test_fitness_rewards_neutral_only_after_survival(monkeypatch) -> None:
+    result: HeadlessResult = {
+        "score": 0,
+        "frames": 100,
+        "survival_frames": 37,
+        "seed": 0,
+        "started": True,
+        "died": True,
+    }
+    monkeypatch.setattr(dataset, "run_headless", lambda *_args, **_kwargs: result)
+
+    fitness = dataset._fitness(0, ("neutral", "left", "neutral"))
+
+    assert fitness == GenomeFitness(survival_frames=37, neutral_actions=2)
+    assert GenomeFitness(38, 0) > fitness
+    assert GenomeFitness(37, 3) > fitness
+
+
+def test_champion_tie_prefers_more_neutral_actions_but_not_shorter_survival(
+    tmp_path,
+) -> None:
+    config = CollectorConfig(database=tmp_path / "dataset.sqlite3", train_seeds=(0,))
+    first = Champion(0, 1, 100, ("left",))
+    stable = Champion(0, 2, 100, ("neutral", "neutral"))
+    shorter = Champion(0, 3, 99, ("neutral", "neutral", "neutral"))
+    connection = sqlite3.connect(config.database)
+    try:
+        _initialize_database(connection, config, resume=False)
+        _store_champion(connection, first)
+        _store_champion(connection, stable)
+        _store_champion(connection, shorter)
+        assert _load_champion(connection, 0) == stable
     finally:
         connection.close()
 

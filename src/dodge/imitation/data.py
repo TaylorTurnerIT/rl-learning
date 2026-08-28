@@ -8,6 +8,7 @@ import numpy as np
 
 from dodge.control import ControlInputError, ControlRuntimeError
 from dodge.dataset import ACTION_CHOICES, DEFAULT_DATABASE
+from dodge.imitation.board import BOARD_SHAPE, encode_board, raw_state_from_json
 from dodge.neat.state import OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION
 
 ACTION_INDEX = {action: index for index, action in enumerate(ACTION_CHOICES)}
@@ -15,7 +16,7 @@ ACTION_INDEX = {action: index for index, action in enumerate(ACTION_CHOICES)}
 
 @dataclass(frozen=True, slots=True)
 class Demonstrations:
-    """Feature matrix and categorical labels read from accepted GA episodes."""
+    """Board tensors and categorical labels read from accepted GA episodes."""
 
     observations: np.ndarray
     actions: np.ndarray
@@ -43,7 +44,8 @@ def load_demonstrations(database: Path = DEFAULT_DATABASE) -> Demonstrations:
     try:
         connection.execute("PRAGMA query_only=ON")
         rows = connection.execute(
-            "SELECT episodes.seed, steps.observation_f32, steps.action FROM steps "
+            "SELECT episodes.seed, steps.observation_f32, steps.raw_state_json, "
+            "steps.action FROM steps "
             "JOIN episodes ON episodes.id=steps.episode_id "
             "JOIN seeds ON seeds.seed=episodes.seed "
             "WHERE steps.bootstrap=0 AND seeds.role='training' "
@@ -54,18 +56,16 @@ def load_demonstrations(database: Path = DEFAULT_DATABASE) -> Demonstrations:
     if not rows:
         raise ControlInputError("dataset contains no learned decision rows")
 
-    observations = np.empty(
-        (len(rows), OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION), dtype=np.float32
-    )
+    observations = np.empty((len(rows), *BOARD_SHAPE), dtype=np.float32)
     actions = np.empty(len(rows), dtype=np.int64)
     seeds = np.empty(len(rows), dtype=np.int64)
     expected_bytes = OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION * 4
-    for index, (seed, packed_observation, action) in enumerate(rows):
+    for index, (seed, packed_observation, raw_state_json, action) in enumerate(rows):
         if len(packed_observation) != expected_bytes:
             raise ControlRuntimeError("collector observation has unexpected width")
+        observations[index] = encode_board(raw_state_from_json(raw_state_json))
         if action not in ACTION_INDEX:
             raise ControlRuntimeError(f"collector action is not recognized: {action}")
-        observations[index] = np.frombuffer(packed_observation, dtype="<f4")
         actions[index] = ACTION_INDEX[action]
         seeds[index] = seed
     return Demonstrations(observations, actions, seeds)

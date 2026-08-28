@@ -8,9 +8,10 @@ import pytest
 import torch
 
 from dodge.control import ControlInputError
-from dodge.dataset import CollectorConfig, _initialize_database
+from dodge.dataset import ACTION_CHOICES, CollectorConfig, _initialize_database
+from dodge.imitation.board import BOARD_CHANNEL_NAMES, BOARD_SHAPE, encode_board
 from dodge.imitation.data import ACTION_INDEX, load_demonstrations, split_demonstrations
-from dodge.imitation.model import BehaviorCloningMLP
+from dodge.imitation.model import BehaviorCloningCNN, predict_action
 from dodge.imitation.plot import plot_training_history
 from dodge.imitation.train import (
     main as train_main,
@@ -19,7 +20,48 @@ from dodge.imitation.train import (
     save_training_history,
     train_behavior_cloning,
 )
-from dodge.neat.state import OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION
+from dodge.neat.state import (
+    OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION,
+    EntityState,
+    PlayerState,
+    RawState,
+)
+
+
+def _raw_state_json() -> str:
+    return json.dumps(
+        RawState(
+            frame=0,
+            player=PlayerState(64, 64, 2, -1, 4),
+            enemies=(EntityState(16, 24, 1, 2, 8, 8, "enemy", 1),),
+            aoes=(
+                EntityState(96, 96, 0, -1, 16, 8, "explosion", 1),
+                EntityState(32, 96, 0, 1, 8, 16, "pattern", 0),
+            ),
+        ).to_json(),
+        separators=(",", ":"),
+    )
+
+
+def test_board_encoder_keeps_entities_in_spatial_channels() -> None:
+    board = encode_board(
+        RawState(
+            frame=0,
+            player=PlayerState(64, 64, 2, -1, 4),
+            enemies=(EntityState(16, 24, 1, 2, 8, 8, "enemy", 1),),
+            aoes=(
+                EntityState(96, 96, 0, -1, 16, 8, "explosion", 1),
+                EntityState(32, 96, 0, 1, 8, 16, "pattern", 0),
+            ),
+        )
+    )
+
+    assert board.shape == BOARD_SHAPE
+    assert board[BOARD_CHANNEL_NAMES.index("player_presence")].sum() > 0
+    assert board[BOARD_CHANNEL_NAMES.index("enemy_presence")].sum() > 0
+    assert board[BOARD_CHANNEL_NAMES.index("aoe_presence")].sum() > 0
+    assert board[BOARD_CHANNEL_NAMES.index("aoe_explosion")].sum() > 0
+    assert board[BOARD_CHANNEL_NAMES.index("aoe_pattern")].sum() > 0
 
 
 def test_v57_loader_reads_only_learned_rows(tmp_path) -> None:
@@ -33,10 +75,10 @@ def test_v57_loader_reads_only_learned_rows(tmp_path) -> None:
             "VALUES (0, 'hash', '{}', '{}')"
         ).lastrowid
         connection.executemany(
-            "INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?, '{}')",
+            "INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (episode_id, 0, 0, "neutral", 1, packed),
-                (episode_id, 1, 8, "up_left", 0, packed),
+                (episode_id, 0, 0, "neutral", 1, packed, _raw_state_json()),
+                (episode_id, 1, 8, "up_left", 0, packed, _raw_state_json()),
             ],
         )
         connection.commit()
@@ -45,15 +87,21 @@ def test_v57_loader_reads_only_learned_rows(tmp_path) -> None:
 
     demonstrations = load_demonstrations(path)
 
-    assert demonstrations.observations.shape == (1, 221)
+    assert demonstrations.observations.shape == (1, *BOARD_SHAPE)
     assert demonstrations.actions.tolist() == [ACTION_INDEX["up_left"]]
     assert demonstrations.seeds.tolist() == [0]
-    assert demonstrations.observations[0, -1] == 220
+    assert demonstrations.observations[0, 0].sum() > 0
+    assert (
+        demonstrations.observations[
+            0, BOARD_CHANNEL_NAMES.index("enemy_presence")
+        ].sum()
+        > 0
+    )
 
 
-def test_v58_mlp_produces_nine_trainable_direction_logits(tmp_path) -> None:
-    model = BehaviorCloningMLP(hidden_size=8)
-    observations = torch.zeros((2, OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION))
+def test_cnn_produces_nine_trainable_direction_logits(tmp_path) -> None:
+    model = BehaviorCloningCNN(hidden_size=8)
+    observations = torch.zeros((2, *BOARD_SHAPE))
 
     logits = model(observations)
     loss = torch.nn.CrossEntropyLoss()(logits, torch.tensor([0, 1]))
@@ -62,7 +110,31 @@ def test_v58_mlp_produces_nine_trainable_direction_logits(tmp_path) -> None:
     assert logits.shape == (2, 9)
     assert all(parameter.grad is not None for parameter in model.parameters())
     with pytest.raises(ValueError, match="observations must have shape"):
-        model(torch.zeros((2, 220)))
+        model(torch.zeros((2, BOARD_SHAPE[0], BOARD_SHAPE[1], BOARD_SHAPE[2] - 1)))
+
+
+def test_cnn_predict_action_uses_board_normalization() -> None:
+    model = BehaviorCloningCNN(hidden_size=8)
+    final_layer = model.network[-1]
+    assert isinstance(final_layer, torch.nn.Linear)
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+        final_layer.bias[ACTION_CHOICES.index("neutral")] = 1
+
+    action = predict_action(
+        model,
+        RawState(
+            frame=0,
+            player=PlayerState(64, 64, 0, 0, 4),
+            enemies=(),
+            aoes=(),
+        ),
+        mean=torch.zeros(BOARD_SHAPE),
+        standard_deviation=torch.ones(BOARD_SHAPE),
+    )
+
+    assert action == "neutral"
 
 
 def test_behavior_cloning_trains_on_loaded_demonstrations(tmp_path) -> None:
@@ -76,8 +148,11 @@ def test_behavior_cloning_trains_on_loaded_demonstrations(tmp_path) -> None:
             "VALUES (0, 'hash', '{}', '{}')"
         ).lastrowid
         connection.executemany(
-            "INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?, '{}')",
-            [(episode_id, index, index * 8, "left", 0, packed) for index in range(4)],
+            "INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (episode_id, index, index * 8, "left", 0, packed, _raw_state_json())
+                for index in range(4)
+            ],
         )
         connection.commit()
     finally:
@@ -108,8 +183,8 @@ def test_v61_cli_auto_falls_back_to_cpu_without_cuda(
                 (seed,),
             ).lastrowid
             connection.execute(
-                "INSERT INTO steps VALUES (?, 0, 0, 'left', 0, ?, '{}')",
-                (episode_id, packed),
+                "INSERT INTO steps VALUES (?, 0, 0, 'left', 0, ?, ?)",
+                (episode_id, packed, _raw_state_json()),
             )
         connection.commit()
     finally:
@@ -145,6 +220,8 @@ def test_v61_cli_auto_falls_back_to_cpu_without_cuda(
     assert output.is_file()
     assert json.loads(history.read_text())["validation_seeds"] == [1]
     artifact = torch.load(output, weights_only=True)
+    assert artifact["model_type"] == "BehaviorCloningCNN"
+    assert artifact["board_shape"] == list(BOARD_SHAPE)
     assert torch.isfinite(artifact["standard_deviation"]).all()
     with pytest.raises(ControlInputError, match="CUDA is unavailable"):
         train_behavior_cloning(load_demonstrations(path), device="cuda")
@@ -167,8 +244,8 @@ def test_v69_v70_hold_out_highest_seed_and_plot_losses(tmp_path) -> None:
                 (seed, f"hash-{seed}"),
             ).lastrowid
             connection.execute(
-                "INSERT INTO steps VALUES (?, 0, 0, 'left', 0, ?, '{}')",
-                (episode_id, packed),
+                "INSERT INTO steps VALUES (?, 0, 0, 'left', 0, ?, ?)",
+                (episode_id, packed, _raw_state_json()),
             )
         connection.commit()
     finally:
