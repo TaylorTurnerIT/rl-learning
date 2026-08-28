@@ -21,6 +21,7 @@ C12: train workers default ≤8; `--workers` selects positive process count.
 C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency or external service.
 C14: retain ≤5 NEAT checkpoints per run; episode history ∉ checkpoint retention.
 C15: v3 defaults: population 50, compatibility target 6 species, fixed 12-seed champion benchmark every 5 generations.
+C16: direct PPO trains board CNN actor-critic; validation `29991..30000` + evaluation `30001..30010` ∉ training seed stream.
 
 §I
 
@@ -38,6 +39,9 @@ cli: `just dodge-neat-train --evolution-seed <n>` → reproducible population ev
 cli: `just dodge-neat-train` end → generation table + concise final fitness summary.
 cli: `just dodge-neat-resume <run> --generations <n>` → same run + `n` generations.
 file: `generation-####/network.html` → interactive best-genome weighted graph.
+py: `DodgeActorCriticCNN(board)` → `(action_logits, value)`.
+cli: `dodge-ppo-train [options]` → resumable direct PPO run + held-out survival evaluation.
+file: `history/dodge/ppo/<run>/checkpoint-latest.pt` → atomic PPO model/optimizer/RNG checkpoint.
 
 §R
 
@@ -79,6 +83,12 @@ V29: v3 champion benchmark uses same 12 held-out seeds every 5 generations; benc
 V30: new run records entropy-generated `evolution_seed`; same seed/config/game banks → reproducible population trajectory.
 V31: transient `InputAcknowledgementTimeout` retries same-seed episode 3 times; only exhausted retries fail worker task.
 V32: CLI time-to-intersection omitted → derive config input width; explicit mode/input-width mismatch → fail before Pemsa.
+V33: GAE nonterminal transition → bootstrap next value; terminal next value → 0; episode boundary → blocks recursive advantage carry.
+V34: PPO actor-critic board batch `(N,19,16,16)` → nine action logits + scalar value; action order = collector choices.
+V35: PPO reward → survival-frame delta + neutral bonus; per-episode stability bonus cap → 1.0 default, survival remains dominant.
+V36: PPO checkpoint → model, optimizer, RNG, counters, and config; resume → latest update, incompatible hyperparameters → fail.
+V37: PPO training seed stream ∩ `{29991..30010}` = ∅; held-out evaluation → no optimizer update.
+V38: PPO advantage normalization + explained variance → finite for one-transition rollout.
 
 §T
 
@@ -102,6 +112,7 @@ T16|x|add latest NEAT generation replay|V25,I.cli
 T17|x|add v2 NEAT search profile, seed schedule, intersection feature|V7,V26,V27,I.json
 T18|x|add v3 speciation diagnostics, benchmark, reproducible evolution, timeout recovery|C15,V28,V29,V30,V31,V32,I.cli
 T19|x|retune v3 population for viable species at v2-scale evaluation cost|C15,V28
+T20|x|add direct board-CNN PPO trainer, checkpoints, seed-held evaluation, + production CLI|C16,V33,V34,V35,V36,V37,V38,I.py,I.cli
 
 §B
 
@@ -138,3 +149,4 @@ B29|2026-08-22|explicit 197-input config inherited 221-input default mode|V32
 B30|2026-08-22|v3 config-width test missed Ruff import order|mechanical format
 B31|2026-08-22|v3 threshold calibrated on evolved genome distances fragmented fresh population|V28
 B32|2026-08-22|v3 population doubled evaluation cost without clear early gain|C15,V28
+B33|2026-08-28|GAE test omitted nonterminal next-value bootstrap from expected advantage|V33

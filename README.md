@@ -102,3 +102,20 @@ but does not accelerate its clock.
 
 For batches, enter `devenv shell` once and invoke `dodge-headless` directly from
 worker processes instead of starting a new devenv shell through `just` per run.
+
+### Direct PPO training
+
+The direct learner trains a convolutional actor-critic against the step-wise
+Dodge environment. It optimizes survived frames directly and uses only a small
+capped preference for neutral actions; it does not depend on behavior-cloning
+weights. Checkpoints and metrics are written under the ignored history tree:
+
+```bash
+just dodge-ppo-train --run-dir history/dodge/ppo/production --updates 1000
+```
+
+Resume an interrupted run by increasing the target update count:
+
+```bash
+just dodge-ppo-train --resume --run-dir history/dodge/ppo/production --updates 2000
+```

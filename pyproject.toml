@@ -30,6 +30,7 @@ dodge-dataset-reset = "dodge.dataset:reset_main"
 dodge-dataset-export = "dodge.dataset:export_main"
 dodge-bc-train = "dodge.imitation.train:main"
 dodge-bc-plot = "dodge.imitation.plot:main"
+dodge-ppo-train = "dodge.rl.ppo:main"
 
 [build-system]
 requires = ["hatchling"]
