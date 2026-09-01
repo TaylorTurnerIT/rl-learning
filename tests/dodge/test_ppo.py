@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
+from dodge.control import ControlInputError, ControlRuntimeError
 from dodge.neat.environment import EpisodeResult, Observation, Transition
 from dodge.neat.state import (
     EntityState,
@@ -22,6 +24,8 @@ from dodge.rl.ppo import (
     PPOTrainer,
     StabilityReward,
     TrainingSeedStream,
+    _atomic_torch_save,
+    _prepare_runtime_directory,
     compute_gae,
     train_ppo,
 )
@@ -183,3 +187,71 @@ def test_ppo_run_checkpoints_and_resumes(tmp_path: Path) -> None:
 
     assert resumed["updates_completed"] == 2
     assert len((run_directory / "metrics.jsonl").read_text().splitlines()) == 2
+
+
+def test_v39_ppo_run_passes_run_scoped_temporary_root(tmp_path: Path) -> None:
+    run_directory = tmp_path / "ppo-run"
+    temporary_roots: list[Path | None] = []
+
+    def environment_factory(**kwargs: object) -> FakePPOEnvironment:
+        temporary_root = kwargs.get("temporary_root")
+        temporary_roots.append(temporary_root)  # type: ignore[arg-type]
+        return FakePPOEnvironment(**kwargs)
+
+    train_ppo(
+        _config(),
+        run_directory,
+        environment_factory=environment_factory,
+        validation_seeds=(1,),
+        evaluation_seeds=(2,),
+    )
+
+    assert temporary_roots
+    assert all(root == run_directory / ".runtime" for root in temporary_roots)
+
+
+def test_v40_runtime_preflight_cleans_owned_stale_workspaces_only(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    stale = runtime_root / "dodge-neat-stale"
+    stale.mkdir(parents=True)
+    (stale / "cartridge.p8").write_text("stale")
+    unrelated = runtime_root / "keep.txt"
+    unrelated.write_text("keep")
+
+    _prepare_runtime_directory(runtime_root)
+
+    assert not stale.exists()
+    assert unrelated.read_text() == "keep"
+
+
+def test_v40_runtime_preflight_rejects_insufficient_free_space(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "dodge.rl.ppo.shutil.disk_usage",
+        lambda _: SimpleNamespace(free=0),
+    )
+
+    with pytest.raises(ControlInputError, match="free space"):
+        _prepare_runtime_directory(tmp_path / "runtime")
+
+
+def test_v41_checkpoint_error_names_operation_and_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+
+    def fail_save(*_: object, **__: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("dodge.rl.ppo.torch.save", fail_save)
+
+    with pytest.raises(ControlRuntimeError) as error:
+        _atomic_torch_save({}, checkpoint)
+
+    assert "checkpoint" in str(error.value)
+    assert str(checkpoint) in str(error.value)

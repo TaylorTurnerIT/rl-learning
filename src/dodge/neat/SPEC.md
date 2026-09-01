@@ -42,6 +42,8 @@ file: `generation-####/network.html` → interactive best-genome weighted graph.
 py: `DodgeActorCriticCNN(board)` → `(action_logits, value)`.
 cli: `dodge-ppo-train [options]` → resumable direct PPO run + held-out survival evaluation.
 file: `history/dodge/ppo/<run>/checkpoint-latest.pt` → atomic PPO model/optimizer/RNG checkpoint.
+py: `DodgeEnv(..., temporary_root: Path|None)` → env with explicit Pemsa scratch root.
+cli: `dodge-ppo-train` → run-scoped durable scratch + free-space preflight.
 
 §R
 
@@ -89,6 +91,10 @@ V35: PPO reward → survival-frame delta + neutral bonus; per-episode stability 
 V36: PPO checkpoint → model, optimizer, RNG, counters, and config; resume → latest update, incompatible hyperparameters → fail.
 V37: PPO training seed stream ∩ `{29991..30010}` = ∅; held-out evaluation → no optimizer update.
 V38: PPO advantage normalization + explained variance → finite for one-transition rollout.
+V39: ∀ PPO run → Pemsa scratch ∈ run-scoped durable runtime directory; default `/tmp` ⊥.
+V40: PPO runtime root → writable + free-space floor before Pemsa launch; stale bridge scratch → clean only inside owned root.
+V41: runtime allocation/write OSError → include operation + target path; checkpoint remains resumable after failure.
+V42: PPO devenv/just launch → SDL/X11 runtime library path set before Pemsa/xdotool.
 
 §T
 
@@ -113,6 +119,7 @@ T17|x|add v2 NEAT search profile, seed schedule, intersection feature|V7,V26,V27
 T18|x|add v3 speciation diagnostics, benchmark, reproducible evolution, timeout recovery|C15,V28,V29,V30,V31,V32,I.cli
 T19|x|retune v3 population for viable species at v2-scale evaluation cost|C15,V28
 T20|x|add direct board-CNN PPO trainer, checkpoints, seed-held evaluation, + production CLI|C16,V33,V34,V35,V36,V37,V38,I.py,I.cli
+T21|~|route PPO/Pemsa scratch to durable run root + guard ENOSPC + repair launch runtime|V39,V40,V41,V42,I.py,I.cli
 
 §B
 
@@ -150,3 +157,5 @@ B30|2026-08-22|v3 config-width test missed Ruff import order|mechanical format
 B31|2026-08-22|v3 threshold calibrated on evolved genome distances fragmented fresh population|V28
 B32|2026-08-22|v3 population doubled evaluation cost without clear early gain|C15,V28
 B33|2026-08-28|GAE test omitted nonterminal next-value bootstrap from expected advantage|V33
+B34|2026-08-28|PPO bridge inherited shared 2GiB `/tmp`; launch OSError dropped path/context; run failed at update 50|V39,V40,V41
+B35|2026-08-28|PPO recipe bypassed devenv SDL library wrapper; xdotool could not load `libXext.so.6`; live tests timed out|V42

@@ -16,7 +16,15 @@ just dodge-ppo-train --run-dir history/dodge/ppo/production --updates 1000
 ```
 
 Each update writes `checkpoint-latest.pt`, periodic checkpoints, `metrics.jsonl`,
-and `run.json`. Resume after interruption with:
+and `run.json`.
+
+PPO places Pemsa/Xvfb scratch workspaces under `<run>/.runtime` on the same
+durable filesystem as the checkpoint. It cleans stale bridge workspaces there
+and refuses to start when that filesystem has less than 512 MiB free. The
+`just dodge-ppo-train` recipe also routes launcher scratch away from the
+shared system `/tmp` mount.
+
+Resume after interruption with:
 
 ```bash
 just dodge-ppo-train --resume --run-dir history/dodge/ppo/production --updates 2000

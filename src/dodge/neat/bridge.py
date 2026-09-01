@@ -289,6 +289,7 @@ class PemsaStepBridge:
         aoe_slots: int = 8,
         source: Path = CARTRIDGE_PATH,
         startup_timeout: float = 10.0,
+        temporary_root: Path | None = None,
     ) -> None:
         self.seed = seed
         self.step_frames = step_frames
@@ -296,6 +297,7 @@ class PemsaStepBridge:
         self.aoe_slots = aoe_slots
         self.source = source
         self.startup_timeout = startup_timeout
+        self.temporary_root = temporary_root
         self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
         self._xvfb: subprocess.Popen[str] | None = None
         self._pemsa: subprocess.Popen[str] | None = None
@@ -315,12 +317,30 @@ class PemsaStepBridge:
                 enemy_slots=self.enemy_slots,
                 aoe_slots=self.aoe_slots,
             )
-            self._temporary_directory = tempfile.TemporaryDirectory(
-                prefix="dodge-neat-"
-            )
+            try:
+                if self.temporary_root is None:
+                    self._temporary_directory = tempfile.TemporaryDirectory(
+                        prefix="dodge-neat-"
+                    )
+                else:
+                    self.temporary_root.mkdir(parents=True, exist_ok=True)
+                    self._temporary_directory = tempfile.TemporaryDirectory(
+                        prefix="dodge-neat-",
+                        dir=self.temporary_root,
+                    )
+            except OSError as error:
+                target = self.temporary_root or Path(tempfile.gettempdir())
+                raise ControlRuntimeError(
+                    f"could not allocate Pemsa scratch directory {target}: {error}"
+                ) from error
             workspace = Path(self._temporary_directory.name)
             cartridge = workspace / "dodge-neat.p8"
-            cartridge.write_text(instrumented, encoding="utf-8")
+            try:
+                cartridge.write_text(instrumented, encoding="utf-8")
+            except OSError as error:
+                raise ControlRuntimeError(
+                    f"could not write Pemsa scratch cartridge {cartridge}: {error}"
+                ) from error
             display = self._start_xvfb()
             self._display_value = display
             self._pemsa = subprocess.Popen(

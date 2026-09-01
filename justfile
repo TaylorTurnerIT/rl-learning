@@ -64,7 +64,8 @@ dodge-bc-plot history *options:
 
 [group("dodge")]
 dodge-ppo-train *options:
-    @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-ppo-train {{ options }}
+    @mkdir -p history/dodge/ppo/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ppo/.launch-tmp" devenv -q shell -- dodge-ppo-train {{ options }}
 
 [group("dodge")]
 dodge-marimo:

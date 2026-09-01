@@ -13,3 +13,6 @@ def test_v14_neat_recipes_use_the_project_uv_environment() -> None:
     assert "dodge-neat-resume run *options:" in justfile
     assert "dodge-neat-train --resume {{ run }} {{ options }}" in justfile
     assert "dodge-neat-replay-latest epoch:" in justfile
+    assert 'TMPDIR="$PWD/history/dodge/ppo/.launch-tmp"' in justfile
+    assert "devenv -q shell -- dodge-ppo-train {{ options }}" in justfile
+    assert "dodge-ppo-train.exec" in devenv

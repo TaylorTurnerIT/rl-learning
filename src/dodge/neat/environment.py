@@ -100,6 +100,7 @@ class DodgeEnv:
         aoe_slots: int = 8,
         include_time_to_intersection: bool = False,
         bridge_factory: BridgeFactory = PemsaStepBridge,
+        temporary_root: Path | None = None,
     ) -> None:
         if not 3 <= step_frames <= 5:
             raise ValueError("step_frames must be between 3 and 5")
@@ -110,6 +111,7 @@ class DodgeEnv:
         self.aoe_slots = aoe_slots
         self.include_time_to_intersection = include_time_to_intersection
         self._bridge_factory = bridge_factory
+        self.temporary_root = temporary_root
         self._bridge: PemsaStepBridge | None = None
         self._seed: int | None = None
         self._actions: list[Direction] = []
@@ -121,11 +123,16 @@ class DodgeEnv:
     def reset(self, seed: int | None = None) -> Observation:
         self.close()
         selected_seed = secrets.randbelow(32_768) if seed is None else _seed(seed)
+        bridge_arguments: dict[str, object] = {
+            "seed": selected_seed,
+            "step_frames": self.step_frames,
+            "enemy_slots": self.enemy_slots,
+            "aoe_slots": self.aoe_slots,
+        }
+        if self.temporary_root is not None:
+            bridge_arguments["temporary_root"] = self.temporary_root
         bridge = self._bridge_factory(
-            seed=selected_seed,
-            step_frames=self.step_frames,
-            enemy_slots=self.enemy_slots,
-            aoe_slots=self.aoe_slots,
+            **bridge_arguments,
         )
         try:
             raw_state = bridge.start()

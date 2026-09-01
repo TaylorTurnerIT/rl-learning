@@ -59,6 +59,34 @@ def test_instrument_step_cartridge_requires_cartridge_markers() -> None:
         instrument_step_cartridge("__gfx__\n", seed=1, step_frames=4)
 
 
+def test_v41_scratch_allocation_error_names_runtime_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    source = tmp_path / "source.p8"
+    source.write_text("function _init()\nend\n__gfx__\n")
+
+    def fail_temporary_directory(**_: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(
+        "dodge.neat.bridge.tempfile.TemporaryDirectory",
+        fail_temporary_directory,
+    )
+    runtime_root = tmp_path / "runtime"
+    bridge = PemsaStepBridge(
+        seed=1,
+        source=source,
+        temporary_root=runtime_root,
+    )
+
+    with pytest.raises(ControlRuntimeError) as error:
+        bridge.start()
+
+    assert str(runtime_root) in str(error.value)
+    assert "scratch directory" in str(error.value)
+
+
 def test_v17_accepted_final_action_tolerates_destroyed_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
+import shutil
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -31,6 +34,8 @@ PPO_CHECKPOINT_VERSION = 1
 PPO_RUN_VERSION = 1
 PPO_MODEL_TYPE = "DodgeActorCriticCNN"
 DEFAULT_RUN_ROOT = PROJECT_ROOT / "history" / "dodge" / "ppo"
+PPO_RUNTIME_DIRECTORY_NAME = ".runtime"
+MIN_RUNTIME_FREE_BYTES = 512 * 1024 * 1024
 TRAINING_SEEDS = tuple(
     seed
     for seed in range(TRAINING_SEED_MAX + 1)
@@ -332,6 +337,7 @@ class PPOTrainer:
         *,
         environment_factory: EnvironmentFactory = DodgeEnv,
         checkpoint: Path | None = None,
+        runtime_directory: Path | None = None,
     ) -> None:
         config.validate()
         self.config = config
@@ -342,7 +348,12 @@ class PPOTrainer:
             self.model.parameters(), lr=config.learning_rate, eps=1e-5
         )
         self._environment_factory = environment_factory
-        self._environment = environment_factory(step_frames=config.step_frames)
+        self.runtime_directory = runtime_directory
+        self._environment = _make_environment(
+            environment_factory,
+            step_frames=config.step_frames,
+            temporary_root=runtime_directory,
+        )
         self._seed_stream = TrainingSeedStream(config.seed)
         self._observation: Observation | None = None
         self._episode_seed: int | None = None
@@ -727,6 +738,7 @@ def evaluate_policy(
     seeds: Sequence[int],
     *,
     environment_factory: EnvironmentFactory = DodgeEnv,
+    temporary_root: Path | None = None,
 ) -> EvaluationResult:
     if not seeds:
         raise ValueError("evaluation requires at least one seed")
@@ -735,7 +747,11 @@ def evaluate_policy(
     terminated: list[bool] = []
     model.eval()
     for seed in seeds:
-        environment = environment_factory(step_frames=config.step_frames)
+        environment = _make_environment(
+            environment_factory,
+            step_frames=config.step_frames,
+            temporary_root=temporary_root,
+        )
         try:
             observation = environment.reset(seed=seed)
             accumulated_survival = 0.0
@@ -784,8 +800,13 @@ def train_ppo(
                 f"PPO run directory is not empty; use --resume: {run_directory}"
             )
     run_directory.mkdir(parents=True, exist_ok=True)
+    runtime_directory = run_directory / PPO_RUNTIME_DIRECTORY_NAME
+    _prepare_runtime_directory(runtime_directory)
     trainer = PPOTrainer(
-        config, environment_factory=environment_factory, checkpoint=checkpoint
+        config,
+        environment_factory=environment_factory,
+        checkpoint=checkpoint,
+        runtime_directory=runtime_directory,
     )
     metrics_path = run_directory / "metrics.jsonl"
     try:
@@ -818,6 +839,7 @@ def train_ppo(
                     config,
                     validation_seeds,
                     environment_factory=environment_factory,
+                    temporary_root=runtime_directory,
                 )
                 metrics["validation"] = validation.to_json()
                 if (
@@ -836,12 +858,14 @@ def train_ppo(
             config,
             validation_seeds,
             environment_factory=environment_factory,
+            temporary_root=runtime_directory,
         )
         final_evaluation = evaluate_policy(
             trainer.model,
             config,
             evaluation_seeds,
             environment_factory=environment_factory,
+            temporary_root=runtime_directory,
         )
         trainer.save_checkpoint(run_directory / "checkpoint-latest.pt")
         record = _write_run_record(
@@ -876,6 +900,7 @@ def _write_run_record(
         "episodes_completed": trainer.episodes_completed,
         "environment_errors": trainer.environment_errors,
         "latest_checkpoint": "checkpoint-latest.pt",
+        "runtime_directory": PPO_RUNTIME_DIRECTORY_NAME,
         "best_validation": trainer.best_validation,
     }
     if final_validation is not None:
@@ -887,22 +912,89 @@ def _write_run_record(
 
 
 def _append_jsonl(path: Path, value: Mapping[str, object]) -> None:
-    with path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(value, sort_keys=True) + "\n")
-        stream.flush()
+    try:
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, sort_keys=True) + "\n")
+            stream.flush()
+    except OSError as error:
+        raise ControlRuntimeError(
+            f"could not append PPO metrics {path}: {error}"
+        ) from error
 
 
 def _atomic_write_json(path: Path, value: Mapping[str, object]) -> None:
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-    temporary.replace(path)
+    temporary: Path | None = None
+    try:
+        temporary = _temporary_path(path)
+        temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        temporary.replace(path)
+    except OSError as error:
+        raise ControlRuntimeError(
+            f"could not write PPO run record {path}: {error}"
+        ) from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _atomic_torch_save(value: object, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    torch.save(value, temporary)
-    temporary.replace(path)
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = _temporary_path(path)
+        torch.save(value, temporary)
+        temporary.replace(path)
+    except (OSError, RuntimeError) as error:
+        raise ControlRuntimeError(
+            f"could not save PPO checkpoint {path}: {error}"
+        ) from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _temporary_path(path: Path) -> Path:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    os.close(descriptor)
+    return Path(temporary_name)
+
+
+def _prepare_runtime_directory(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        if not os.access(path, os.W_OK | os.X_OK):
+            raise ControlInputError(f"PPO runtime directory is not writable: {path}")
+        for child in path.iterdir():
+            if child.is_dir() and child.name.startswith("dodge-neat-"):
+                shutil.rmtree(child)
+        usage = shutil.disk_usage(path)
+    except ControlInputError:
+        raise
+    except OSError as error:
+        raise ControlRuntimeError(
+            f"could not prepare PPO runtime directory {path}: {error}"
+        ) from error
+    if usage.free < MIN_RUNTIME_FREE_BYTES:
+        raise ControlInputError(
+            f"PPO runtime directory {path} has {usage.free} bytes of free space; "
+            f"need at least {MIN_RUNTIME_FREE_BYTES}"
+        )
+
+
+def _make_environment(
+    factory: EnvironmentFactory,
+    *,
+    step_frames: int,
+    temporary_root: Path | None,
+) -> Environment:
+    arguments: dict[str, object] = {"step_frames": step_frames}
+    if temporary_root is not None:
+        arguments["temporary_root"] = temporary_root
+    return factory(**arguments)
 
 
 def _print_update(metrics: Mapping[str, object], device: str) -> None:

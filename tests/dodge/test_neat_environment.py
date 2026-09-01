@@ -100,6 +100,19 @@ def test_environment_uses_entropy_when_seed_is_omitted(
     assert FakeBridge.instances[0].kwargs["seed"] == 999
 
 
+def test_environment_passes_explicit_temporary_root_to_bridge(tmp_path: Path) -> None:
+    FakeBridge.instances.clear()
+    temporary_root = tmp_path / "runtime"
+    environment = DodgeEnv(
+        bridge_factory=FakeBridge,  # type: ignore[arg-type]
+        temporary_root=temporary_root,
+    )
+
+    environment.reset(seed=123)
+
+    assert FakeBridge.instances[0].kwargs["temporary_root"] == temporary_root
+
+
 def test_environment_rejects_steps_after_terminal_result() -> None:
     environment = DodgeEnv(bridge_factory=FakeBridge)  # type: ignore[arg-type]
     environment.reset(seed=123)
