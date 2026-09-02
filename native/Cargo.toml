@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/dodge-core",
+    "crates/dodge-batch",
     "crates/dodge-native-runner",
     "crates/dodge-viewer",
 ]

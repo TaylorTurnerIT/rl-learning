@@ -1,0 +1,329 @@
+use dodge_core::{FullState, PatternRect, PicoFixed};
+
+pub const BOARD_SIZE: usize = 16;
+pub const BOARD_WIDTH: usize = BOARD_SIZE;
+pub const BOARD_HEIGHT: usize = BOARD_SIZE;
+pub const BOARD_CHANNELS: usize = 19;
+pub const BOARD_VALUES: usize = BOARD_CHANNELS * BOARD_HEIGHT * BOARD_WIDTH;
+const CELL_VALUES: usize = BOARD_HEIGHT * BOARD_WIDTH;
+const VELOCITY_VALUES: usize = 6 * CELL_VALUES;
+const SCREEN_SIZE: f32 = 128.0;
+
+pub const PLAYER_PRESENCE: usize = 0;
+pub const PLAYER_VX: usize = 1;
+pub const PLAYER_VY: usize = 2;
+pub const PLAYER_WIDTH: usize = 3;
+pub const PLAYER_HEIGHT: usize = 4;
+pub const ENEMY_PRESENCE: usize = 5;
+pub const ENEMY_VX: usize = 6;
+pub const ENEMY_VY: usize = 7;
+pub const ENEMY_WIDTH: usize = 8;
+pub const ENEMY_HEIGHT: usize = 9;
+pub const ENEMY_STAGE: usize = 10;
+pub const AOE_PRESENCE: usize = 11;
+pub const AOE_VX: usize = 12;
+pub const AOE_VY: usize = 13;
+pub const AOE_WIDTH: usize = 14;
+pub const AOE_HEIGHT: usize = 15;
+pub const AOE_STAGE: usize = 16;
+pub const AOE_EXPLOSION: usize = 17;
+pub const AOE_PATTERN: usize = 18;
+
+/// Channel-major `(19, 16, 16)` semantic board, flattened in C order.
+///
+/// This is a compatibility observation for the existing CNN. The canonical
+/// native observation remains `FullState` plus indexed pixels. Normal enemy
+/// records use the same width rule as the Python bridge: personalities 0/1
+/// use their current size, while power-up personalities use an 8-pixel box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Board19x16 {
+    values: Vec<f32>,
+}
+
+impl Board19x16 {
+    pub fn from_full_state(state: &FullState) -> Self {
+        let mut board = vec![0.0; BOARD_VALUES];
+        let mut velocity_sums = vec![0.0; VELOCITY_VALUES];
+        let mut velocity_counts = vec![0_u32; VELOCITY_VALUES];
+        paint_entity(
+            &mut board,
+            &mut velocity_sums,
+            &mut velocity_counts,
+            state.player.x,
+            state.player.y,
+            state.player.size,
+            state.player.size,
+            state.player.vx,
+            state.player.vy,
+            None,
+            PLAYER_PRESENCE,
+            PLAYER_VX,
+            PLAYER_VY,
+            PLAYER_WIDTH,
+            PLAYER_HEIGHT,
+            None,
+            0,
+            None,
+        );
+        for enemy in &state.enemies {
+            if enemy.personality == -1 {
+                paint_entity(
+                    &mut board,
+                    &mut velocity_sums,
+                    &mut velocity_counts,
+                    enemy.x,
+                    enemy.y,
+                    enemy.size,
+                    enemy.size,
+                    enemy.vx,
+                    enemy.vy,
+                    Some(PicoFixed::ZERO),
+                    AOE_PRESENCE,
+                    AOE_VX,
+                    AOE_VY,
+                    AOE_WIDTH,
+                    AOE_HEIGHT,
+                    Some(AOE_STAGE),
+                    4,
+                    Some(AOE_EXPLOSION),
+                );
+            } else {
+                let size = if enemy.personality >= 2 {
+                    PicoFixed::from_int(8)
+                } else {
+                    enemy.size
+                };
+                paint_entity(
+                    &mut board,
+                    &mut velocity_sums,
+                    &mut velocity_counts,
+                    enemy.x,
+                    enemy.y,
+                    size,
+                    size,
+                    enemy.vx,
+                    enemy.vy,
+                    Some(PicoFixed::ZERO),
+                    ENEMY_PRESENCE,
+                    ENEMY_VX,
+                    ENEMY_VY,
+                    ENEMY_WIDTH,
+                    ENEMY_HEIGHT,
+                    Some(ENEMY_STAGE),
+                    2,
+                    None,
+                );
+            }
+        }
+        if let Some(pattern_index) = state.active_pattern
+            && let Some(pattern) = state.patterns.get(pattern_index)
+        {
+            for rect in &pattern.rects {
+                paint_pattern(&mut board, &mut velocity_sums, &mut velocity_counts, rect);
+            }
+        }
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, PLAYER_VX, 0);
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, PLAYER_VY, 1);
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, ENEMY_VX, 2);
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, ENEMY_VY, 3);
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, AOE_VX, 4);
+        write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, AOE_VY, 5);
+        Self { values: board }
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        &self.values
+    }
+
+    pub fn shape(&self) -> (usize, usize, usize) {
+        (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH)
+    }
+}
+
+fn paint_pattern(
+    board: &mut [f32],
+    velocity_sums: &mut [f32],
+    velocity_counts: &mut [u32],
+    rect: &PatternRect,
+) {
+    paint_entity(
+        board,
+        velocity_sums,
+        velocity_counts,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        rect.dx,
+        rect.dy,
+        Some(rect.sh),
+        AOE_PRESENCE,
+        AOE_VX,
+        AOE_VY,
+        AOE_WIDTH,
+        AOE_HEIGHT,
+        Some(AOE_STAGE),
+        4,
+        Some(AOE_PATTERN),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_entity(
+    board: &mut [f32],
+    velocity_sums: &mut [f32],
+    velocity_counts: &mut [u32],
+    x: PicoFixed,
+    y: PicoFixed,
+    width: PicoFixed,
+    height: PicoFixed,
+    vx: PicoFixed,
+    vy: PicoFixed,
+    stage: Option<PicoFixed>,
+    presence_channel: usize,
+    _vx_channel: usize,
+    _vy_channel: usize,
+    width_channel: usize,
+    height_channel: usize,
+    stage_channel: Option<usize>,
+    velocity_slot: usize,
+    kind_channel: Option<usize>,
+) {
+    let Some((top, bottom, left, right)) = cell_bounds(x, y, width, height) else {
+        return;
+    };
+    let normalized_width = width.to_f32() / SCREEN_SIZE;
+    let normalized_height = height.to_f32() / SCREEN_SIZE;
+    let normalized_vx = vx.to_f32() / SCREEN_SIZE;
+    let normalized_vy = vy.to_f32() / SCREEN_SIZE;
+    let normalized_stage = stage.map(|value| value.to_f32() / 2.0);
+    for row in top..=bottom {
+        for column in left..=right {
+            let cell = row * BOARD_WIDTH + column;
+            set_presence(board, presence_channel, cell);
+            update_max(board, width_channel, cell, normalized_width);
+            update_max(board, height_channel, cell, normalized_height);
+            add_velocity(
+                velocity_sums,
+                velocity_counts,
+                velocity_slot,
+                cell,
+                normalized_vx,
+                normalized_vy,
+            );
+            if let (Some(channel), Some(value)) = (stage_channel, normalized_stage) {
+                update_max(board, channel, cell, value);
+            }
+            if let Some(channel) = kind_channel {
+                set_presence(board, channel, cell);
+            }
+        }
+    }
+}
+
+fn cell_bounds(
+    x: PicoFixed,
+    y: PicoFixed,
+    width: PicoFixed,
+    height: PicoFixed,
+) -> Option<(usize, usize, usize, usize)> {
+    let scale = BOARD_SIZE as f32 / SCREEN_SIZE;
+    let left = ((x.to_f32() - width.to_f32() / 2.0) * scale).floor();
+    let right = ((x.to_f32() + width.to_f32() / 2.0) * scale).floor();
+    let top = ((y.to_f32() - height.to_f32() / 2.0) * scale).floor();
+    let bottom = ((y.to_f32() + height.to_f32() / 2.0) * scale).floor();
+    let left = left as i32;
+    let right = right as i32;
+    let top = top as i32;
+    let bottom = bottom as i32;
+    if right < 0 || left >= BOARD_SIZE as i32 || bottom < 0 || top >= BOARD_SIZE as i32 {
+        return None;
+    }
+    Some((
+        top.max(0) as usize,
+        bottom.min(BOARD_SIZE as i32 - 1) as usize,
+        left.max(0) as usize,
+        right.min(BOARD_SIZE as i32 - 1) as usize,
+    ))
+}
+
+fn set_presence(board: &mut [f32], channel: usize, cell: usize) {
+    let index = channel * CELL_VALUES + cell;
+    if let Some(value) = board.get_mut(index) {
+        *value = 1.0;
+    }
+}
+
+fn update_max(board: &mut [f32], channel: usize, cell: usize, value: f32) {
+    let index = channel * CELL_VALUES + cell;
+    if let Some(current) = board.get_mut(index) {
+        *current = current.max(value);
+    }
+}
+
+fn add_velocity(sums: &mut [f32], counts: &mut [u32], slot: usize, cell: usize, vx: f32, vy: f32) {
+    let x_index = slot * CELL_VALUES + cell;
+    let y_index = (slot + 1) * CELL_VALUES + cell;
+    if let Some(sum) = sums.get_mut(x_index) {
+        *sum += vx;
+    }
+    if let Some(sum) = sums.get_mut(y_index) {
+        *sum += vy;
+    }
+    if let Some(count) = counts.get_mut(x_index) {
+        *count = count.saturating_add(1);
+    }
+    if let Some(count) = counts.get_mut(y_index) {
+        *count = count.saturating_add(1);
+    }
+}
+
+fn write_velocity_channel(
+    board: &mut [f32],
+    sums: &[f32],
+    counts: &[u32],
+    channel: usize,
+    slot: usize,
+) {
+    for cell in 0..CELL_VALUES {
+        let sum_index = slot * CELL_VALUES + cell;
+        let Some(count) = counts.get(sum_index).copied() else {
+            continue;
+        };
+        if count == 0 {
+            continue;
+        }
+        let Some(sum) = sums.get(sum_index).copied() else {
+            continue;
+        };
+        let board_index = channel * CELL_VALUES + cell;
+        if let Some(value) = board.get_mut(board_index) {
+            *value = sum / count as f32;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_WIDTH, Board19x16};
+    use dodge_core::{NativeConfig, NativeGame};
+
+    #[test]
+    fn native_ready_state_matches_board_shape_and_finite_contract() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        let mut snapshot = game.reset();
+        for _ in 0..13 {
+            snapshot = game
+                .advance_frame(dodge_core::BUTTON_X_MASK)
+                .unwrap_or_else(|_| unreachable!("startup should succeed"))
+                .snapshot;
+        }
+        let board = Board19x16::from_full_state(snapshot.logical_state());
+        assert_eq!(board.shape(), (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH));
+        assert_eq!(
+            board.as_slice().len(),
+            BOARD_SIZE * BOARD_SIZE * BOARD_CHANNELS
+        );
+        assert!(board.as_slice().iter().all(|value| value.is_finite()));
+    }
+}

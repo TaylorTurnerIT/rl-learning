@@ -316,6 +316,9 @@ game lifecycle boundary.
 V159: source `sin`/`cos` converts fixed input to `f32`, evaluates the Pemsa C
 double-math path, narrows the result to `f32`, then converts to Q16.16; native
 code never substitutes `f32`-only trig evaluation.
+V160: native board rasterization scales world coordinates before applying the
+source floor boundary; serial and parallel batch outputs preserve lane order
+and the documented `(19,16,16)` channel-major layout.
 
 §T
 
@@ -525,3 +528,5 @@ B128|2026-09-02|native round used signed remainder and rounded negative subpixel
 B129|2026-09-02|native pattern scheduler only opened rectangles and never executed source targets or completion reset|V157
 B130|2026-09-02|pattern inventory regression test used one-based pattern IDs as zero-based vector indexes|V157
 B131|2026-09-02|native particle trig evaluated `f32` sin/cos while Pemsa uses `f32` input plus C double math before `f32` fixed conversion|V159
+B132|2026-09-02|initial native batch scaffold retained an invalid import, borrowed lane storage while formatting an error, and floored board coordinates before scaling|V160; batch focused build catches the defects; safe access and scale-before-floor implementation
+B133|2026-09-02|batch reset bookkeeping used direct vector indexing under the workspace no-panic lint profile|V160; replace writes with checked mutable access
