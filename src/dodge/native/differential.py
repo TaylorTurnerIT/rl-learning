@@ -78,8 +78,94 @@ class NativeParticle:
 
 
 @dataclass(frozen=True, slots=True)
+class NativePatternTarget:
+    kind: str
+    move: tuple[int, int, int, int] | None = None
+    wait: int | None = None
+    set_fyou: bool | None = None
+    spawns: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NativePatternRect:
+    x: int
+    y: int
+    width: int
+    height: int
+    speed: int
+    dx: int
+    dy: int
+    targets: tuple[NativePatternTarget, ...]
+    target_index: int
+    wait: int
+    shown: bool
+    sh: int
+    warnings: tuple[tuple[int, int, int, int], ...]
+    collision_done: bool
+    finished: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NativePattern:
+    id: int
+    mins: int
+    maxs: int
+    probability: int
+    variants: tuple[int, ...]
+    smooth: bool
+    pattern_type: int
+    bounce_cap: bool
+    spawn_enabled: bool
+    automatic_variant: int | None
+    special: int
+    counter: int
+    timer: int
+    rects: tuple[NativePatternRect, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRng:
+    seed: int
+    state: tuple[int, ...]
+    front: int
+    rear: int
+
+
+@dataclass(frozen=True, slots=True)
+class NativeSettings:
+    theme_index: int
+    theme_background: int
+    theme_shadow: int
+    difficulty: int
+    patterns_enabled: bool
+    powerups_enabled: bool
+    cursor: int
+    message_timer: int
+    message_sprite: int
+    message_x: int
+    message_y: int
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRenderState:
+    draw_color: int
+    fill_pattern: int
+    draw_palette: bytes
+    screen_palette: bytes
+    transparent: bytes
+    camera_x: int
+    camera_y: int
+    clip_x: int
+    clip_y: int
+    clip_width: int
+    clip_height: int
+    transition_y: int
+
+
+@dataclass(frozen=True, slots=True)
 class NativeSnapshot:
     source_sha256: str
+    core_schema_version: int
     seed: int
     frame: int
     mode: str
@@ -89,14 +175,49 @@ class NativeSnapshot:
     dead: bool
     input_mask: int
     previous_input_mask: int
+    input_source_mode: bool
+    rng: NativeRng
     player: tuple[int, int, int, int, int]
     enemies: tuple[NativeEnemy, ...]
     particles: tuple[NativeParticle, ...]
+    patterns: tuple[NativePattern, ...]
+    active_pattern: int | None
+    spawns: tuple[tuple[int, int], ...]
+    physical_screen: bytes
+    enemy_timer: int
+    enemy_est: int
+    enemy_stats: tuple[int, int, int, int, int]
+    friendly_timer: int
+    friendly_enabled: bool
+    enemy_max_size: int
+    speed: int
+    freeze_rate: int
+    freeze_active: bool
+    freeze_timer: int
+    size_timer: int
+    patterns_enabled: bool
+    powerups_enabled: bool
+    pattern_timer: int
+    pattern_delay_frames: int
+    pattern_active: bool
+    new_highscore: bool
+    can_click: bool
+    has_played: bool
+    should_collide: bool
+    enemy_should_collide: bool
+    bounce_cap_static: int
+    bounce_cap_moving: int
+    bounce_cap: int
     score: int
     survival_frames: int
     shake: int
     camera_x: int
     camera_y: int
+    transition_render_y: int
+    transition_from: str
+    settings: NativeSettings
+    highscores: tuple[int, ...]
+    render_state: NativeRenderState
     pixels: bytes
 
 
@@ -147,16 +268,17 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     dead = reader.boolean()
     input_mask = reader.u8()
     previous_input_mask = reader.u8()
-    reader.boolean()
+    input_source_mode = reader.boolean()
     if input_mask > 63 or previous_input_mask > 63:
         raise NativeDifferentialError("native snapshot input mask is invalid")
 
-    reader.u32()
-    reader.skip(31 * 4)
+    rng_seed = reader.u32()
+    rng_state = tuple(reader.u32() for _ in range(31))
     front = reader.u8()
     rear = reader.u8()
     if front >= 31 or rear >= 31:
         raise NativeDifferentialError("native snapshot RNG checkpoint is invalid")
+    rng = NativeRng(seed=rng_seed, state=rng_state, front=front, rear=rear)
 
     player = tuple(reader.i32() for _ in range(5))
     enemy_count = reader.u32()
@@ -170,56 +292,72 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     pattern_count = reader.u32()
     if pattern_count > 128:
         raise NativeDifferentialError("native snapshot pattern count is invalid")
-    for _ in range(pattern_count):
-        _skip_pattern(reader)
+    patterns = tuple(_read_pattern(reader) for _ in range(pattern_count))
+    active_pattern: int | None = None
     if reader.boolean():
         active_pattern_index = reader.u32()
         if active_pattern_index >= pattern_count:
             raise NativeDifferentialError("native active pattern index is invalid")
+        active_pattern = active_pattern_index
 
     spawn_count = reader.u32()
     if spawn_count > 256:
         raise NativeDifferentialError("native spawn count is invalid")
-    reader.skip(spawn_count * 2 * 4)
-    reader.i32()
-    reader.i32()
-    reader.skip(5 * 4)
-    reader.u32()
-    reader.boolean()
-    reader.i32()
-    reader.i32()
-    reader.i32()
-    reader.boolean()
-    reader.u32()
-    reader.i32()
-    reader.boolean()
-    reader.boolean()
-    reader.u32()
-    reader.u32()
-    reader.boolean()
-    reader.boolean()
-    reader.boolean()
-    reader.boolean()
-    reader.boolean()
-    reader.boolean()
-    reader.i32()
-    reader.i32()
-    reader.i32()
+    spawns = tuple((reader.i32(), reader.i32()) for _ in range(spawn_count))
+    enemy_timer = reader.i32()
+    enemy_est = reader.i32()
+    enemy_stats = tuple(reader.i32() for _ in range(5))
+    friendly_timer = reader.u32()
+    friendly_enabled = reader.boolean()
+    enemy_max_size = reader.i32()
+    speed = reader.i32()
+    freeze_rate = reader.i32()
+    freeze_active = reader.boolean()
+    freeze_timer = reader.u32()
+    size_timer = reader.i32()
+    patterns_enabled = reader.boolean()
+    powerups_enabled = reader.boolean()
+    pattern_timer = reader.u32()
+    pattern_delay_frames = reader.u32()
+    pattern_active = reader.boolean()
+    new_highscore = reader.boolean()
+    can_click = reader.boolean()
+    has_played = reader.boolean()
+    should_collide = reader.boolean()
+    enemy_should_collide = reader.boolean()
+    bounce_cap_static = reader.i32()
+    bounce_cap_moving = reader.i32()
+    bounce_cap = reader.i32()
     score = reader.i32()
     survival_frames = reader.u32()
     shake = reader.i32()
     camera_x = reader.i32()
     camera_y = reader.i32()
-    reader.i16()
-    reader.u8()
-    reader.skip(13)
-    reader.skip(12 * 4)
+    transition_render_y = reader.i16()
+    transition_from_tag = reader.u8()
+    if transition_from_tag not in NATIVE_MODES:
+        raise NativeDifferentialError("native transition source mode is invalid")
+    transition_from = NATIVE_MODES[transition_from_tag]
+    settings = NativeSettings(
+        theme_index=reader.u8(),
+        theme_background=reader.u8(),
+        theme_shadow=reader.u8(),
+        difficulty=reader.u8(),
+        patterns_enabled=reader.boolean(),
+        powerups_enabled=reader.boolean(),
+        cursor=reader.u8(),
+        message_timer=reader.u8(),
+        message_sprite=reader.u8(),
+        message_x=reader.i16(),
+        message_y=reader.i16(),
+    )
+    highscores = tuple(reader.i32() for _ in range(12))
     physical_screen = reader.take(FRAME_SIZE)
     if any(pixel >= 16 for pixel in physical_screen):
         raise NativeDifferentialError("native physical screen is not palette indexes")
 
     draw_color = reader.u8()
-    reader.u16()
+    fill_pattern = reader.u16()
     draw_palette = reader.take(16)
     screen_palette = reader.take(16)
     transparent = reader.take(16)
@@ -227,15 +365,29 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
         raise NativeDifferentialError("native snapshot palette is invalid")
     if any(value not in {0, 1} for value in transparent):
         raise NativeDifferentialError("native snapshot transparency is invalid")
-    reader.i32()
-    reader.i32()
-    reader.i16()
-    reader.i16()
+    render_camera_x = reader.i32()
+    render_camera_y = reader.i32()
+    clip_x = reader.i16()
+    clip_y = reader.i16()
     clip_width = reader.u16()
     clip_height = reader.u16()
     if clip_width > FRAME_WIDTH or clip_height > FRAME_HEIGHT:
         raise NativeDifferentialError("native snapshot clip is invalid")
-    reader.i16()
+    render_transition_y = reader.i16()
+    render_state = NativeRenderState(
+        draw_color=draw_color,
+        fill_pattern=fill_pattern,
+        draw_palette=draw_palette,
+        screen_palette=screen_palette,
+        transparent=transparent,
+        camera_x=render_camera_x,
+        camera_y=render_camera_y,
+        clip_x=clip_x,
+        clip_y=clip_y,
+        clip_width=clip_width,
+        clip_height=clip_height,
+        transition_y=render_transition_y,
+    )
 
     pixels = reader.take(FRAME_SIZE)
     if any(pixel >= 16 for pixel in pixels):
@@ -243,6 +395,7 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     reader.ensure_finished()
     return NativeSnapshot(
         source_sha256=source_sha256,
+        core_schema_version=core_schema,
         seed=seed,
         frame=frame,
         mode=NATIVE_MODES[mode_tag],
@@ -252,14 +405,49 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
         dead=dead,
         input_mask=input_mask,
         previous_input_mask=previous_input_mask,
+        input_source_mode=input_source_mode,
+        rng=rng,
         player=player,  # type: ignore[arg-type]
         enemies=enemies,
         particles=particles,
+        patterns=patterns,
+        active_pattern=active_pattern,
+        spawns=spawns,
+        physical_screen=physical_screen,
+        enemy_timer=enemy_timer,
+        enemy_est=enemy_est,
+        enemy_stats=enemy_stats,  # type: ignore[arg-type]
+        friendly_timer=friendly_timer,
+        friendly_enabled=friendly_enabled,
+        enemy_max_size=enemy_max_size,
+        speed=speed,
+        freeze_rate=freeze_rate,
+        freeze_active=freeze_active,
+        freeze_timer=freeze_timer,
+        size_timer=size_timer,
+        patterns_enabled=patterns_enabled,
+        powerups_enabled=powerups_enabled,
+        pattern_timer=pattern_timer,
+        pattern_delay_frames=pattern_delay_frames,
+        pattern_active=pattern_active,
+        new_highscore=new_highscore,
+        can_click=can_click,
+        has_played=has_played,
+        should_collide=should_collide,
+        enemy_should_collide=enemy_should_collide,
+        bounce_cap_static=bounce_cap_static,
+        bounce_cap_moving=bounce_cap_moving,
+        bounce_cap=bounce_cap,
         score=score,
         survival_frames=survival_frames,
         shake=shake,
         camera_x=camera_x,
         camera_y=camera_y,
+        transition_render_y=transition_render_y,
+        transition_from=transition_from,
+        settings=settings,
+        highscores=highscores,  # type: ignore[arg-type]
+        render_state=render_state,
         pixels=pixels,
     )
 
@@ -892,48 +1080,118 @@ def _read_particle(reader: _Reader) -> NativeParticle:
     )
 
 
-def _skip_pattern(reader: _Reader) -> None:
-    reader.skip(1 + 3 * 4)
+def _read_pattern(reader: _Reader) -> NativePattern:
+    pattern_id = reader.u8()
+    mins = reader.i32()
+    maxs = reader.i32()
+    probability = reader.i32()
     variant_count = reader.u32()
     if variant_count > 256:
         raise NativeDifferentialError("native pattern variant count is invalid")
-    reader.skip(variant_count)
-    reader.skip(1 + 1 + 1 + 1)
-    if reader.boolean():
-        reader.skip(1)
-    reader.skip(4 + 4 + 4)
+    variants = tuple(reader.u8() for _ in range(variant_count))
+    smooth = reader.boolean()
+    pattern_type = reader.u8()
+    bounce_cap = reader.boolean()
+    spawn_enabled = reader.boolean()
+    automatic_variant = reader.u8() if reader.boolean() else None
+    special = reader.i32()
+    counter = reader.u32()
+    timer = reader.i32()
     rect_count = reader.u32()
     if rect_count > 4096:
         raise NativeDifferentialError("native pattern rectangle count is invalid")
-    for _ in range(rect_count):
-        _skip_pattern_rect(reader)
+    rects = tuple(_read_pattern_rect(reader) for _ in range(rect_count))
+    return NativePattern(
+        id=pattern_id,
+        mins=mins,
+        maxs=maxs,
+        probability=probability,
+        variants=variants,
+        smooth=smooth,
+        pattern_type=pattern_type,
+        bounce_cap=bounce_cap,
+        spawn_enabled=spawn_enabled,
+        automatic_variant=automatic_variant,
+        special=special,
+        counter=counter,
+        timer=timer,
+        rects=rects,
+    )
 
 
-def _skip_pattern_rect(reader: _Reader) -> None:
-    reader.skip(7 * 4)
+def _read_pattern_rect(reader: _Reader) -> NativePatternRect:
+    x = reader.i32()
+    y = reader.i32()
+    width = reader.i32()
+    height = reader.i32()
+    speed = reader.i32()
+    dx = reader.i32()
+    dy = reader.i32()
     target_count = reader.u32()
     if target_count > 256:
         raise NativeDifferentialError("native pattern target count is invalid")
+    targets: list[NativePatternTarget] = []
     for _ in range(target_count):
         tag = reader.u8()
         if tag == 0:
-            reader.skip(4 * 4)
+            targets.append(
+                NativePatternTarget(
+                    kind="move",
+                    move=tuple(reader.i32() for _ in range(4)),  # type: ignore[arg-type]
+                )
+            )
         elif tag == 1:
-            reader.skip(4)
+            targets.append(NativePatternTarget(kind="wait", wait=reader.i32()))
         elif tag == 2:
-            reader.skip(1)
+            targets.append(
+                NativePatternTarget(kind="set_fyou", set_fyou=reader.boolean())
+            )
         elif tag == 3:
             point_count = reader.u32()
             if point_count > 256:
                 raise NativeDifferentialError("native pattern point count is invalid")
-            reader.skip(point_count * 2 * 4)
+            targets.append(
+                NativePatternTarget(
+                    kind="set_spawns",
+                    spawns=tuple(
+                        (reader.i32(), reader.i32()) for _ in range(point_count)
+                    ),
+                )
+            )
         else:
             raise NativeDifferentialError("native pattern target tag is invalid")
-    reader.skip(4 + 4 + 1 + 4)
+    target_index = reader.u32()
+    if target_index > target_count:
+        raise NativeDifferentialError("native pattern target index is invalid")
+    wait = reader.i32()
+    shown = reader.boolean()
+    sh = reader.i32()
     warning_count = reader.u32()
     if warning_count > 256:
         raise NativeDifferentialError("native pattern warning count is invalid")
-    reader.skip(warning_count * 4 * 4 + 2)
+    warnings = tuple(
+        tuple(reader.i32() for _ in range(4))  # type: ignore[arg-type]
+        for _ in range(warning_count)
+    )
+    collision_done = reader.boolean()
+    finished = reader.boolean()
+    return NativePatternRect(
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        speed=speed,
+        dx=dx,
+        dy=dy,
+        targets=tuple(targets),
+        target_index=target_index,
+        wait=wait,
+        shown=shown,
+        sh=sh,
+        warnings=warnings,
+        collision_done=collision_done,
+        finished=finished,
+    )
 
 
 def _fixed_float(raw: int) -> float:

@@ -4,15 +4,43 @@ import struct
 
 import pytest
 
+from dodge.control import CARTRIDGE_PATH
 from dodge.native.differential import (
     NativeDifferentialError,
     compare_native_to_oracle,
     decode_native_snapshot,
+    load_source_map,
 )
+from dodge.native.manifest import manifest_for_path
 
 SOURCE_HASH = bytes.fromhex(
     "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
 )
+
+
+def _minimal_pattern_bytes() -> bytes:
+    output = bytearray()
+    output.extend(struct.pack("<Biii", 7, 0, 0, 72_090))
+    output.extend(struct.pack("<I", 2))
+    output.extend(bytes((1, 3)))
+    output.extend(bytes((1, 2, 1, 0)))
+    output.extend(bytes((1, 9)))
+    output.extend(struct.pack("<iIiI", 72_090, 4, 12_288, 1))
+    output.extend(
+        struct.pack("<7i", 1 << 16, 2 << 16, 8 << 16, 4 << 16, 1 << 16, 0, 1 << 16)
+    )
+    output.extend(struct.pack("<I", 4))
+    output.extend(bytes((0,)))
+    output.extend(struct.pack("<4i", 3 << 16, 4 << 16, 5 << 16, 6 << 16))
+    output.extend(bytes((1,)))
+    output.extend(struct.pack("<i", 7 << 16))
+    output.extend(bytes((2, 1)))
+    output.extend(bytes((3,)))
+    output.extend(struct.pack("<Iii", 1, 10 << 16, 11 << 16))
+    output.extend(struct.pack("<IiBiI", 4, 8 << 16, 1, 9 << 16, 1))
+    output.extend(struct.pack("<4i", 12 << 16, 13 << 16, 14 << 16, 15 << 16))
+    output.extend(bytes((1, 0)))
+    return bytes(output)
 
 
 def _snapshot_hex(
@@ -20,6 +48,7 @@ def _snapshot_hex(
     frame: int = 1,
     player_x: float = 64.0,
     pixels: bytes = bytes(128 * 128),
+    with_pattern: bool = False,
 ) -> str:
     output = bytearray(b"DGSN")
     output.extend(struct.pack("<II", 7, 1))
@@ -36,8 +65,12 @@ def _snapshot_hex(
     )
     output.extend(struct.pack("<I", 0))
     output.extend(struct.pack("<I", 0))
-    output.extend(struct.pack("<I", 0))
-    output.extend(struct.pack("<B", 0))
+    output.extend(struct.pack("<I", 1 if with_pattern else 0))
+    if with_pattern:
+        output.extend(_minimal_pattern_bytes())
+    output.extend(struct.pack("<B", 1 if with_pattern else 0))
+    if with_pattern:
+        output.extend(struct.pack("<I", 0))
     output.extend(struct.pack("<I", 0))
     output.extend(
         struct.pack(
@@ -146,12 +179,146 @@ def _source_map() -> dict[str, object]:
 def test_native_snapshot_decoder_exposes_full_fixed_state_and_pixels() -> None:
     snapshot = decode_native_snapshot(_snapshot_hex())
 
+    assert snapshot.source_sha256 == SOURCE_HASH.hex()
+    assert snapshot.core_schema_version == 1
+    assert snapshot.seed == 42
     assert snapshot.frame == 1
     assert snapshot.mode == "transition_to_game"
+    assert snapshot.transition_y == -108
+    assert snapshot.started is True
+    assert snapshot.game_ready is False
+    assert snapshot.dead is False
     assert snapshot.input_mask == 32
     assert snapshot.previous_input_mask == 32
+    assert snapshot.input_source_mode is True
+    assert snapshot.rng == snapshot.rng.__class__(42, (0,) * 31, 3, 0)
     assert snapshot.player == (4_194_304, 4_194_304, 0, 0, 262_144)
+    assert snapshot.enemies == ()
+    assert snapshot.particles == ()
+    assert snapshot.patterns == ()
+    assert snapshot.active_pattern is None
+    assert snapshot.spawns == ()
+    assert snapshot.physical_screen == bytes(128 * 128)
+    assert snapshot.enemy_timer == 0
+    assert snapshot.enemy_est == 0
+    assert snapshot.enemy_stats == (0,) * 5
+    assert snapshot.friendly_timer == 0
+    assert snapshot.friendly_enabled is False
+    assert snapshot.enemy_max_size == 0
+    assert snapshot.speed == 0
+    assert snapshot.freeze_rate == 0
+    assert snapshot.freeze_active is False
+    assert snapshot.freeze_timer == 0
+    assert snapshot.size_timer == 0
+    assert snapshot.patterns_enabled is False
+    assert snapshot.powerups_enabled is False
+    assert snapshot.pattern_timer == 0
+    assert snapshot.pattern_delay_frames == 0
+    assert snapshot.pattern_active is False
+    assert snapshot.new_highscore is False
+    assert snapshot.can_click is False
+    assert snapshot.has_played is False
+    assert snapshot.should_collide is False
+    assert snapshot.enemy_should_collide is False
+    assert snapshot.bounce_cap_static == 0
+    assert snapshot.bounce_cap_moving == 0
+    assert snapshot.bounce_cap == 0
+    assert snapshot.score == 0
+    assert snapshot.survival_frames == 0
+    assert snapshot.shake == 0
+    assert snapshot.camera_x == 0
+    assert snapshot.camera_y == 0
+    assert snapshot.transition_render_y == -108
+    assert snapshot.transition_from == "menu"
+    assert snapshot.settings.theme_index == 1
+    assert snapshot.settings.theme_background == 12
+    assert snapshot.settings.theme_shadow == 1
+    assert snapshot.settings.difficulty == 2
+    assert snapshot.settings.patterns_enabled is True
+    assert snapshot.settings.powerups_enabled is True
+    assert snapshot.settings.cursor == 1
+    assert snapshot.settings.message_timer == 0
+    assert snapshot.settings.message_sprite == 0
+    assert snapshot.settings.message_x == 0
+    assert snapshot.settings.message_y == 0
+    assert snapshot.highscores == (0,) * 12
+    assert snapshot.render_state.draw_color == 6
+    assert snapshot.render_state.fill_pattern == 0
+    assert snapshot.render_state.draw_palette == bytes(range(16))
+    assert snapshot.render_state.screen_palette == bytes(range(16))
+    assert snapshot.render_state.transparent == bytes((1, *([0] * 15)))
+    assert snapshot.render_state.camera_x == 0
+    assert snapshot.render_state.camera_y == 0
+    assert snapshot.render_state.clip_x == 0
+    assert snapshot.render_state.clip_y == 0
+    assert snapshot.render_state.clip_width == 128
+    assert snapshot.render_state.clip_height == 128
+    assert snapshot.render_state.transition_y == -108
     assert len(snapshot.pixels) == 128 * 128
+
+
+def test_native_snapshot_decoder_exposes_pattern_targets_and_warnings() -> None:
+    snapshot = decode_native_snapshot(_snapshot_hex(with_pattern=True))
+
+    assert snapshot.active_pattern == 0
+    assert len(snapshot.patterns) == 1
+    pattern = snapshot.patterns[0]
+    assert pattern.id == 7
+    assert pattern.variants == (1, 3)
+    assert pattern.smooth is True
+    assert pattern.pattern_type == 2
+    assert pattern.bounce_cap is True
+    assert pattern.spawn_enabled is False
+    assert pattern.automatic_variant == 9
+    assert pattern.special == 72_090
+    assert pattern.counter == 4
+    assert pattern.timer == 12_288
+    assert len(pattern.rects) == 1
+    rect = pattern.rects[0]
+    assert rect.x == 1 << 16
+    assert rect.target_index == 4
+    assert rect.wait == 8 << 16
+    assert rect.shown is True
+    assert rect.sh == 9 << 16
+    assert rect.collision_done is True
+    assert rect.finished is False
+    assert [target.kind for target in rect.targets] == [
+        "move",
+        "wait",
+        "set_fyou",
+        "set_spawns",
+    ]
+    assert rect.targets[0].move == (3 << 16, 4 << 16, 5 << 16, 6 << 16)
+    assert rect.targets[1].wait == 7 << 16
+    assert rect.targets[2].set_fyou is True
+    assert rect.targets[3].spawns == ((10 << 16, 11 << 16),)
+    assert rect.warnings == ((12 << 16, 13 << 16, 14 << 16, 15 << 16),)
+
+
+def test_source_map_covers_every_cartridge_function() -> None:
+    source_map = load_source_map()
+    manifest = manifest_for_path(CARTRIDGE_PATH)
+    functions = source_map.get("functions")
+    assert isinstance(functions, list)
+    entries = {
+        function["pico8_name"]: function
+        for function in functions
+        if isinstance(function, dict) and isinstance(function.get("pico8_name"), str)
+    }
+    assert set(entries) == {function.name for function in manifest.functions}
+    assert source_map.get("unresolved", []) == []
+    if "source_sha256" in source_map:
+        assert source_map["source_sha256"] == manifest.sha256
+    for function in manifest.functions:
+        entry = entries[function.name]
+        source = entry.get("source")
+        assert isinstance(source, dict)
+        span = source.get("span")
+        assert isinstance(span, list)
+        assert len(span) == 2
+        assert all(isinstance(line, int) for line in span)
+        assert isinstance(entry.get("rust_target"), str)
+        assert entry["rust_target"]
 
 
 def test_field_mismatch_reports_first_path_and_source_span() -> None:

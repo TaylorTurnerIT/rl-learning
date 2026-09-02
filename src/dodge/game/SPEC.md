@@ -382,7 +382,7 @@ P4-T2|x|port player movement, collision, death, progression, freeze, sizing, and
 P4-T3|x|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154
 P4-T4|x|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123,V157
 P4-T5|x|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126,V158
-P4-T6|.|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
+P4-T6|x|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
 P4-T7|.|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129
 P4-T8|.|run held-out randomized traces and legacy regression suite|V120,V127,V130
 P4-T9|.|produce P4 acceptance report and stable core handoff to P5/P6|V119-V130
