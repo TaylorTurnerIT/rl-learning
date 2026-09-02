@@ -77,6 +77,9 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 | R2 | Serialization/config | Namtao suggests Serde for serialization; use it for config/traces, never for per-decision hot-path transport | https://www.namtao.com/rust/ |
 | R3 | Benchmarks/tests | Namtao suggests Criterion and cargo-nextest; use workload-defined benchmarks plus focused tests | https://www.namtao.com/rust/ |
 | R4 | Macroquad boundary | Macroquad's rendering features belong to a separate viewer process/crate; its API is not a training environment contract | https://docs.rs/macroquad/latest/macroquad/ |
+| R5 | PyO3 binding | PyO3 0.29.2 supports a stable extension-module boundary and an ABI3 floor suitable for the project's Python `>=3.11` contract; the binding remains outside `dodge-core` | https://pyo3.rs/main/building-and-distribution |
+| R6 | NumPy ownership | NumPy 0.29.0 provides PyO3-backed arrays and accepts owned `ndarray` buffers; the first binding copies native results into Python-owned arrays and therefore makes no zero-copy claim | https://docs.rs/numpy/0.29.0/numpy/ |
+| R7 | Build workflow | Maturin 1.14.1 is available from the current Nixpkgs environment and will build/install the `dodge-python` `cdylib` into the project uv environment | https://www.maturin.rs/ |
 
 ### §V INVARIANTS
 
@@ -111,7 +114,7 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 
 | id | status | task | cites |
 |----|--------|------|-------|
-| P6-T1 | . | Select and research Python binding boundary; record PyO3/NumPy/maturin decision before coding | R1-R4 |
+| P6-T1 | x | Select and research Python binding boundary; record PyO3/NumPy/maturin decision before coding | R1-R7 |
 | P6-T2 | . | Add native batch crate/API over accepted P4 core with serial lane mode | V1,V3 |
 | P6-T3 | . | Add typed full-state, pixel, and derived-board buffer views with shape/dtype tests | V5,V9 |
 | P6-T4 | . | Add Python binding and native DodgeEnv compatibility adapter | V4,V6,V8 |
