@@ -86,7 +86,16 @@ impl NativeGame {
     }
 
     pub fn advance_frame(&mut self, input_mask: u8) -> Result<FrameResult, CoreError> {
+        self.advance_frame_with_post_mask(input_mask, input_mask)
+    }
+
+    pub fn advance_frame_with_post_mask(
+        &mut self,
+        input_mask: u8,
+        post_frame_mask: u8,
+    ) -> Result<FrameResult, CoreError> {
         InputState::validate_mask(input_mask)?;
+        InputState::validate_mask(post_frame_mask)?;
         self.input.advance(input_mask)?;
         let mode_before = self.lifecycle.mode;
         let start_pressed = mode_before == Mode::Menu && self.input.btnp(Button::X);
@@ -115,7 +124,7 @@ impl NativeGame {
         } else {
             PicoFixed::ZERO
         };
-        self.input.finalize_frame();
+        self.input.finalize_frame(post_frame_mask);
         Ok(self.result(reward))
     }
 

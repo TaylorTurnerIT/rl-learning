@@ -74,8 +74,9 @@ impl InputState {
         Ok(())
     }
 
-    pub(crate) fn finalize_frame(&mut self) {
-        self.previous_mask = self.current_mask;
+    pub(crate) fn finalize_frame(&mut self, post_frame_mask: u8) {
+        self.current_mask = post_frame_mask;
+        self.previous_mask = post_frame_mask;
     }
 
     pub const fn btn(self, button: Button) -> bool {
@@ -103,7 +104,7 @@ mod tests {
         assert!(input.advance(Button::X.mask()).is_ok());
         assert!(input.btnp(Button::X));
 
-        input.finalize_frame();
+        input.finalize_frame(Button::X.mask());
 
         assert_eq!(input.current_mask(), Button::X.mask());
         assert_eq!(input.previous_mask(), Button::X.mask());

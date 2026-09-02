@@ -18,3 +18,13 @@ cargo run -p dodge-native-runner -- \
 
 The runner emits one record per frame, including the canonical snapshot in
 hexadecimal, typed-state hash, indexed-pixel hash, reward, and terminal flag.
+
+Compare that stream with a canonical full-draw trace and receive the first
+field or pixel mismatch with its cartridge source span:
+
+```text
+dodge-native-diff \
+  --native native-trace.json \
+  --oracle ../src/dodge/runtime/.native-p3-oracle/seed-42-movement.json \
+  --no-pixels
+```

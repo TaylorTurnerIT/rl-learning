@@ -209,6 +209,7 @@ V102: menu start `btnp` → transition advances on same frame; default game-read
 V103: collision/death sets the terminal flag while preserving the update-game mode; terminal reward/survival accounting stops on that frame.
 V104: the native transition render cursor includes the same-frame transition tick; the source draw-side game update begins on the accepted frame-seven boundary and yields the seed-42 friendly spawn at frame 57.
 V105: post-update frame metadata exposes current and previous masks at the same completed-frame boundary as the oracle; held input therefore records equal masks while `btnp` still sees the pre-frame edge during simulation.
+V106: a command boundary may apply one simulation mask and publish a different cleared post-frame mask; the ordinary `advance_frame(mask)` path remains same-mask.
 
 §T
 
@@ -271,7 +272,7 @@ T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C
 T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104
 T57|x|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
 T58|x|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
-T59|.|add field/pixel differential comparison + source-map diagnostics|V100,I.file
+T59|x|add field/pixel differential comparison + source-map diagnostics|V100,I.file
 T60|.|run defined slice corpus every frame + resolve parity mismatches|V94-V100
 T61|.|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,I.file
 
@@ -342,3 +343,9 @@ B61|2026-09-02|snapshot module imported its own FullState type|mechanical import
 B62|2026-09-02|snapshot validation and truncation test used unchecked indexing syntax|V8
 B63|2026-09-02|runner duration conversion manually reimplemented integer ceiling division|mechanical Clippy fix
 B64|2026-09-02|native snapshots exposed pre-finalization input history unlike the post-draw oracle boundary|V105
+B65|2026-09-02|differential diagnostics initially violated Ruff import and line-width rules|mechanical format
+B66|2026-09-02|differential fixture construction exceeded the configured line width|mechanical format
+B67|2026-09-02|differential fixture timer packing shifted the canonical render payload|V98
+B68|2026-09-02|runner command-boundary frame needed simulation input before post-draw mask clearing|V106
+B69|2026-09-02|P3 logical differential reached the source RNG-selected normal-enemy size at frame 130|T60
+B70|2026-09-02|P3 pixel differential reached the unported menu sprite at frame 1|T60,P4

@@ -35,6 +35,7 @@ dodge-native-oracle = "dodge.native.oracle:main"
 dodge-native-probe = "dodge.native.probe:main"
 dodge-native-extract-assets = "dodge.native.assets:main"
 dodge-native-p2-report = "dodge.native.p2:main"
+dodge-native-diff = "dodge.native.differential:main"
 
 [build-system]
 requires = ["hatchling"]
