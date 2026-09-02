@@ -69,11 +69,12 @@ impl PicoFixed {
     }
 
     pub fn round(self) -> Self {
-        let remainder = self.rem_fixed(Self::ONE);
+        let floor = self.floor();
+        let remainder = self.sub(floor);
         if remainder < Self::from_f32(0.5) {
-            self.floor()
+            floor
         } else {
-            self.ceil()
+            floor.add(Self::ONE)
         }
     }
 
@@ -153,6 +154,8 @@ mod tests {
             pico_mod(PicoFixed::from_int(7), PicoFixed::from_int(4)),
             Ok(PicoFixed::from_int(3))
         );
+        assert_eq!(PicoFixed::from_f32(-1.2).round(), PicoFixed::from_int(-1));
+        assert_eq!(PicoFixed::from_f32(-1.7).round(), PicoFixed::from_int(-2));
     }
 
     #[test]
