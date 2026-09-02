@@ -222,6 +222,66 @@ V115: power-up collision uses the source four-pixel expanded bounds; personality
 V116: the native pattern scheduler reaches the source first-pattern boundary after 420 game updates and consumes its one selection RNG draw before later frame-side effects.
 V117: canonical differential frames include per-frame reward and ordered events; missing or mismatched values fail before state/pixel comparison.
 V118: P3 report separates accepted logical-slice parity from deferred visual/full-state parity; no P3 artifact claims complete-game equivalence.
+V119: every behavior-affecting source-manifest field has one typed native field or reviewed derived representation; no opaque remainder.
+V120: same seed, persistent initialization, settings, action schedule, and frame boundary → identical full canonical trace through terminal state.
+V121: native frame systems execute source-observed order; no hidden RNG, input, timer, list, or draw-side mutation.
+V122: restore(snapshot) + same next input → identical next state, pixels, reward, events, done, and hashes.
+V123: every active enemy, particle, pattern, rectangle, warning, timer, flag, setting, and side effect appears in FullState or proves derived.
+V124: native indexed framebuffer equals canonical oracle pixels at every accepted frame; RGB/GPU output never proves parity.
+V125: full-draw and renderless paths preserve classified draw-side effects and RNG accounting; render cannot silently alter simulation.
+V126: camera, palette, fill pattern, clipping, sprite transparency, built-in text, primitive order, and indexed raster match PICO-8.
+V127: input, stat, mouse mode, persistent reads, and external state remain replay-controlled; host state cannot alter canonical trace.
+V128: reward, death, survival frames, score, transition boundaries, terminal events, and legacy Python contracts remain equal.
+V129: any full-port mismatch blocks acceptance and records first frame, field/pixel, source span, expected/actual, and RNG delta.
+V130: existing Python control, headless, NEAT, PPO, native-oracle, and extraction regression suites remain green.
+V131: canonical indexed pixels use the same camera-relative coordinate space as
+the source `pget` capture; camera movement affects the retained clear edge while
+world primitives remain at their queried coordinates.
+V132: indexed primitive colors include palette index zero; sprite transparency
+applies only to sprite source pixels and never suppresses `pset`, line, rect, or
+text writes.
+V133: draw-side particle additions occur only when the source dispatch actually
+renders `drawgame`; menu/settings transition frames expose no game trail.
+V134: if the source renderer performs a duplicate draw after a canonical capture
+callback, its side effects affect only the next frame and never the captured
+frame's state or pixels.
+V135: camera edge retention is determined by PICO's quantized integer camera
+offset, so subpixel values use the same rounding boundary as the source and
+can expose a retained clear edge.
+V136: draw-side trails use the same floored enemy coordinates as the source
+ draw loop before applying their random trigonometric offsets.
+V137: pattern line endpoints preserve source fractional interpolation until the
+ PICO line primitive's coordinate conversion; they are not rounded by the
+ pattern caller.
+V138: active pattern shape and timer updates occur after enemy updates and use
+ the current source freeze-rate multiplier before the next draw.
+V139: dead frames skip active-game primitives and render the source game-over
+prompts, icons, logo, and centered score with the current input mode.
+V140: each kamikaze enemy updates its proximity speed exactly once per source
+enemy-update frame before movement; the post-movement position never performs a
+second speed adjustment.
+V141: opening `TransitionToGame` frames render source game-draw state beneath
+exposed transition rows; overlay cursor and fill remain source-aligned.
+V142: target-2 transitions render source `from` state while cursor >0 and target
+settings state while cursor ≤0; game draw-side effects follow exposed layer.
+V143: when target-2 exposes a game `from` state, the source invokes `updategame`
+once from `drawtransition` after the outer update; the initiating frame therefore
+executes both source updategame calls before its captured draw.
+V144: the first menu X edge latches `hasplayed=true` before any later settings
+frame; settings then locks gameplay rows and routes X back to game.
+V145: transition mode completion follows the source draw cursor after its
+same-frame ±10 tick: target 1/0 becomes active at cursor ≥128 and target 2 at
+cursor ≤−128, even when the lifecycle bookkeeping counter has a different
+intermediate value.
+V146: the post-capture duplicate-draw trail compensation applies to the initial
+menu-to-game transition only; settings-to-game completion contributes one
+draw-side trail and no extra next-frame particle.
+V147: terminal rendering preserves the camera-directed physical-screen edge
+through the normal clear/project path; it does not force one physical row to a
+constant color.
+V148: a normal collision followed by `die` applies the source shake increment
+twice, once in `collide` and once in `die`, before the next `_update60` camera
+sample.
 
 §T
 
@@ -287,6 +347,15 @@ T58|x|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99
 T59|x|add field/pixel differential comparison + source-map diagnostics|V100,I.file
 T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches; classify visual boundary for P4|V94-V100,V117,V118
 T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
+P4-T1|x|port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries|V119,V120,V128,V143-V145
+P4-T2|.|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128
+P4-T3|.|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125
+P4-T4|.|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123
+P4-T5|.|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126
+P4-T6|.|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
+P4-T7|.|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129
+P4-T8|.|run held-out randomized traces and legacy regression suite|V120,V127,V130
+P4-T9|.|produce P4 acceptance report and stable core handoff to P5/P6|V119-V130
 
 §B
 
@@ -373,3 +442,43 @@ B79|2026-09-02|full-draw corpus reached source power-up trail RNG side effects|V
 B80|2026-09-02|seed-42 corpus reached the source personality-4 collision branch|V115
 B81|2026-09-02|seed-42 corpus reached source first-pattern selection RNG before a later spawn|V116
 B82|2026-09-02|differential comparison omitted canonical per-frame reward and ordered side-effect events|V117
+B83|2026-09-02|snapshot module imported the FullState type it defines while extending the canonical state wire|V123
+B84|2026-09-02|Python native snapshot decoder retained the pre-particle wire offsets|V123
+B85|2026-09-02|native raster stored physical camera-shifted coordinates while the oracle captures camera-relative `pget` coordinates|V131
+B86|2026-09-02|native raster reused sprite transparency when drawing a color-zero shatter particle|V132
+B87|2026-09-02|particle oracle capture introduced import-order and line-width violations|mechanical format
+B88|2026-09-02|native added the player trail on every transition instead of only game-rendered transition frames|V133
+B89|2026-09-02|Pemsa emitted a duplicate transition draw after the canonical frame callback and advanced the next frame's particle list|V134
+B90|2026-09-02|native clear classified a negative subpixel camera as an exposed edge although PICO truncates the camera offset|V135
+B91|2026-09-02|persistent-screen renderer reborrowed a mutable framebuffer reference after changing its signature|mechanical borrow fix
+B92|2026-09-02|v4 differential fixture supplied one fewer timer/state value than its packed wire format requires|fixture field-count fix
+B93|2026-09-02|power-up trail side effects used the enemy's fixed-point position instead of the draw loop's floored coordinates|V136
+B94|2026-09-02|game-side trail fix referenced a renderer-private coordinate helper|mechanical module boundary fix
+B95|2026-09-02|pattern renderer introduced a missing fixed-to-pixel rounding helper|mechanical module boundary fix
+B96|2026-09-02|pattern line interpolation rounded a fractional endpoint before the source line primitive converted it|V137
+B97|2026-09-02|pattern selection was represented without advancing active rectangle opening state|V138
+B98|2026-09-02|pattern opening fill applied the dotted mask using the destination row instead of the source fillp anchor row|V126
+B99|2026-09-02|pattern opening used filled rectangles although the cartridge uses patterned outline rectangles|V126
+B100|2026-09-02|pattern closing geometry used the clamped one-pixel progress instead of the source raw stage minus one|V137
+B101|2026-09-02|terminal frames omitted the source drawgame game-over branch|V139
+B102|2026-09-02|adding the terminal high-score flag left the Python fixture on the old packed field shape|V123
+B103|2026-09-02|terminal draw selection used the physical mask instead of the cartridge keyboard-or-mouse input mode|V127,V139
+B104|2026-09-02|terminal camera projection exposed the source-cleared physical bottom row as background|V124,V126
+B105|2026-09-02|expanding EnemyState and NativeConfig left constructors and difficulty helpers incomplete|V119
+B106|2026-09-02|enemy collision helper returned an unused removal value in a unit match|mechanical Rust type fix
+B107|2026-09-02|native kamikaze speed was adjusted again after movement, shortening the source trajectory|V140
+B108|2026-09-02|settings expansion used a non-const clamp and passed i16 coordinates into an i32 raster API|mechanical Rust type fix
+B109|2026-09-02|adding settings lifecycle modes left the runner's exhaustive mode-name match stale|mechanical Rust match fix
+B110|2026-09-02|strict no-panic Clippy exposed unchecked fixed-array and framebuffer indexing in the expanded renderer|V110
+B111|2026-09-02|strict Clippy caught the active-pattern delay constant before the scheduler consumed it|mechanical Rust warning fix
+B112|2026-09-02|adding typed settings and transition provenance changed the native snapshot payload without advancing its wire version|V123
+B113|2026-09-02|expanded transition renderer selected menu beneath exposed opening game-transition rows|V141
+B114|2026-09-02|settings button extension overconstrained legacy example-movement coverage|mechanical test fix
+B115|2026-09-02|settings-opening update retained game draw-side trails although source dispatched drawsettings|V133
+B116|2026-09-02|target-2 transition was treated as settings for positive cursor values although source retains `from` draw state|V142
+B117|2026-09-02|target-2 game-side transition replay matched the exposed draw state but omitted drawtransition's second updategame call|V143
+B118|2026-09-02|native menu start advanced the lifecycle but did not latch the cartridge hasplayed flag|V144
+B119|2026-09-02|settings-to-game replay kept transition_to_game for one frame after the source draw cursor had reached its completion boundary|V145
+B120|2026-09-02|generic transition-boundary trail compensation added a second settings-to-game trail that the source does not retain|V146
+B121|2026-09-02|terminal rendering forced the physical bottom row to zero and broke a source trace whose quantized camera offset retained background there|V147
+B122|2026-09-02|native die omitted the source's second shake increment, changing terminal camera quantization and the retained edge|V148

@@ -7,6 +7,7 @@ mod fixed;
 mod game;
 mod input;
 mod lifecycle;
+mod patterns;
 mod rng;
 mod snapshot;
 mod state;
@@ -18,12 +19,13 @@ pub use fixed::{PicoFixed, pico_ceil, pico_floor, pico_mid, pico_mod};
 pub use game::{FrameEvent, FrameResult, NativeGame};
 pub use input::{BUTTON_MASK_LIMIT, Button, InputState};
 pub use lifecycle::{LifecycleState, Mode};
+pub use patterns::{PatternRect, PatternState, PatternTarget, SpawnPoint, WarningLine};
 pub use rng::{PicoRng, RngCheckpoint};
 pub use snapshot::{
     CARTRIDGE_SOURCE_SHA256, FRAMEBUFFER_HEIGHT, FRAMEBUFFER_SIZE, FRAMEBUFFER_WIDTH, FullState,
     IndexedFramebuffer, RenderState, Snapshot, SnapshotProvenance,
 };
-pub use state::{EnemyState, PlayerState};
+pub use state::{EnemyState, ParticleState, PlayerState, SettingsState};
 
 /// Workspace-level version of native state contract.
 pub const CORE_SCHEMA_VERSION: u32 = 1;

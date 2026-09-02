@@ -36,6 +36,7 @@ def test_duration_to_frames_rounds_up() -> None:
 def test_command_masks_match_pico8_buttons() -> None:
     assert COMMAND_MASKS == {
         "x": 32,
+        "o": 16,
         "neutral": 0,
         "left": 1,
         "right": 2,

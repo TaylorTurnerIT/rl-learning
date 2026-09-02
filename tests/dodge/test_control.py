@@ -76,6 +76,7 @@ class FakeKeyboard:
 def test_all_direction_mappings() -> None:
     assert DIRECTION_KEYS == {
         "x": ("x",),
+        "o": ("o",),
         "neutral": (),
         "left": ("Left",),
         "right": ("Right",),
@@ -388,4 +389,12 @@ def test_example_movement_file_is_valid() -> None:
 
     assert commands[0].move == "x"
     moves = {command.move for command in commands}
-    assert {"x", "left", "right", "up_left", "up_right", "down", "neutral"} <= moves
+    assert {
+        "x",
+        "left",
+        "right",
+        "up_left",
+        "up_right",
+        "down",
+        "neutral",
+    } <= moves

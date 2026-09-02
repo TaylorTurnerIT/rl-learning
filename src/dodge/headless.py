@@ -25,9 +25,11 @@ RESULT_PREFIX = "__dodge_result__"
 STATE_PREFIX = "__dodge_state__"
 PIXEL_PREFIX = "__dodge_pixel__"
 FRAME_PREFIX = "__dodge_frame__"
+PARTICLE_PREFIX = "__dodge_particle__"
 
 COMMAND_MASKS: dict[str, int] = {
     "x": 32,
+    "o": 16,
     "neutral": 0,
     "left": 1,
     "right": 2,
@@ -137,7 +139,9 @@ function __dodge_emit_frame()
  printh("{FRAME_PREFIX}"..tostr(__dodge_frames).."|"..
   tostr(__dodge_mask).."|"..tostr(__dodge_previous_mask).."|"..
   tostr(mode).."|"..tostr(isdead and 1 or 0).."|"..
-  tostr(__dodge_reward).."|"..events)
+  tostr(__dodge_reward).."|"..events.."|"..
+  tostr(mode==4 and target or -1))
+ if isdead then printh("__dodge_time__"..tostr(time()).."|"..tostr(__dodge_frames)) end
 end
 
 function __dodge_emit_pixels()
@@ -220,6 +224,18 @@ function __dodge_emit_state()
   tostr(dpy)..","..tostr(size)
  printh("{STATE_PREFIX}"..tostr(__dodge_frames).."|"..player.."|"..
   __dodge_join(enemy_state).."|"..__dodge_join(aoe_state))
+ __dodge_emit_particles()
+end
+
+function __dodge_emit_particles()
+ for particle in all(part) do
+  printh("{PARTICLE_PREFIX}"..tostr(__dodge_frames).."|"..
+   tostr(particle.x)..","..tostr(particle.y)..","..
+   tostr(particle.dx)..","..tostr(particle.dy)..","..
+   tostr(particle.r)..","..tostr(particle.tpe)..","..
+   tostr(particle.mage)..","..tostr(particle.age)..","..
+   tostr(particle.col).."|"..__dodge_join(particle.colarr))
+ end
 end
 
 '''

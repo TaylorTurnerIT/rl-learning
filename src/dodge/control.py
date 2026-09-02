@@ -24,6 +24,7 @@ class ControlRuntimeError(RuntimeError):
 
 DIRECTION_KEYS: dict[str, tuple[str, ...]] = {
     "x": ("x",),
+    "o": ("o",),
     "neutral": (),
     "left": ("Left",),
     "right": ("Right",),

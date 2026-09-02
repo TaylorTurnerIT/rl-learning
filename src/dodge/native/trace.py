@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from dodge.control import ControlRuntimeError, MovementCommand
 from dodge.headless import (
     FRAME_PREFIX,
+    PARTICLE_PREFIX,
     PIXEL_PREFIX,
     RESULT_PREFIX,
     STATE_PREFIX,
     _parse_result,
 )
 from dodge.native.manifest import canonical_json
-from dodge.neat.state import RawState, parse_raw_state
+from dodge.neat.state import (
+    ParticleState,
+    RawState,
+    parse_particle_line,
+    parse_raw_state,
+)
 
 TRACE_SCHEMA_VERSION = 1
 TRACE_TYPE = "dodge.native.full_draw"
@@ -36,6 +42,7 @@ class OracleFrame:
     previous_input_mask: int = 0
     mode: int = 0
     dead: bool = False
+    transition_target: int | None = None
 
     @property
     def state_sha256(self) -> str:
@@ -59,6 +66,7 @@ class OracleFrame:
                 "previous_mask": self.previous_input_mask,
                 "mode": self.mode,
                 "dead": self.dead,
+                "transition_target": self.transition_target,
             },
             "pixels": {
                 "encoding": PIXEL_ENCODING,
@@ -110,8 +118,11 @@ def parse_full_draw_stdout(
     stdout: str,
 ) -> tuple[tuple[OracleFrame, ...], dict[str, int | float | bool]]:
     states: dict[int, RawState] = {}
+    particles: dict[int, list[ParticleState]] = {}
     pixel_rows: dict[int, dict[int, tuple[int, ...]]] = {}
-    metadata: dict[int, tuple[int, int, int, bool, float, tuple[str, ...]]] = {}
+    metadata: dict[
+        int, tuple[int, int, int, bool, float, tuple[str, ...], int | None]
+    ] = {}
     result_lines = 0
 
     for raw_line in stdout.splitlines():
@@ -123,15 +134,34 @@ def parse_full_draw_stdout(
                     f"duplicate full-draw state for frame {state.frame}"
                 )
             states[state.frame] = state
+            particles.setdefault(state.frame, [])
+        elif line.startswith(PARTICLE_PREFIX):
+            frame, particle = parse_particle_line(line, prefix=PARTICLE_PREFIX)
+            particles.setdefault(frame, []).append(particle)
         elif line.startswith(FRAME_PREFIX):
-            frame, mask, previous_mask, mode, dead, reward, events = parse_frame_line(
-                line
-            )
+            (
+                frame,
+                mask,
+                previous_mask,
+                mode,
+                dead,
+                reward,
+                events,
+                transition_target,
+            ) = parse_frame_line(line)
             if frame in metadata:
                 raise ControlRuntimeError(
                     f"duplicate full-draw metadata for frame {frame}"
                 )
-            metadata[frame] = (mask, previous_mask, mode, dead, reward, events)
+            metadata[frame] = (
+                mask,
+                previous_mask,
+                mode,
+                dead,
+                reward,
+                events,
+                transition_target,
+            )
         elif line.startswith(PIXEL_PREFIX):
             frame, row, pixels = parse_pixel_line(line)
             frame_rows = pixel_rows.setdefault(frame, {})
@@ -170,10 +200,13 @@ def parse_full_draw_stdout(
                 f"full-draw frame {frame_index} has an invalid pixel count"
             )
         done = frame_index == terminal_frame
+        state = replace(
+            states[frame_index], particles=tuple(particles.get(frame_index, ()))
+        )
         frames.append(
             OracleFrame(
                 frame_index=frame_index,
-                state=states[frame_index],
+                state=state,
                 pixels=pixels,
                 done=done,
                 reward=metadata[frame_index][4],
@@ -186,6 +219,7 @@ def parse_full_draw_stdout(
                 previous_input_mask=metadata[frame_index][1],
                 mode=metadata[frame_index][2],
                 dead=metadata[frame_index][3],
+                transition_target=metadata[frame_index][6],
             )
         )
         previous_frame = frame_index
@@ -221,30 +255,52 @@ def parse_pixel_line(line: str) -> tuple[int, int, tuple[int, ...]]:
 
 def parse_frame_line(
     line: str,
-) -> tuple[int, int, int, int, bool, float, tuple[str, ...]]:
+) -> tuple[int, int, int, int, bool, float, tuple[str, ...], int | None]:
     values = line.removeprefix(FRAME_PREFIX).split("|")
-    if len(values) not in {6, 7}:
+    if len(values) not in {6, 7, 8}:
         raise ControlRuntimeError("invalid full-draw metadata field count")
     try:
         frame, mask, previous_mask, mode, dead = (int(value) for value in values[:5])
         if len(values) == 7:
             reward = float(values[5])
             events_value = values[6]
+            transition_target = None
+        elif len(values) == 8:
+            reward = float(values[5])
+            events_value = values[6]
+            target_value = int(values[7])
+            transition_target = None if target_value == -1 else target_value
         else:
             reward = 0.0
             events_value = values[5]
+            transition_target = None
     except ValueError as error:
         raise ControlRuntimeError("invalid full-draw metadata values") from error
     if frame < 0 or not 0 <= mask <= 63 or not 0 <= previous_mask <= 63:
         raise ControlRuntimeError("invalid full-draw input mask")
     if not 0 <= mode <= 4 or dead not in {0, 1}:
         raise ControlRuntimeError("invalid full-draw lifecycle metadata")
+    if transition_target is not None and not 0 <= transition_target <= 2:
+        raise ControlRuntimeError("invalid full-draw transition target")
+    if mode == 4 and transition_target is None:
+        raise ControlRuntimeError("transition metadata is missing its target")
+    if mode != 4 and transition_target is not None:
+        raise ControlRuntimeError("non-transition metadata has a target")
     if not math.isfinite(reward) or reward < 0:
         raise ControlRuntimeError("invalid full-draw reward")
     events = tuple(event for event in events_value.split(",") if event)
     if any(not event.replace("_", "").isalnum() for event in events):
         raise ControlRuntimeError("invalid full-draw event name")
-    return frame, mask, previous_mask, mode, bool(dead), reward, events
+    return (
+        frame,
+        mask,
+        previous_mask,
+        mode,
+        bool(dead),
+        reward,
+        events,
+        transition_target,
+    )
 
 
 def command_schedule(commands: list[MovementCommand]) -> list[dict[str, object]]:

@@ -46,11 +46,26 @@ class EntityState:
 
 
 @dataclass(frozen=True, slots=True)
+class ParticleState:
+    x: float
+    y: float
+    dx: float
+    dy: float
+    radius: float
+    kind: int
+    max_age: float
+    age: float
+    color: int
+    colors: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RawState:
     frame: int
     player: PlayerState
     enemies: tuple[EntityState, ...]
     aoes: tuple[EntityState, ...]
+    particles: tuple[ParticleState, ...] = ()
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -58,6 +73,7 @@ class RawState:
             "player": asdict(self.player),
             "enemies": [asdict(entity) for entity in self.enemies],
             "aoes": [asdict(entity) for entity in self.aoes],
+            "particles": [asdict(particle) for particle in self.particles],
         }
 
 
@@ -81,6 +97,33 @@ def parse_raw_state(line: str, *, prefix: str) -> RawState:
     except ValueError as error:
         raise ControlRuntimeError("invalid Dodge raw state values") from error
     return RawState(frame, player, enemies, aoes)
+
+
+def parse_particle_line(line: str, *, prefix: str) -> tuple[int, ParticleState]:
+    values = line.removeprefix(prefix).split("|")
+    if len(values) != 3:
+        raise ControlRuntimeError("invalid Dodge particle field count")
+    try:
+        frame = int(values[0])
+        particle_values = _numbers(values[1], 9)
+        colors = tuple(int(value) for value in values[2].split(","))
+        particle = ParticleState(
+            x=particle_values[0],
+            y=particle_values[1],
+            dx=particle_values[2],
+            dy=particle_values[3],
+            radius=particle_values[4],
+            kind=int(particle_values[5]),
+            max_age=particle_values[6],
+            age=particle_values[7],
+            color=int(particle_values[8]),
+            colors=colors,
+        )
+    except ValueError as error:
+        raise ControlRuntimeError("invalid Dodge particle values") from error
+    if frame < 0 or not colors or any(color < 0 or color > 15 for color in colors):
+        raise ControlRuntimeError("invalid Dodge particle state")
+    return frame, particle
 
 
 def project_state(

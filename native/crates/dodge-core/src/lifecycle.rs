@@ -7,6 +7,9 @@ pub enum Mode {
     TransitionToGame,
     Game,
     Terminal,
+    Settings,
+    TransitionToSettings,
+    TransitionToMenu,
 }
 
 /// Explicit lifecycle state for the P3 menu/start boundary.
@@ -45,7 +48,20 @@ impl LifecycleState {
             Mode::TransitionToGame => {
                 self.advance_transition();
             }
-            Mode::Game | Mode::Terminal => {}
+            Mode::TransitionToSettings => {
+                self.transition_y -= 10;
+                if self.transition_y <= 0 {
+                    self.mode = Mode::Settings;
+                }
+            }
+            Mode::TransitionToMenu => {
+                self.advance_transition();
+                if self.transition_y >= 0 {
+                    self.mode = Mode::Menu;
+                    self.game_ready = false;
+                }
+            }
+            Mode::Game | Mode::Terminal | Mode::Settings => {}
         }
         self.frame += 1;
     }

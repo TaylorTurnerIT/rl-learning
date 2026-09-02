@@ -22,11 +22,11 @@ def _snapshot_hex(
     pixels: bytes = bytes(128 * 128),
 ) -> str:
     output = bytearray(b"DGSN")
-    output.extend(struct.pack("<II", 1, 1))
+    output.extend(struct.pack("<II", 5, 1))
     output.extend(SOURCE_HASH)
     output.extend(struct.pack("<II", 42, frame))
     output.extend(struct.pack("<Bh", 1, -108))
-    output.extend(bytes((1, 0, 0, 32, 32)))
+    output.extend(bytes((1, 0, 0, 32, 32, 1)))
     output.extend(struct.pack("<I", 42))
     output.extend(bytes(31 * 4))
     output.extend(bytes((3, 0)))
@@ -35,9 +35,22 @@ def _snapshot_hex(
         b"".join(struct.pack("<i", int(value * (1 << 16))) for value in player)
     )
     output.extend(struct.pack("<I", 0))
+    output.extend(struct.pack("<I", 0))
+    output.extend(struct.pack("<I", 0))
+    output.extend(struct.pack("<B", 0))
+    output.extend(struct.pack("<I", 0))
     output.extend(
-        struct.pack("<iiIiiiIBiIh", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -108)
+        struct.pack(
+            "<ii5iIBiiiBIiBBIIBBBBiiiiIiiih",
+            *([0] * 31),
+            -108,
+        )
     )
+    output.extend(struct.pack("<B", 0))
+    output.extend(bytes((1, 12, 1, 2, 1, 1, 1, 0, 0)))
+    output.extend(struct.pack("<hh", 0, 0))
+    output.extend(bytes(12 * 4))
+    output.extend(bytes(128 * 128))
     output.extend(struct.pack("<BH", 6, 0))
     output.extend(bytes(range(16)))
     output.extend(bytes(range(16)))

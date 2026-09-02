@@ -17,7 +17,7 @@ FRAME_HEIGHT = 128
 FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT
 FIXED_SCALE = 1 << 16
 SNAPSHOT_MAGIC = b"DGSN"
-SNAPSHOT_WIRE_VERSION = 1
+SNAPSHOT_WIRE_VERSION = 5
 MAX_ENEMIES = 4_096
 
 NATIVE_MODES = {
@@ -25,6 +25,14 @@ NATIVE_MODES = {
     1: "transition_to_game",
     2: "game",
     3: "terminal",
+    4: "settings",
+    5: "transition_to_settings",
+    6: "transition_to_menu",
+}
+NATIVE_TRANSITION_MODES = {
+    0: "transition_to_menu",
+    1: "transition_to_game",
+    2: "transition_to_settings",
 }
 ORACLE_MODES = {
     1: "menu",
@@ -50,6 +58,23 @@ class NativeEnemy:
     speed: int
     inside: bool
     is_dying: bool
+    isizing: bool
+    life: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeParticle:
+    x: int
+    y: int
+    dx: int
+    dy: int
+    radius: int
+    kind: int
+    max_age: int
+    age: int
+    color: int
+    colors: tuple[int, int, int]
+    color_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,8 +91,12 @@ class NativeSnapshot:
     previous_input_mask: int
     player: tuple[int, int, int, int, int]
     enemies: tuple[NativeEnemy, ...]
+    particles: tuple[NativeParticle, ...]
     score: int
     survival_frames: int
+    shake: int
+    camera_x: int
+    camera_y: int
     pixels: bytes
 
 
@@ -118,6 +147,7 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     dead = reader.boolean()
     input_mask = reader.u8()
     previous_input_mask = reader.u8()
+    reader.boolean()
     if input_mask > 63 or previous_input_mask > 63:
         raise NativeDifferentialError("native snapshot input mask is invalid")
 
@@ -133,18 +163,58 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     if enemy_count > MAX_ENEMIES:
         raise NativeDifferentialError("native snapshot enemy count is invalid")
     enemies = tuple(_read_enemy(reader) for _ in range(enemy_count))
+    particle_count = reader.u32()
+    if particle_count > 16_384:
+        raise NativeDifferentialError("native snapshot particle count is invalid")
+    particles = tuple(_read_particle(reader) for _ in range(particle_count))
+    pattern_count = reader.u32()
+    if pattern_count > 128:
+        raise NativeDifferentialError("native snapshot pattern count is invalid")
+    for _ in range(pattern_count):
+        _skip_pattern(reader)
+    if reader.boolean():
+        active_pattern_index = reader.u32()
+        if active_pattern_index >= pattern_count:
+            raise NativeDifferentialError("native active pattern index is invalid")
 
+    spawn_count = reader.u32()
+    if spawn_count > 256:
+        raise NativeDifferentialError("native spawn count is invalid")
+    reader.skip(spawn_count * 2 * 4)
     reader.i32()
     reader.i32()
-    reader.u32()
-    reader.i32()
-    reader.i32()
-    reader.i32()
+    reader.skip(5 * 4)
     reader.u32()
     reader.boolean()
+    reader.i32()
+    reader.i32()
+    reader.i32()
+    reader.boolean()
+    reader.u32()
+    reader.i32()
+    reader.boolean()
+    reader.boolean()
+    reader.u32()
+    reader.u32()
+    reader.boolean()
+    reader.boolean()
+    reader.boolean()
+    reader.boolean()
+    reader.i32()
+    reader.i32()
+    reader.i32()
     score = reader.i32()
     survival_frames = reader.u32()
+    shake = reader.i32()
+    camera_x = reader.i32()
+    camera_y = reader.i32()
     reader.i16()
+    reader.u8()
+    reader.skip(13)
+    reader.skip(12 * 4)
+    physical_screen = reader.take(FRAME_SIZE)
+    if any(pixel >= 16 for pixel in physical_screen):
+        raise NativeDifferentialError("native physical screen is not palette indexes")
 
     draw_color = reader.u8()
     reader.u16()
@@ -182,8 +252,12 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
         previous_input_mask=previous_input_mask,
         player=player,  # type: ignore[arg-type]
         enemies=enemies,
+        particles=particles,
         score=score,
         survival_frames=survival_frames,
+        shake=shake,
+        camera_x=camera_x,
+        camera_y=camera_y,
         pixels=pixels,
     )
 
@@ -350,6 +424,19 @@ def _compare_frame(
         )
 
     expected_input = _mapping_value(expected.get("input"), "oracle input")
+    expected_mode = ORACLE_MODES.get(
+        _int_value(expected_input, "mode", frame_number), "invalid"
+    )
+    transition_target = expected_input.get("transition_target")
+    if transition_target is not None and not isinstance(transition_target, int):
+        raise NativeDifferentialError(
+            f"oracle frame {frame_number} transition target is invalid"
+        )
+    actual_mode = actual.get("mode")
+    if transition_target is not None:
+        expected_mode = NATIVE_TRANSITION_MODES.get(transition_target, "invalid")
+    elif expected_mode == "transition_to_game":
+        expected_mode = "transition_to_game"
     comparisons = (
         (
             "input.mask",
@@ -365,10 +452,8 @@ def _compare_frame(
         ),
         (
             "lifecycle.mode",
-            ORACLE_MODES.get(
-                _int_value(expected_input, "mode", frame_number), "invalid"
-            ),
-            actual.get("mode"),
+            expected_mode,
+            actual_mode,
             "lifecycle",
         ),
         (
@@ -520,6 +605,73 @@ def _compare_frame(
                     "updateenemies",
                     source_map,
                 )
+
+    expected_particles = state.get("particles", [])
+    if not isinstance(expected_particles, list):
+        raise NativeDifferentialError(
+            f"oracle frame {frame_number} particles are invalid"
+        )
+    if len(expected_particles) != len(snapshot.particles):
+        return _mismatch(
+            frame_number,
+            "particles.count",
+            len(expected_particles),
+            len(snapshot.particles),
+            "updateparts",
+            source_map,
+        )
+    for index, expected_particle_value in enumerate(expected_particles):
+        expected_particle = _mapping_value(
+            expected_particle_value,
+            f"oracle particle {index}",
+        )
+        actual_particle = snapshot.particles[index]
+        particle_fields = (
+            ("x", expected_particle.get("x"), actual_particle.x),
+            ("y", expected_particle.get("y"), actual_particle.y),
+            ("dx", expected_particle.get("dx"), actual_particle.dx),
+            ("dy", expected_particle.get("dy"), actual_particle.dy),
+            ("radius", expected_particle.get("radius"), actual_particle.radius),
+            ("max_age", expected_particle.get("max_age"), actual_particle.max_age),
+            ("age", expected_particle.get("age"), actual_particle.age),
+            ("kind", expected_particle.get("kind"), actual_particle.kind),
+            ("color", expected_particle.get("color"), actual_particle.color),
+        )
+        for name, expected_value, actual_value in particle_fields:
+            if not isinstance(expected_value, int | float) or isinstance(
+                expected_value, bool
+            ):
+                raise NativeDifferentialError(
+                    f"oracle particle {index} field {name} is not numeric"
+                )
+            normalized_actual = (
+                _fixed_float(actual_value)
+                if name in {"x", "y", "dx", "dy", "radius", "max_age"}
+                else actual_value
+            )
+            if not math.isclose(
+                float(expected_value), float(normalized_actual), abs_tol=0.0002
+            ):
+                return _mismatch(
+                    frame_number,
+                    f"particles[{index}].{name}",
+                    expected_value,
+                    normalized_actual,
+                    "updateparts",
+                    source_map,
+                )
+        expected_colors = expected_particle.get("colors")
+        if not isinstance(expected_colors, list) or expected_colors != list(
+            actual_particle.colors[: actual_particle.color_count]
+        ):
+            return _mismatch(
+                frame_number,
+                f"particles[{index}].colors",
+                expected_colors,
+                list(actual_particle.colors[: actual_particle.color_count]),
+                "addpart",
+                source_map,
+            )
 
     if compare_pixels:
         expected_pixels = _oracle_pixels(expected, frame_number)
@@ -704,7 +856,79 @@ def _read_enemy(reader: _Reader) -> NativeEnemy:
         speed=reader.i32(),
         inside=reader.boolean(),
         is_dying=reader.boolean(),
+        isizing=reader.boolean(),
+        life=reader.i32() if reader.boolean() else None,
     )
+
+
+def _read_particle(reader: _Reader) -> NativeParticle:
+    x = reader.i32()
+    y = reader.i32()
+    dx = reader.i32()
+    dy = reader.i32()
+    radius = reader.i32()
+    kind = reader.i8()
+    max_age = reader.i32()
+    age = reader.u32()
+    color = reader.u8()
+    colors = tuple(reader.u8() for _ in range(3))
+    color_count = reader.u8()
+    if color_count == 0 or color_count > 3 or any(color >= 16 for color in colors):
+        raise NativeDifferentialError("native snapshot particle color is invalid")
+    return NativeParticle(
+        x=x,
+        y=y,
+        dx=dx,
+        dy=dy,
+        radius=radius,
+        kind=kind,
+        max_age=max_age,
+        age=age,
+        color=color,
+        colors=colors,  # type: ignore[arg-type]
+        color_count=color_count,
+    )
+
+
+def _skip_pattern(reader: _Reader) -> None:
+    reader.skip(1 + 3 * 4)
+    variant_count = reader.u32()
+    if variant_count > 256:
+        raise NativeDifferentialError("native pattern variant count is invalid")
+    reader.skip(variant_count)
+    reader.skip(1 + 1 + 1 + 1 + 1 + 4 + 4)
+    rect_count = reader.u32()
+    if rect_count > 4096:
+        raise NativeDifferentialError("native pattern rectangle count is invalid")
+    for _ in range(rect_count):
+        _skip_pattern_rect(reader)
+
+
+def _skip_pattern_rect(reader: _Reader) -> None:
+    reader.skip(7 * 4)
+    target_count = reader.u32()
+    if target_count > 256:
+        raise NativeDifferentialError("native pattern target count is invalid")
+    for _ in range(target_count):
+        tag = reader.u8()
+        if tag == 0:
+            reader.skip(4 * 4)
+        elif tag == 1:
+            reader.skip(4)
+        elif tag == 2:
+            reader.skip(1)
+        elif tag == 3:
+            point_count = reader.u32()
+            if point_count > 256:
+                raise NativeDifferentialError("native pattern point count is invalid")
+            reader.skip(point_count * 2 * 4)
+        else:
+            raise NativeDifferentialError("native pattern target tag is invalid")
+    reader.skip(4 + 4 + 1 + 4)
+    warning_count = reader.u32()
+    if warning_count > 256:
+        raise NativeDifferentialError("native pattern warning count is invalid")
+    reader.skip(warning_count * 4 * 4 + 2)
 
 
 def _fixed_float(raw: int) -> float:

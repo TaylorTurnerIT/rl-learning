@@ -7,7 +7,7 @@ use std::{
     process,
 };
 
-use dodge_core::{Action, BUTTON_X_MASK, NativeConfig, NativeGame};
+use dodge_core::{Action, BUTTON_X_MASK, Button, NativeConfig, NativeGame};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_SEED: u32 = 42;
@@ -248,6 +248,9 @@ impl InputCommand {
         if self.movement == "x" {
             return Ok(BUTTON_X_MASK);
         }
+        if self.movement == "o" {
+            return Ok(Button::O.mask());
+        }
         Action::from_name(&self.movement)
             .map(Action::mask)
             .map_err(|error| error.to_string())
@@ -283,6 +286,9 @@ fn mode_name(mode: dodge_core::Mode) -> &'static str {
         dodge_core::Mode::TransitionToGame => "transition_to_game",
         dodge_core::Mode::Game => "game",
         dodge_core::Mode::Terminal => "terminal",
+        dodge_core::Mode::Settings => "settings",
+        dodge_core::Mode::TransitionToSettings => "transition_to_settings",
+        dodge_core::Mode::TransitionToMenu => "transition_to_menu",
     }
 }
 

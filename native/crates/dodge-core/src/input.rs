@@ -28,6 +28,7 @@ impl Button {
 pub struct InputState {
     current_mask: u8,
     previous_mask: u8,
+    source_input_mode: bool,
 }
 
 impl InputState {
@@ -35,10 +36,15 @@ impl InputState {
         Self {
             current_mask: 0,
             previous_mask: 0,
+            source_input_mode: false,
         }
     }
 
-    pub(crate) const fn from_masks(current_mask: u8, previous_mask: u8) -> Result<Self, CoreError> {
+    pub(crate) const fn from_wire(
+        current_mask: u8,
+        previous_mask: u8,
+        source_input_mode: bool,
+    ) -> Result<Self, CoreError> {
         if current_mask > BUTTON_MASK_LIMIT {
             return Err(CoreError::InvalidButtonMask(current_mask));
         }
@@ -48,6 +54,7 @@ impl InputState {
         Ok(Self {
             current_mask,
             previous_mask,
+            source_input_mode,
         })
     }
 
@@ -57,6 +64,11 @@ impl InputState {
 
     pub const fn previous_mask(self) -> u8 {
         self.previous_mask
+    }
+
+    /// Whether the cartridge's `input` selector is in keyboard/button mode.
+    pub const fn source_input_mode(self) -> bool {
+        self.source_input_mode
     }
 
     pub fn validate_mask(mask: u8) -> Result<(), CoreError> {
@@ -71,6 +83,9 @@ impl InputState {
         Self::validate_mask(mask)?;
         self.previous_mask = self.current_mask;
         self.current_mask = mask;
+        if mask != 0 {
+            self.source_input_mode = true;
+        }
         Ok(())
     }
 
