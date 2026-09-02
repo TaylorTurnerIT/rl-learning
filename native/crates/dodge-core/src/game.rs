@@ -73,6 +73,7 @@ pub struct FrameResult {
     pub done: bool,
     pub reward: PicoFixed,
     pub events: Vec<FrameEvent>,
+    pub audio: Vec<AudioEvent>,
     pub snapshot: Snapshot,
 }
 
@@ -94,6 +95,40 @@ impl FrameEvent {
             Self::Death => "death",
             Self::PatternActive => "pattern_active",
             Self::Terminal => "terminal",
+        }
+    }
+}
+
+/// An ordered source audio command emitted at a completed frame boundary.
+///
+/// The native core exposes identity and channel/timing metadata. It does not
+/// synthesize a host audio device, so waveform playback remains a viewer
+/// concern just as Macroquad remains outside the simulation core.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AudioEvent {
+    Music { track: u8 },
+    Sfx { id: u8, channel: Option<i8> },
+}
+
+impl AudioEvent {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Music { .. } => "music",
+            Self::Sfx { .. } => "sfx",
+        }
+    }
+
+    pub const fn id(self) -> u8 {
+        match self {
+            Self::Music { track } => track,
+            Self::Sfx { id, .. } => id,
+        }
+    }
+
+    pub const fn channel(self) -> Option<i8> {
+        match self {
+            Self::Music { .. } => None,
+            Self::Sfx { channel, .. } => channel,
         }
     }
 }
@@ -145,6 +180,7 @@ pub struct NativeGame {
     transition_from: Mode,
     settings: SettingsState,
     highscores: [PicoFixed; 12],
+    frame_audio: Vec<AudioEvent>,
 }
 
 impl NativeGame {
@@ -196,6 +232,7 @@ impl NativeGame {
             transition_from: Mode::Menu,
             settings: SettingsState::new(config),
             highscores: config.highscores,
+            frame_audio: Vec::new(),
         }
     }
 
@@ -240,6 +277,7 @@ impl NativeGame {
         self.camera_y = PicoFixed::ZERO;
         self.transition_render_y = -128;
         self.transition_from = Mode::Menu;
+        self.frame_audio.clear();
         self.snapshot()
     }
 
@@ -307,6 +345,7 @@ impl NativeGame {
             transition_from: state.transition_from,
             settings: state.settings,
             highscores: state.highscores,
+            frame_audio: Vec::new(),
         })
     }
 
@@ -326,6 +365,7 @@ impl NativeGame {
     ) -> Result<FrameResult, CoreError> {
         InputState::validate_mask(input_mask)?;
         InputState::validate_mask(post_frame_mask)?;
+        self.frame_audio.clear();
         self.input.advance(input_mask)?;
         self.refresh_enemy_stats();
         let mode_before = self.lifecycle.mode;
@@ -334,12 +374,20 @@ impl NativeGame {
         if start_pressed {
             self.has_played = true;
             self.transition_from = Mode::Menu;
+            self.emit_sfx(55, Some(-2));
         }
         if mode_before == Mode::Menu && self.input.btnp(Button::O) {
             self.begin_transition(Mode::TransitionToSettings);
+            self.emit_sfx(55, Some(-2));
+            self.emit_sfx(55, Some(0));
         }
         if matches!(mode_before, Mode::Game | Mode::Terminal) && self.input.btnp(Button::O) {
             self.begin_transition(Mode::TransitionToSettings);
+            if self.lifecycle.dead {
+                self.emit_music(3);
+            }
+            self.emit_sfx(55, Some(-2));
+            self.emit_sfx(55, Some(0));
         }
         self.lifecycle.advance(self.input);
         if start_pressed {
@@ -394,6 +442,14 @@ impl NativeGame {
                 Mode::TransitionToMenu
             };
             self.begin_transition(target);
+            if self.has_played {
+                if self.lifecycle.dead {
+                    self.emit_music(22);
+                }
+                self.emit_sfx(55, Some(-2));
+            } else {
+                self.emit_sfx(55, Some(2));
+            }
         }
         if self.active_pattern.is_some() && mode_before == Mode::Game {
             events.push(FrameEvent::PatternActive);
@@ -415,6 +471,7 @@ impl NativeGame {
         let result = self.result_with_snapshot(
             reward,
             events,
+            self.frame_audio.clone(),
             Snapshot::with_framebuffer_from_game(
                 self,
                 draw_snapshot.framebuffer().clone(),
@@ -470,6 +527,10 @@ impl NativeGame {
 
     pub fn particles(&self) -> &[ParticleState] {
         self.particles.as_slice()
+    }
+
+    pub fn patterns(&self) -> &[PatternState] {
+        self.patterns.as_slice()
     }
 
     pub const fn score(&self) -> PicoFixed {
@@ -541,6 +602,12 @@ impl NativeGame {
         if self.friendly_enabled {
             self.update_fyou(events);
         }
+        if self.lifecycle.dead && self.can_click && self.input.btnp(Button::X) {
+            self.restart_gameplay();
+            self.emit_music(3);
+            self.emit_sfx(55, Some(-2));
+        }
+        self.can_click = !self.input.btnp(Button::X);
         self.collision_check(events);
         self.update_player();
         self.update_particles();
@@ -593,6 +660,7 @@ impl NativeGame {
                 self.config.theme_shadow = shadow;
                 self.settings.theme_background = background;
                 self.settings.theme_shadow = shadow;
+                self.emit_sfx(58, None);
             } else if gameplay_editable {
                 match cursor {
                     2 => {
@@ -600,16 +668,19 @@ impl NativeGame {
                             cycle_index(self.settings.difficulty, 3, increase);
                         self.config.difficulty = self.settings.difficulty;
                         self.apply_initial_difficulty();
+                        self.emit_sfx(58, None);
                     }
                     3 => {
                         self.settings.patterns_enabled = !self.settings.patterns_enabled;
                         self.config.patterns_enabled = self.settings.patterns_enabled;
                         self.patterns_enabled = self.settings.patterns_enabled;
+                        self.emit_sfx(58, None);
                     }
                     4 => {
                         self.settings.powerups_enabled = !self.settings.powerups_enabled;
                         self.config.powerups_enabled = self.settings.powerups_enabled;
                         self.powerups_enabled = self.settings.powerups_enabled;
+                        self.emit_sfx(58, None);
                     }
                     _ => {}
                 }
@@ -636,6 +707,53 @@ impl NativeGame {
         self.speed = initial_speed(self.settings.difficulty);
         self.bounce_cap_static = initial_bounce_static(self.settings.difficulty);
         self.bounce_cap_moving = initial_bounce_moving(self.settings.difficulty);
+    }
+
+    fn restart_gameplay(&mut self) {
+        let counters = self
+            .patterns
+            .iter()
+            .map(|pattern| pattern.counter)
+            .collect::<Vec<_>>();
+        self.lifecycle.dead = false;
+        self.score = PicoFixed::ZERO;
+        self.survival_frames = 0;
+        self.shake = PicoFixed::ZERO;
+        self.enemy_timer = PicoFixed::ZERO;
+        self.enemies.clear();
+        self.particles.clear();
+        self.apply_initial_difficulty();
+        self.size_timer = PicoFixed::ZERO;
+        self.player.size = PicoFixed::from_int(4);
+        self.freeze_active = false;
+        self.freeze_timer = 0;
+        self.freeze_rate = PicoFixed::ONE;
+        self.active_pattern = None;
+        self.pattern_active = false;
+        self.pattern_timer = 0;
+        self.pattern_delay_frames = INITIAL_PATTERN_DELAY_FRAMES;
+        self.friendly_enabled = true;
+        self.spawns = initial_spawns();
+        self.new_highscore = false;
+        self.bounce_cap = PicoFixed::from_f32(1.45);
+
+        self.patterns = crate::patterns::init_patterns(&mut self.rng);
+        for (index, pattern) in self.patterns.iter_mut().enumerate() {
+            let Some(counter) = counters.get(index).copied() else {
+                continue;
+            };
+            let base = if pattern.pattern_type == 1 { 17 } else { 15 };
+            let divisor = i32::try_from(pattern.variants.len() + 1).unwrap_or(1);
+            let probability = PicoFixed::from_int(base)
+                .div_fixed(PicoFixed::from_int(divisor))
+                .unwrap_or(PicoFixed::ZERO);
+            let mut adjusted = probability.sub(PicoFixed::from_int(counter as i32));
+            if probability == PicoFixed::ONE {
+                adjusted = adjusted.sub(PicoFixed::from_int(6 * counter as i32));
+            }
+            pattern.counter = counter;
+            pattern.probability = adjusted.add(PicoFixed::from_int(2));
+        }
     }
 
     fn refresh_enemy_stats(&mut self) {
@@ -867,12 +985,14 @@ impl NativeGame {
                 events.push(FrameEvent::Death);
             }
             2 => {
+                self.emit_sfx(60, None);
                 self.explode_powerup_enemy(index);
             }
             3 => {
                 self.remove_enemy_at(index);
                 self.freeze_active = true;
                 self.freeze_timer = 0;
+                self.emit_sfx(62, None);
                 self.score = self.score.add(PicoFixed::ONE);
                 self.apply_difficulty(false);
             }
@@ -880,6 +1000,7 @@ impl NativeGame {
                 self.remove_enemy_at(index);
                 self.player.size = PicoFixed::from_int(2);
                 self.size_timer = PicoFixed::ZERO;
+                self.emit_sfx(61, None);
                 self.score = self.score.add(PicoFixed::ONE);
                 self.apply_difficulty(false);
             }
@@ -925,6 +1046,7 @@ impl NativeGame {
     }
 
     fn die(&mut self) {
+        self.emit_sfx(62, None);
         self.lifecycle.mark_dead();
         self.shake = self.shake.add(PicoFixed::from_f32(0.07));
         let slot = self.current_highscore_slot();
@@ -939,6 +1061,7 @@ impl NativeGame {
             }
             self.new_highscore = true;
         }
+        self.emit_music(22);
     }
 
     fn current_highscore_slot(&self) -> usize {
@@ -1328,6 +1451,7 @@ impl NativeGame {
         } else {
             self.shatter(shatter_x, shatter_y);
         }
+        self.emit_sfx(63, None);
         self.score = self.score.add(SCORE_PER_SHATTER);
         self.shake = self.shake.add(PicoFixed::from_f32(0.07));
         self.apply_difficulty(true);
@@ -1724,13 +1848,22 @@ impl NativeGame {
 
     fn result(&self, reward: PicoFixed, events: Vec<FrameEvent>) -> FrameResult {
         let snapshot = self.snapshot();
-        self.result_with_snapshot(reward, events, snapshot)
+        self.result_with_snapshot(reward, events, Vec::new(), snapshot)
+    }
+
+    fn emit_music(&mut self, track: u8) {
+        self.frame_audio.push(AudioEvent::Music { track });
+    }
+
+    fn emit_sfx(&mut self, id: u8, channel: Option<i8>) {
+        self.frame_audio.push(AudioEvent::Sfx { id, channel });
     }
 
     fn result_with_snapshot(
         &self,
         reward: PicoFixed,
         events: Vec<FrameEvent>,
+        audio: Vec<AudioEvent>,
         snapshot: Snapshot,
     ) -> FrameResult {
         FrameResult {
@@ -1744,6 +1877,7 @@ impl NativeGame {
             done: self.lifecycle.dead,
             reward,
             events,
+            audio,
             snapshot,
         }
     }
@@ -2073,7 +2207,7 @@ fn settings_row(cursor: u8) -> i16 {
 mod tests {
     use super::NativeGame;
     use crate::{
-        Action, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PatternRect,
+        Action, AudioEvent, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PatternRect,
         PatternState, PatternTarget, PicoFixed,
     };
 
@@ -2671,6 +2805,72 @@ mod tests {
         assert_eq!(snapshot.logical_state().player.size, PicoFixed::from_int(2));
         assert_eq!(game.score(), PicoFixed::ONE);
         assert!(game.enemies().is_empty());
+    }
+
+    #[test]
+    fn v158_audio_events_preserve_source_order_and_restart_boundary() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        let start = game.advance_frame(BUTTON_X_MASK);
+        assert_eq!(
+            start.as_ref().map(|result| result.audio.as_slice()),
+            Ok([AudioEvent::Sfx {
+                id: 55,
+                channel: Some(-2),
+            }]
+            .as_slice())
+        );
+        start_game(&mut game);
+
+        game.enemies.push(EnemyState::normal(
+            PicoFixed::from_int(61),
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(3),
+        ));
+        let death = game.advance_frame(0);
+        assert_eq!(
+            death.as_ref().map(|result| result.audio.as_slice()),
+            Ok([
+                AudioEvent::Sfx {
+                    id: 62,
+                    channel: None,
+                },
+                AudioEvent::Music { track: 22 },
+            ]
+            .as_slice())
+        );
+        assert!(game.lifecycle().dead);
+
+        let restart = game.advance_frame(BUTTON_X_MASK);
+        assert_eq!(
+            restart.as_ref().map(|result| result.audio.as_slice()),
+            Ok([
+                AudioEvent::Music { track: 3 },
+                AudioEvent::Sfx {
+                    id: 55,
+                    channel: Some(-2),
+                },
+            ]
+            .as_slice())
+        );
+        assert!(!game.lifecycle().dead);
+        assert_eq!(game.score(), PicoFixed::ZERO);
+        assert_eq!(game.survival_frames(), 1);
+        assert!(game.enemies().is_empty());
+    }
+
+    #[test]
+    fn v158_settings_change_emits_one_source_sfx() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        game.lifecycle.mode = Mode::Settings;
+        let result = game.advance_frame(crate::Button::Right.mask());
+        assert_eq!(
+            result.as_ref().map(|value| value.audio.as_slice()),
+            Ok([AudioEvent::Sfx {
+                id: 58,
+                channel: None,
+            }]
+            .as_slice())
+        );
     }
 
     #[test]

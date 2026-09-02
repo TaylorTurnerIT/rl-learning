@@ -53,9 +53,17 @@ struct OutputFrame {
     done: bool,
     reward_raw: i32,
     events: Vec<String>,
+    audio: Vec<OutputAudio>,
     state_hash: u64,
     pixel_hash: u64,
     snapshot_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OutputAudio {
+    kind: &'static str,
+    id: u8,
+    channel: Option<i8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -273,6 +281,15 @@ fn output_frame(result: &dodge_core::FrameResult) -> OutputFrame {
             .events
             .iter()
             .map(|event| event.name().to_owned())
+            .collect(),
+        audio: result
+            .audio
+            .iter()
+            .map(|event| OutputAudio {
+                kind: event.name(),
+                id: event.id(),
+                channel: event.channel(),
+            })
             .collect(),
         state_hash: snapshot.state_hash(),
         pixel_hash: snapshot.pixel_hash(),
