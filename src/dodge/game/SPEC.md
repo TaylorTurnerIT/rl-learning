@@ -205,6 +205,7 @@ V98: Snapshot canonical serialization roundtrip → identical bytes, typed state
 V99: serial native runner consumes P1 scenarios without emulator IPC; invalid action/frame count fails before simulation mutation.
 V100: native/Pemsa mismatch → first frame + field path or pixel coordinate + expected/actual + source-map span; aggregate hashes alone insufficient.
 V101: P3 corpus acceptance report names exact slice boundary, corpus, parity result, deferred systems, and P4 handoff; no full-port claim.
+V102: menu start `btnp` → transition advances on same frame; default game-ready frame = 13.
 
 §T
 
@@ -263,7 +264,7 @@ T51|x|add primitive differential fixtures against P1 indexed frames|V85,V89,V90
 T52|x|add stale-output + unresolved-symbol validation|V84,V87,V88,V91,V92
 T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
 T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
-T55|.|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
+T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
 T56|.|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96
 T57|.|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
 T58|.|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
@@ -326,3 +327,5 @@ B49|2026-09-01|T50 clip test expected a pixel outside its declared 2x2 clip|mech
 B50|2026-09-01|T51 raster fixture imports required Ruff reordering|mechanical format
 B51|2026-09-01|T52 asset validation test import order and declaration exceeded configured style|mechanical format
 B52|2026-09-01|T53 manifest installer verification found line-width violations|mechanical format
+B53|2026-09-02|native lifecycle advanced transition one frame after menu start|V102
+B54|2026-09-02|PicoFixed helpers shadowed standard arithmetic trait names|mechanical Clippy fix

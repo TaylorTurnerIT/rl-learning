@@ -1,8 +1,22 @@
 #![doc = "Engine-free deterministic core for the native Dodge runtime."]
 
-/// Workspace-level version of the native state contract.
-pub const CORE_SCHEMA_VERSION: u32 = 1;
+mod action;
+mod config;
+mod error;
+mod fixed;
+mod game;
+mod input;
+mod lifecycle;
+mod rng;
 
-/// Placeholder root for the P3 typed simulation API.
-#[derive(Debug, Default)]
-pub struct NativeGame;
+pub use action::{Action, BUTTON_X_MASK};
+pub use config::NativeConfig;
+pub use error::CoreError;
+pub use fixed::{PicoFixed, pico_ceil, pico_floor, pico_mid, pico_mod};
+pub use game::{FrameResult, NativeGame};
+pub use input::{BUTTON_MASK_LIMIT, Button, InputState};
+pub use lifecycle::{LifecycleState, Mode};
+pub use rng::{PicoRng, RngCheckpoint};
+
+/// Workspace-level version of native state contract.
+pub const CORE_SCHEMA_VERSION: u32 = 1;
