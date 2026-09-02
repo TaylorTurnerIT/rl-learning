@@ -905,7 +905,9 @@ impl NativeGame {
             .active_pattern
             .and_then(|index| self.patterns.get(index))
             .map_or(PicoFixed::ONE, |pattern| {
-                if matches!(pattern.special, 2 | 3) {
+                if pattern.special == PicoFixed::from_int(2)
+                    || pattern.special == PicoFixed::from_int(3)
+                {
                     PicoFixed::from_f32(1.75)
                 } else {
                     PicoFixed::ONE
@@ -1309,8 +1311,14 @@ impl NativeGame {
     }
 
     fn update_pattern_schedule(&mut self) {
+        if !self.patterns_enabled {
+            return;
+        }
         if self.active_pattern.is_some() {
             self.update_active_pattern();
+            return;
+        }
+        if self.freeze_active {
             return;
         }
         self.pattern_timer += 1;
@@ -1362,23 +1370,208 @@ impl NativeGame {
             return;
         };
         let increment = PicoFixed::from_f32(0.02).mul_fixed(self.freeze_rate);
+        let Some(pattern_snapshot) = self.patterns.get(pattern_index).cloned() else {
+            self.active_pattern = None;
+            self.pattern_active = false;
+            return;
+        };
         if let Some(pattern) = self.patterns.get_mut(pattern_index) {
             pattern.timer = pattern.timer.add(self.freeze_rate);
-            for rect in &mut pattern.rects {
-                if rect.shown {
-                    if rect.sh < PicoFixed::from_int(2) {
-                        rect.sh = rect.sh.add(increment);
-                        if rect.sh > PicoFixed::from_f32(1.99) {
-                            rect.sh = PicoFixed::from_int(2);
-                        }
-                    }
-                } else if rect.sh > PicoFixed::ZERO {
-                    rect.sh = rect.sh.sub(increment);
-                    if rect.sh < PicoFixed::from_f32(0.05) {
-                        rect.sh = PicoFixed::ZERO;
+        }
+
+        let mut finished_count = 0_usize;
+        for rect_index in 0..pattern_snapshot.rects.len() {
+            let Some(rect_snapshot) = pattern_snapshot.rects.get(rect_index).cloned() else {
+                continue;
+            };
+            if pattern_snapshot.pattern_type == 1 && rect_snapshot.sh < PicoFixed::from_int(2) {
+                let warnings = moving_pattern_warnings(&rect_snapshot, increment);
+                if let Some(rect) = self
+                    .patterns
+                    .get_mut(pattern_index)
+                    .and_then(|pattern| pattern.rects.get_mut(rect_index))
+                {
+                    rect.warnings = warnings;
+                }
+            }
+
+            if rect_snapshot.sh == PicoFixed::from_int(2) && !rect_snapshot.collision_done {
+                if let Some(rect) = self
+                    .patterns
+                    .get_mut(pattern_index)
+                    .and_then(|pattern| pattern.rects.get_mut(rect_index))
+                {
+                    rect.collision_done = true;
+                }
+                for enemy in &mut self.enemies {
+                    if enemy.personality != -1
+                        && enemy.x.add(enemy.size) > rect_snapshot.x
+                        && enemy.y.add(enemy.size) > rect_snapshot.y
+                        && enemy.x < rect_snapshot.x.add(rect_snapshot.width)
+                        && enemy.y < rect_snapshot.y.add(rect_snapshot.height)
+                    {
+                        enemy.is_dying = true;
                     }
                 }
             }
+
+            let mut next_x = rect_snapshot.x;
+            let mut next_y = rect_snapshot.y;
+            let mut next_width = rect_snapshot.width;
+            let mut next_height = rect_snapshot.height;
+            let mut next_target_index = rect_snapshot.target_index;
+            let mut next_wait = rect_snapshot.wait;
+            let mut next_shown = rect_snapshot.shown;
+            let mut next_sh = rect_snapshot.sh;
+            let mut finished = rect_snapshot.finished;
+            if rect_snapshot.sh >= PicoFixed::from_int(2) && rect_snapshot.shown {
+                if let Some(target) = rect_snapshot.targets.get(rect_snapshot.target_index) {
+                    match target {
+                        crate::PatternTarget::Move {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } => {
+                            if pattern_snapshot.smooth {
+                                next_x = next_x.add(
+                                    x.sub(next_x)
+                                        .div_fixed(rect_snapshot.speed)
+                                        .unwrap_or(PicoFixed::ZERO)
+                                        .mul_fixed(self.freeze_rate),
+                                );
+                                next_y = next_y.add(
+                                    y.sub(next_y)
+                                        .div_fixed(rect_snapshot.speed)
+                                        .unwrap_or(PicoFixed::ZERO)
+                                        .mul_fixed(self.freeze_rate),
+                                );
+                                next_width = next_width.add(
+                                    width
+                                        .sub(next_width)
+                                        .div_fixed(rect_snapshot.speed)
+                                        .unwrap_or(PicoFixed::ZERO)
+                                        .mul_fixed(self.freeze_rate),
+                                );
+                                next_height = next_height.add(
+                                    height
+                                        .sub(next_height)
+                                        .div_fixed(rect_snapshot.speed)
+                                        .unwrap_or(PicoFixed::ZERO)
+                                        .mul_fixed(self.freeze_rate),
+                                );
+                            } else {
+                                next_x =
+                                    move_toward(next_x, *x, rect_snapshot.speed, self.freeze_rate);
+                                next_y =
+                                    move_toward(next_y, *y, rect_snapshot.speed, self.freeze_rate);
+                                next_width = move_toward(
+                                    next_width,
+                                    *width,
+                                    rect_snapshot.speed,
+                                    self.freeze_rate,
+                                );
+                                next_height = move_toward(
+                                    next_height,
+                                    *height,
+                                    rect_snapshot.speed,
+                                    self.freeze_rate,
+                                );
+                            }
+                            if next_x.round() == *x
+                                && next_y.round() == *y
+                                && next_width.round() == *width
+                                && next_height.round() == *height
+                            {
+                                next_target_index += 1;
+                            }
+                        }
+                        crate::PatternTarget::Wait(seconds) => {
+                            next_wait = next_wait.add(self.freeze_rate);
+                            if next_wait >= seconds.mul_fixed(PicoFixed::from_int(60)) {
+                                next_wait = PicoFixed::ZERO;
+                                next_target_index += 1;
+                            }
+                        }
+                        crate::PatternTarget::SetFyou(value) => {
+                            self.friendly_enabled = *value;
+                            next_target_index += 1;
+                        }
+                        crate::PatternTarget::SetSpawns(points) => {
+                            self.spawns = points.clone();
+                            next_target_index += 1;
+                        }
+                    }
+                }
+            } else if rect_snapshot.shown {
+                next_sh = next_sh.add(increment);
+                if next_sh > PicoFixed::from_f32(1.99) {
+                    next_sh = PicoFixed::from_int(2);
+                    self.spawns = initial_spawns();
+                }
+            } else {
+                next_sh = next_sh.sub(increment);
+                if pattern_snapshot.spawn_enabled {
+                    self.spawns.clear();
+                }
+                if next_sh < PicoFixed::from_f32(0.05) {
+                    next_sh = PicoFixed::ZERO;
+                }
+            }
+
+            if next_target_index >= rect_snapshot.targets.len() {
+                if pattern_snapshot.pattern_type == 1 {
+                    finished = true;
+                } else {
+                    next_shown = false;
+                }
+            }
+            if !next_shown && next_sh <= PicoFixed::ZERO {
+                finished = true;
+            }
+            if finished {
+                finished_count += 1;
+            }
+            if let Some(rect) = self
+                .patterns
+                .get_mut(pattern_index)
+                .and_then(|pattern| pattern.rects.get_mut(rect_index))
+            {
+                rect.x = next_x;
+                rect.y = next_y;
+                rect.width = next_width;
+                rect.height = next_height;
+                rect.target_index = next_target_index;
+                rect.wait = next_wait;
+                rect.shown = next_shown;
+                rect.sh = next_sh;
+                rect.finished = finished;
+            }
+        }
+        if finished_count >= pattern_snapshot.rects.len() {
+            let probabilities = self
+                .patterns
+                .iter()
+                .map(|pattern| pattern.probability)
+                .collect::<Vec<_>>();
+            let counters = self
+                .patterns
+                .iter()
+                .map(|pattern| pattern.counter)
+                .collect::<Vec<_>>();
+            self.patterns = crate::patterns::init_patterns(&mut self.rng);
+            for (index, pattern) in self.patterns.iter_mut().enumerate() {
+                if let Some(probability) = probabilities.get(index).copied() {
+                    pattern.probability = probability;
+                }
+                if let Some(counter) = counters.get(index).copied() {
+                    pattern.counter = counter;
+                }
+            }
+            self.active_pattern = None;
+            self.pattern_active = false;
+            self.friendly_enabled = true;
+            self.spawns = initial_spawns();
         }
     }
 
@@ -1575,6 +1768,162 @@ fn pico_lerp(position: PicoFixed, target: PicoFixed, percentage: PicoFixed) -> P
         .sub(percentage)
         .mul_fixed(position)
         .add(percentage.mul_fixed(target))
+}
+
+fn move_toward(
+    position: PicoFixed,
+    target: PicoFixed,
+    speed: PicoFixed,
+    freeze_rate: PicoFixed,
+) -> PicoFixed {
+    let step = speed.mul_fixed(freeze_rate);
+    if position > target {
+        position.sub(step)
+    } else if position < target {
+        position.add(step)
+    } else {
+        position
+    }
+}
+
+fn moving_pattern_warnings(
+    rect: &crate::PatternRect,
+    _increment: PicoFixed,
+) -> Vec<crate::WarningLine> {
+    let x = rect.x;
+    let y = rect.y;
+    let width = rect.width;
+    let height = rect.height;
+    let offset = PicoFixed::from_int(6);
+    let sh = rect.sh.min(PicoFixed::ONE);
+    let mut warnings = Vec::new();
+    if rect.dx > PicoFixed::ZERO {
+        warnings = vec![
+            crate::WarningLine {
+                x0: x.add(width).add(offset),
+                y0: y.add(
+                    height
+                        .div_fixed(PicoFixed::from_int(2))
+                        .unwrap_or(PicoFixed::ZERO),
+                ),
+                x1: x.add(width).add(offset),
+                y1: pico_lerp(
+                    y.add(
+                        height
+                            .div_fixed(PicoFixed::from_int(2))
+                            .unwrap_or(PicoFixed::ZERO),
+                    ),
+                    y.add(PicoFixed::ONE),
+                    sh,
+                ),
+            },
+            crate::WarningLine {
+                x0: x.add(width).add(offset),
+                y0: y.add(
+                    height
+                        .div_fixed(PicoFixed::from_int(2))
+                        .unwrap_or(PicoFixed::ZERO),
+                ),
+                x1: x.add(width).add(offset),
+                y1: pico_lerp(
+                    y.add(
+                        height
+                            .div_fixed(PicoFixed::from_int(2))
+                            .unwrap_or(PicoFixed::ZERO),
+                    ),
+                    y.add(height).sub(PicoFixed::from_int(2)),
+                    sh,
+                ),
+            },
+        ];
+    } else if rect.dx < PicoFixed::ZERO {
+        warnings = vec![
+            crate::WarningLine {
+                x0: x.sub(offset),
+                y0: y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                x1: x.sub(offset),
+                y1: pico_lerp(
+                    y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                    y.add(PicoFixed::ONE),
+                    sh,
+                ),
+            },
+            crate::WarningLine {
+                x0: x.sub(offset),
+                y0: y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                x1: x.sub(offset),
+                y1: pico_lerp(
+                    y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                    y.add(height).sub(PicoFixed::from_int(2)),
+                    sh,
+                ),
+            },
+        ];
+    }
+    if rect.dy > PicoFixed::ZERO {
+        warnings = vec![
+            crate::WarningLine {
+                x0: x.add(
+                    width
+                        .div_fixed(PicoFixed::from_int(2))
+                        .unwrap_or(PicoFixed::ZERO),
+                ),
+                y0: y.add(height).add(offset),
+                x1: pico_lerp(
+                    x.add(
+                        width
+                            .div_fixed(PicoFixed::from_int(2))
+                            .unwrap_or(PicoFixed::ZERO),
+                    ),
+                    x.add(PicoFixed::ONE),
+                    sh,
+                ),
+                y1: y.add(height).add(offset),
+            },
+            crate::WarningLine {
+                x0: x.add(
+                    width
+                        .div_fixed(PicoFixed::from_int(2))
+                        .unwrap_or(PicoFixed::ZERO),
+                ),
+                y0: y.add(height).add(offset),
+                x1: pico_lerp(
+                    x.add(
+                        width
+                            .div_fixed(PicoFixed::from_int(2))
+                            .unwrap_or(PicoFixed::ZERO),
+                    ),
+                    x.add(width).sub(PicoFixed::from_int(2)),
+                    sh,
+                ),
+                y1: y.add(height).add(offset),
+            },
+        ];
+    } else if rect.dy < PicoFixed::ZERO {
+        warnings = vec![
+            crate::WarningLine {
+                x0: x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                y0: y.sub(offset),
+                x1: pico_lerp(
+                    x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                    x.add(PicoFixed::ONE),
+                    sh,
+                ),
+                y1: y.sub(offset),
+            },
+            crate::WarningLine {
+                x0: x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                y0: y.sub(offset),
+                x1: pico_lerp(
+                    x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                    x.add(width).sub(PicoFixed::from_int(2)),
+                    sh,
+                ),
+                y1: y.sub(offset),
+            },
+        ];
+    }
+    warnings
 }
 
 fn initial_spawns() -> Vec<SpawnPoint> {
@@ -2101,7 +2450,8 @@ mod tests {
             pattern_type: 0,
             bounce_cap: false,
             spawn_enabled: false,
-            special: 0,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
             counter: 0,
             timer: PicoFixed::ZERO,
             rects: vec![crate::PatternRect {

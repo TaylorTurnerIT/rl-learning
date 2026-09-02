@@ -12,7 +12,7 @@ pub const FRAMEBUFFER_WIDTH: usize = 128;
 pub const FRAMEBUFFER_HEIGHT: usize = 128;
 pub const FRAMEBUFFER_SIZE: usize = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT;
 pub const PALETTE_SIZE: usize = 16;
-pub const SNAPSHOT_WIRE_VERSION: u32 = 6;
+pub const SNAPSHOT_WIRE_VERSION: u32 = 7;
 pub const CARTRIDGE_SOURCE_SHA256: [u8; 32] = [
     0x74, 0x53, 0xa9, 0x65, 0x8f, 0xd3, 0x25, 0x77, 0x38, 0x5a, 0xd7, 0x26, 0x72, 0xa5, 0x4a, 0xd8,
     0x4f, 0xf7, 0x05, 0x67, 0xfa, 0xdb, 0xde, 0x75, 0xba, 0x66, 0x34, 0xaa, 0x5c, 0xc6, 0x84, 0xa3,
@@ -1567,7 +1567,14 @@ fn write_pattern_state(writer: &mut Writer, pattern: &PatternState) {
     writer.u8(pattern.pattern_type);
     writer.bool(pattern.bounce_cap);
     writer.bool(pattern.spawn_enabled);
-    writer.u8(pattern.special);
+    match pattern.automatic_variant {
+        Some(variant) => {
+            writer.bool(true);
+            writer.u8(variant);
+        }
+        None => writer.bool(false),
+    }
+    writer.i32(pattern.special.raw());
     writer.u32(pattern.counter);
     writer.i32(pattern.timer.raw());
     writer.u32(pattern.rects.len() as u32);
@@ -1685,7 +1692,12 @@ fn read_pattern_state(reader: &mut Reader<'_>) -> Result<PatternState, CoreError
     let pattern_type = reader.u8()?;
     let bounce_cap = reader.bool()?;
     let spawn_enabled = reader.bool()?;
-    let special = reader.u8()?;
+    let automatic_variant = if reader.bool()? {
+        Some(reader.u8()?)
+    } else {
+        None
+    };
+    let special = PicoFixed::from_raw(reader.i32()?);
     let counter = reader.u32()?;
     let timer = PicoFixed::from_raw(reader.i32()?);
     let rect_count = reader.u32()?;
@@ -1706,6 +1718,7 @@ fn read_pattern_state(reader: &mut Reader<'_>) -> Result<PatternState, CoreError
         pattern_type,
         bounce_cap,
         spawn_enabled,
+        automatic_variant,
         special,
         counter,
         timer,

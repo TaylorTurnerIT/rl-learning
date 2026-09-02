@@ -17,7 +17,7 @@ FRAME_HEIGHT = 128
 FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT
 FIXED_SCALE = 1 << 16
 SNAPSHOT_MAGIC = b"DGSN"
-SNAPSHOT_WIRE_VERSION = 6
+SNAPSHOT_WIRE_VERSION = 7
 MAX_ENEMIES = 4_096
 
 NATIVE_MODES = {
@@ -898,7 +898,10 @@ def _skip_pattern(reader: _Reader) -> None:
     if variant_count > 256:
         raise NativeDifferentialError("native pattern variant count is invalid")
     reader.skip(variant_count)
-    reader.skip(1 + 1 + 1 + 1 + 1 + 4 + 4)
+    reader.skip(1 + 1 + 1 + 1)
+    if reader.boolean():
+        reader.skip(1)
+    reader.skip(4 + 4 + 4)
     rect_count = reader.u32()
     if rect_count > 4096:
         raise NativeDifferentialError("native pattern rectangle count is invalid")

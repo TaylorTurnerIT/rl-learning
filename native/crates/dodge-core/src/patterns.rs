@@ -60,7 +60,8 @@ pub struct PatternState {
     pub pattern_type: u8,
     pub bounce_cap: bool,
     pub spawn_enabled: bool,
-    pub special: u8,
+    pub automatic_variant: Option<u8>,
+    pub special: PicoFixed,
     pub counter: u32,
     pub timer: PicoFixed,
     pub rects: Vec<PatternRect>,
@@ -112,7 +113,8 @@ impl PatternState {
             pattern_type: 0,
             bounce_cap: false,
             spawn_enabled: false,
-            special: 0,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
             counter: 0,
             timer: PicoFixed::ZERO,
             rects,
@@ -127,9 +129,7 @@ impl PatternState {
 
     fn with_variants(mut self, variants: &[u8], automatic: Option<u8>) -> Self {
         self.variants = variants.to_vec();
-        if let Some(target_id) = automatic {
-            self.special = target_id;
-        }
+        self.automatic_variant = automatic;
         self
     }
 
@@ -138,8 +138,8 @@ impl PatternState {
         self
     }
 
-    fn with_special(mut self, special: u8) -> Self {
-        self.special = special;
+    fn with_special(mut self, special: f32) -> Self {
+        self.special = PicoFixed::from_f32(special);
         self
     }
 }
@@ -279,8 +279,7 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
             ],
         )
         .with_range(50, 170)
-        .with_variants(&[14], None)
-        .with_special(13),
+        .with_variants(&[14], None),
         PatternState::new(
             14,
             vec![
@@ -300,16 +299,15 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
             ],
         )
         .with_range(50, 120)
-        .with_variants(&[13], None)
-        .with_special(14),
+        .with_variants(&[13], None),
         PatternState::new(15, Vec::new())
             .with_range(100, 200)
             .with_variants(&[16], None)
-            .with_special(1),
+            .with_special(1.0),
         PatternState::new(16, Vec::new())
             .with_range(100, 200)
             .with_variants(&[15], None)
-            .with_special(11),
+            .with_special(1.1),
         PatternState::new(
             17,
             vec![PatternRect::new(56, 56, 16, 16).with_motion(34.0, 0, 0)],
@@ -317,14 +315,14 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
         .with_range(25, 90),
         PatternState::new(18, Vec::new())
             .with_range(0, 60)
-            .with_special(5),
+            .with_special(5.0),
         PatternState::new(19, Vec::new())
             .with_range(60, 120)
-            .with_special(2)
+            .with_special(2.0)
             .with_type(0),
         PatternState::new(20, Vec::new())
             .with_range(60, 120)
-            .with_special(3)
+            .with_special(3.0)
             .with_type(0),
         PatternState::new(
             21,
@@ -364,7 +362,7 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
         .with_type(1),
         PatternState::new(24, Vec::new())
             .with_range(120, 32_767)
-            .with_special(6),
+            .with_special(6.0),
         PatternState::new(
             25,
             vec![
@@ -384,8 +382,7 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
             ],
         )
         .with_range(40, 100)
-        .with_variants(&[26], None)
-        .with_special(25),
+        .with_variants(&[26], None),
         PatternState::new(
             26,
             vec![
@@ -405,11 +402,10 @@ pub(crate) fn init_patterns(rng: &mut PicoRng) -> Vec<PatternState> {
             ],
         )
         .with_range(40, 100)
-        .with_variants(&[25], None)
-        .with_special(26),
+        .with_variants(&[25], None),
         PatternState::new(27, Vec::new())
             .with_range(10, 60)
-            .with_special(7),
+            .with_special(7.0),
         PatternState::new(
             28,
             vec![
@@ -535,18 +531,22 @@ fn spawn(x: i32, y: i32) -> SpawnPoint {
 fn add_special_rects(patterns: &mut [PatternState], rng: &mut PicoRng) {
     if let Some(pattern) = patterns.get_mut(14) {
         for x in (-8..=120).step_by(32) {
-            pattern.rects.push(
-                PatternRect::new(x, 61, 16, 6)
-                    .with_targets(vec![PatternTarget::Wait(PicoFixed::from_f32(8.5))]),
-            );
+            pattern
+                .rects
+                .push(PatternRect::new(x, 61, 16, 6).with_targets(vec![
+                    PatternTarget::SetFyou(false),
+                    PatternTarget::Wait(PicoFixed::from_f32(8.5)),
+                ]));
         }
     }
     if let Some(pattern) = patterns.get_mut(15) {
         for y in (-8..=120).step_by(32) {
-            pattern.rects.push(
-                PatternRect::new(60, y, 8, 16)
-                    .with_targets(vec![PatternTarget::Wait(PicoFixed::from_f32(8.5))]),
-            );
+            pattern
+                .rects
+                .push(PatternRect::new(60, y, 8, 16).with_targets(vec![
+                    PatternTarget::SetFyou(false),
+                    PatternTarget::Wait(PicoFixed::from_f32(8.5)),
+                ]));
         }
     }
     if let Some(pattern) = patterns.get_mut(18) {
@@ -743,7 +743,7 @@ fn apply_defaults(patterns: &mut [PatternState]) {
 fn add_automatic_variants(patterns: &mut [PatternState]) {
     let source = patterns.to_vec();
     for pattern in source {
-        let Some(target_id) = automatic_target(pattern.id) else {
+        let Some(target_id) = pattern.automatic_variant else {
             continue;
         };
         let Some(target) = patterns.get_mut(usize::from(target_id - 1)) else {
@@ -773,21 +773,6 @@ fn add_automatic_variants(patterns: &mut [PatternState]) {
     }
 }
 
-fn automatic_target(id: u8) -> Option<u8> {
-    match id {
-        3 => Some(4),
-        5 => Some(6),
-        7 => Some(8),
-        9 => Some(10),
-        11 => Some(12),
-        30 => Some(31),
-        32 => Some(33),
-        36 => Some(37),
-        38 => Some(39),
-        _ => None,
-    }
-}
-
 fn transpose_target(target: &PatternTarget) -> PatternTarget {
     match target {
         PatternTarget::Move {
@@ -812,5 +797,29 @@ fn transpose_target(target: &PatternTarget) -> PatternTarget {
                 })
                 .collect(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::init_patterns;
+    use crate::{PicoFixed, PicoRng};
+
+    #[test]
+    fn v155_special_values_and_automatic_variants_are_independent() {
+        let mut rng = PicoRng::new(42);
+        let patterns = init_patterns(&mut rng);
+        assert_eq!(patterns.get(2).and_then(|p| p.automatic_variant), Some(4));
+        assert_eq!(patterns.get(2).map(|p| p.special), Some(PicoFixed::ZERO));
+        assert_eq!(
+            patterns.get(14).map(|p| p.special),
+            Some(PicoFixed::from_int(1))
+        );
+        assert_eq!(
+            patterns.get(15).map(|p| p.special),
+            Some(PicoFixed::from_f32(1.1))
+        );
+        assert_eq!(patterns.get(24).and_then(|p| p.automatic_variant), None);
+        assert_eq!(patterns.get(24).map(|p| p.special), Some(PicoFixed::ZERO));
     }
 }

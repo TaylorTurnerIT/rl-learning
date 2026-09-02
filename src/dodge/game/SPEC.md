@@ -300,6 +300,12 @@ visited again after its outer collision shatter.
 V154: enemy updates preserve source pre-growth local position/size for pattern and
 crush checks, then use post-growth entity position/size for overlap, edge bounce,
 kamikaze speed, and movement.
+V155: pattern metadata preserves source `special` numeric values, including 1.1,
+separately from `autovar`; generated constructors and snapshots retain both
+identities without sentinel substitutions.
+V156: native rounding uses the source modulo-positive fractional part for
+negative coordinates, so pattern interpolation and raster coordinates round
+with the same floor/half-up boundary as PICO-8.
 
 §T
 
@@ -504,3 +510,5 @@ B123|2026-09-02|new difficulty tables used direct indexing under workspace no-pa
 B124|2026-09-02|native snapshot wire version changed without updating the Python fixture constructor|V152
 B125|2026-09-02|native P2 collision removed initiating enemy before source mutable-list iteration|V153
 B126|2026-09-02|native enemy update reused one size/position view across source pre-growth and post-growth checks|V154
+B127|2026-09-02|pattern metadata wire and constructors assumed autovar could stand in for special values|V155
+B128|2026-09-02|native round used signed remainder and rounded negative subpixels toward floor|V156
