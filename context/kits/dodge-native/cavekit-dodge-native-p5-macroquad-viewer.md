@@ -63,7 +63,7 @@ with source hash and frame metadata.
 
 | id | topic | finding | source |
 |----|-------|---------|--------|
-| R1 | Macroquad API | Macroquad advertises a small Rust API, PC support, and efficient 2D rendering with automatic geometry batching | https://docs.rs/macroquad/latest/macroquad/ |
+| R1 | Macroquad API | Macroquad 0.4.16 exposes `Texture2D::from_rgba8` and `FilterMode::Nearest`, which fit the final indexed-to-RGBA viewer boundary | https://docs.rs/macroquad/0.4.16/macroquad/texture/struct.Texture2D.html |
 | R2 | Macroquad getting started | Official examples use a Macroquad main loop and next_frame; viewer lifecycle must remain outside core stepping | https://macroquad.rs/ |
 | R3 | Namtao Rust devenv | Suggested setup includes rustfmt, clippy, rust-analyzer, bacon, cargo-nextest, and a pinned Rust devenv; use those practices without putting viewer tools in core | https://www.namtao.com/rust/ |
 
@@ -90,13 +90,13 @@ with source hash and frame metadata.
 
 | id | status | task | cites |
 |----|--------|------|-------|
-| P5-T1 | . | Add Macroquad viewer crate and pin selected version/toolchain in Rust workspace | §C,R1 |
-| P5-T2 | . | Upload canonical indexed framebuffer through palette-preserving texture path | V1,V2,V3 |
-| P5-T3 | . | Add seed/config launch, native frame loop, and visible cadence without core coupling | V4,V5 |
-| P5-T4 | . | Add trace replay with controls disabled and exact action/frame scheduling | V5,V6 |
-| P5-T5 | . | Add optional read-only state/hash/debug overlay and lossless frame capture | V7,V8 |
-| P5-T6 | . | Add viewer screenshot/source-buffer comparison fixtures | V1,V2,V3 |
-| P5-T7 | . | Perform original-vs-native visual review across representative scenarios | V8 |
+| P5-T1 | x | Add Macroquad viewer crate and pin selected version/toolchain in Rust workspace | §C,R1 |
+| P5-T2 | x | Upload canonical indexed framebuffer through palette-preserving texture path | V1,V2,V3 |
+| P5-T3 | x | Add seed/config launch, native frame loop, and visible cadence without core coupling | V4,V5 |
+| P5-T4 | x | Add trace replay with controls disabled and exact action/frame scheduling | V5,V6 |
+| P5-T5 | x | Add optional read-only state/hash/debug overlay and lossless frame capture | V7,V8 |
+| P5-T6 | x | Add viewer screenshot/source-buffer comparison fixtures | V1,V2,V3 |
+| P5-T7 | ~ | Perform original-vs-native visual review across representative scenarios | V8 |
 | P5-T8 | . | Produce viewer acceptance report and hand stable presentation contract to P7 | V1-V8 |
 
 ### §B BUGS

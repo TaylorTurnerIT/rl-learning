@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/dodge-core", "crates/dodge-native-runner"]
+members = [
+    "crates/dodge-core",
+    "crates/dodge-native-runner",
+    "crates/dodge-viewer",
+]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
