@@ -97,7 +97,7 @@ with source hash and frame metadata.
 | P5-T5 | x | Add optional read-only state/hash/debug overlay and lossless frame capture | V7,V8 |
 | P5-T6 | x | Add viewer screenshot/source-buffer comparison fixtures | V1,V2,V3 |
 | P5-T7 | ~ | Perform original-vs-native visual review across representative scenarios | V8 |
-| P5-T8 | . | Produce viewer acceptance report and hand stable presentation contract to P7 | V1-V8 |
+| P5-T8 | x | Produce viewer acceptance report and hand stable presentation contract to P7 | V1-V8 |
 
 ### §B BUGS
 

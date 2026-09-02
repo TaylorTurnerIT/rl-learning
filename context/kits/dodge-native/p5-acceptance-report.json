@@ -1,0 +1,52 @@
+{
+  "phase": "P5",
+  "schema_version": 1,
+  "status": "accepted_automated_owner_visual_review_pending",
+  "handoff": "p6_batch_and_p7_ready",
+  "crate": {
+    "name": "dodge-viewer",
+    "macroquad": "0.4.16",
+    "cargo_lock_sha256": "bbfb97368d70dfc8c61e537b20b928c960544d7624fa2aa3dd1bbc353fd848c0"
+  },
+  "contract": {
+    "source": "dodge_core::Snapshot",
+    "logical_width": 128,
+    "logical_height": 128,
+    "input_format": "native runner trace snapshot_hex",
+    "scaling": "integer centered square",
+    "filter": "nearest",
+    "overlay": "opt-in and drawn after canonical texture",
+    "capture": ["indexed PGM", "RGB PPM"]
+  },
+  "automated_checks": {
+    "viewer_tests": "6 passed",
+    "workspace_tests": "40 core + 4 runner + 6 viewer passed",
+    "workspace_clippy_warnings_as_errors": "passed",
+    "workspace_fmt_check": "passed",
+    "trace_replay": {
+      "native_trace": "src/dodge/runtime/.native-p4-full-native-f64-20260902.json",
+      "frame": 0,
+      "status": "snapshot, state hash, and pixel hash validated"
+    },
+    "live_xvfb_smoke": {
+      "status": "passed",
+      "window_discovery": "Dodge Native Viewer title",
+      "escape_exit_code": 0,
+      "viewer_exit_code": 0,
+      "capture": "src/dodge/runtime/.native-viewer-smoke-20260902.pgm",
+      "capture_sha256": "c4d7ec304e8be2b388ffab0f7e9255258e1345b4842360242f39b9b994cc0395",
+      "capture_payload_bytes": 16384,
+      "capture_payload_matches_native_pixels": true
+    }
+  },
+  "owner_review": {
+    "status": "pending",
+    "required_scope": "side-by-side review of menu, settings, gameplay, patterns, particles, death, and transitions",
+    "note": "The viewer presents the accepted native indexed framebuffer; automated source-buffer and runtime checks pass."
+  },
+  "deferred": [
+    "audio playback",
+    "owner visual approval",
+    "training batch and Python binding"
+  ]
+}
