@@ -17,15 +17,48 @@ const SPAWN_INTERVAL: PicoFixed = PicoFixed::from_int(60);
 const ENEMY_HALF_STEP: PicoFixed = PicoFixed::from_raw(32_768);
 const DIFFICULTY_SPEED_TARGET: PicoFixed = PicoFixed::from_int(3);
 const DIFFICULTY_EST_TARGET: PicoFixed = PicoFixed::from_raw(14_417);
-const DIFFICULTY_SPEED_STEP: PicoFixed = PicoFixed::from_raw(226);
-const DIFFICULTY_EST_STEP: PicoFixed = PicoFixed::from_raw(327);
-const DIFFICULTY_SPEED_FULL_STEP: PicoFixed = PicoFixed::from_raw(452);
-const DIFFICULTY_EST_FULL_STEP: PicoFixed = PicoFixed::from_raw(655);
 const SCORE_PER_SHATTER: PicoFixed = PicoFixed::from_raw(32_768);
 const ENEMY_SPEED_STEP: PicoFixed = PicoFixed::from_raw(655);
 const KAMIKAZE_RADIUS_SQUARED: PicoFixed = PicoFixed::from_int(625);
 const INITIAL_PATTERN_DELAY_FRAMES: u32 = 420;
 const ACTIVE_PATTERN_DELAY_FRAMES: u32 = 600;
+
+#[derive(Clone, Copy)]
+struct DifficultyCurve {
+    speed_increment: PicoFixed,
+    enemy_increment: PicoFixed,
+    static_increment: PicoFixed,
+    static_target: PicoFixed,
+    moving_increment: PicoFixed,
+    moving_target: PicoFixed,
+}
+
+const DIFFICULTY_CURVES: [DifficultyCurve; 3] = [
+    DifficultyCurve {
+        speed_increment: PicoFixed::from_raw(131),
+        enemy_increment: PicoFixed::from_raw(327),
+        static_increment: PicoFixed::from_raw(32),
+        static_target: PicoFixed::from_raw(29_491),
+        moving_increment: PicoFixed::from_raw(85),
+        moving_target: PicoFixed::from_raw(29_491),
+    },
+    DifficultyCurve {
+        speed_increment: PicoFixed::from_raw(452),
+        enemy_increment: PicoFixed::from_raw(655),
+        static_increment: PicoFixed::from_raw(1_245),
+        static_target: PicoFixed::from_raw(29_491),
+        moving_increment: PicoFixed::from_raw(1_245),
+        moving_target: PicoFixed::from_raw(29_491),
+    },
+    DifficultyCurve {
+        speed_increment: PicoFixed::from_raw(1_835),
+        enemy_increment: PicoFixed::from_raw(1_310),
+        static_increment: PicoFixed::from_raw(1_572),
+        static_target: PicoFixed::from_raw(26_214),
+        moving_increment: PicoFixed::from_raw(1_572),
+        moving_target: PicoFixed::from_raw(26_214),
+    },
+];
 
 /// Result of one native simulation frame and its canonical observation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,6 +131,8 @@ pub struct NativeGame {
     new_highscore: bool,
     can_click: bool,
     has_played: bool,
+    should_collide: bool,
+    enemy_should_collide: bool,
     bounce_cap_static: PicoFixed,
     bounce_cap_moving: PicoFixed,
     bounce_cap: PicoFixed,
@@ -147,6 +182,8 @@ impl NativeGame {
             new_highscore: false,
             can_click: true,
             has_played: false,
+            should_collide: true,
+            enemy_should_collide: true,
             bounce_cap_static: initial_bounce_static(config.difficulty),
             bounce_cap_moving: initial_bounce_moving(config.difficulty),
             bounce_cap: PicoFixed::from_f32(1.45),
@@ -191,6 +228,8 @@ impl NativeGame {
         self.pattern_active = false;
         self.new_highscore = false;
         self.can_click = true;
+        self.should_collide = true;
+        self.enemy_should_collide = true;
         self.bounce_cap_static = initial_bounce_static(self.config.difficulty);
         self.bounce_cap_moving = initial_bounce_moving(self.config.difficulty);
         self.bounce_cap = PicoFixed::from_f32(1.45);
@@ -401,6 +440,8 @@ impl NativeGame {
             new_highscore: self.new_highscore,
             can_click: self.can_click,
             has_played: self.has_played,
+            should_collide: self.should_collide,
+            enemy_should_collide: self.enemy_should_collide,
             bounce_cap_static: self.bounce_cap_static,
             bounce_cap_moving: self.bounce_cap_moving,
             bounce_cap: self.bounce_cap,
@@ -671,7 +712,7 @@ impl NativeGame {
     }
 
     fn collision_check(&mut self, events: &mut Vec<FrameEvent>) {
-        if self.lifecycle.dead {
+        if self.lifecycle.dead || !self.should_collide {
             return;
         }
         let mut index = 0;
@@ -1022,7 +1063,8 @@ impl NativeGame {
                 } else {
                     PicoFixed::ZERO
                 };
-                if inside
+                if self.enemy_should_collide
+                    && inside
                     && other.inside
                     && x.add(size) > other.x.sub(other_offset)
                     && y.add(size) > other.y.sub(other_offset)
@@ -1234,18 +1276,20 @@ impl NativeGame {
     }
 
     fn apply_difficulty(&mut self, half: bool) {
-        let speed_step = if half {
-            DIFFICULTY_SPEED_STEP
-        } else {
-            DIFFICULTY_SPEED_FULL_STEP
+        let index = difficulty_index(self.settings.difficulty);
+        let Some(curve) = DIFFICULTY_CURVES.get(index).copied() else {
+            return;
         };
-        let enemy_step = if half {
-            DIFFICULTY_EST_STEP
-        } else {
-            DIFFICULTY_EST_FULL_STEP
-        };
+        let speed_step = difficulty_increment(curve.speed_increment, half);
+        let enemy_step = difficulty_increment(curve.enemy_increment, half);
         self.speed = pico_lerp(self.speed, DIFFICULTY_SPEED_TARGET, speed_step);
         self.enemy_est = pico_lerp(self.enemy_est, DIFFICULTY_EST_TARGET, enemy_step);
+        let static_step = difficulty_increment(curve.static_increment, half);
+        let moving_step = difficulty_increment(curve.moving_increment, half);
+        self.bounce_cap_static =
+            pico_lerp(self.bounce_cap_static, curve.static_target, static_step);
+        self.bounce_cap_moving =
+            pico_lerp(self.bounce_cap_moving, curve.moving_target, moving_step);
     }
 
     fn update_pattern_schedule(&mut self) {
@@ -1542,6 +1586,19 @@ fn difficulty_index(difficulty: u8) -> usize {
     usize::from(difficulty.clamp(1, 3) - 1)
 }
 
+// These are the cartridge's `difspd`, `difest`, `incbs`, `tarbs`, `incbm`, and
+// `tarbm` tables in the accepted Q16.16 boundary. Keeping table values here,
+// rather than converting through host floats at each update, makes the source
+// difficulty curve part of the portable deterministic contract.
+
+fn difficulty_increment(value: PicoFixed, half: bool) -> PicoFixed {
+    if half {
+        PicoFixed::from_raw(value.raw() / 2)
+    } else {
+        value
+    }
+}
+
 fn initial_speed(difficulty: u8) -> PicoFixed {
     match difficulty_index(difficulty) {
         0 => PicoFixed::from_f32(0.8),
@@ -1834,6 +1891,133 @@ mod tests {
             super::normal_personality_from_roll(PicoFixed::from_int(95)),
             4
         );
+    }
+
+    #[test]
+    fn v149_collision_flags_gate_player_and_enemy_collision() {
+        let mut player_game = NativeGame::new(NativeConfig::default());
+        start_game(&mut player_game);
+        player_game.enemies.clear();
+        player_game.should_collide = false;
+        player_game.enemies.push(EnemyState::normal(
+            PicoFixed::from_int(61),
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(3),
+        ));
+        assert!(player_game.advance_frame(0).is_ok());
+        assert!(!player_game.lifecycle.dead);
+
+        let mut enemy_game = NativeGame::new(NativeConfig::default());
+        start_game(&mut enemy_game);
+        enemy_game.enemies.clear();
+        enemy_game.enemy_should_collide = false;
+        let mut first = EnemyState::normal(
+            PicoFixed::from_int(10),
+            PicoFixed::from_int(10),
+            PicoFixed::from_int(3),
+        );
+        first.inside = true;
+        let mut second = first;
+        second.x = PicoFixed::from_int(11);
+        enemy_game.enemies.push(first);
+        enemy_game.enemies.push(second);
+        assert!(enemy_game.advance_frame(0).is_ok());
+        assert!(enemy_game.enemies().iter().all(|enemy| !enemy.is_dying));
+    }
+
+    #[test]
+    fn v150_difficulty_curve_uses_all_source_tables_and_half_steps() {
+        let expected = [
+            (131, 327, 32, 29_491, 85, 29_491),
+            (452, 655, 1_245, 29_491, 1_245, 29_491),
+            (1_835, 1_310, 1_572, 26_214, 1_572, 26_214),
+        ];
+        for (difficulty_index, values) in expected.iter().enumerate() {
+            let difficulty = u8::try_from(difficulty_index + 1).unwrap_or(1);
+            let curve = super::DIFFICULTY_CURVES.get(difficulty_index).copied();
+            assert!(curve.is_some());
+            let Some(curve) = curve else {
+                continue;
+            };
+            assert_eq!(curve.speed_increment, PicoFixed::from_raw(values.0));
+            assert_eq!(curve.enemy_increment, PicoFixed::from_raw(values.1));
+            assert_eq!(curve.static_increment, PicoFixed::from_raw(values.2));
+            assert_eq!(curve.static_target, PicoFixed::from_raw(values.3));
+            assert_eq!(curve.moving_increment, PicoFixed::from_raw(values.4));
+            assert_eq!(curve.moving_target, PicoFixed::from_raw(values.5));
+
+            let mut config = NativeConfig::new(42);
+            config.difficulty = difficulty;
+            let mut full = NativeGame::new(config);
+            full.apply_difficulty(false);
+            assert_eq!(
+                full.speed,
+                super::pico_lerp(
+                    super::initial_speed(difficulty),
+                    super::DIFFICULTY_SPEED_TARGET,
+                    curve.speed_increment,
+                )
+            );
+            assert_eq!(
+                full.enemy_est,
+                super::pico_lerp(
+                    super::initial_enemy_est(difficulty),
+                    super::DIFFICULTY_EST_TARGET,
+                    curve.enemy_increment,
+                )
+            );
+            assert_eq!(
+                full.bounce_cap_static,
+                super::pico_lerp(
+                    super::initial_bounce_static(difficulty),
+                    curve.static_target,
+                    curve.static_increment,
+                )
+            );
+            assert_eq!(
+                full.bounce_cap_moving,
+                super::pico_lerp(
+                    super::initial_bounce_moving(difficulty),
+                    curve.moving_target,
+                    curve.moving_increment,
+                )
+            );
+
+            let mut half = NativeGame::new(config);
+            half.apply_difficulty(true);
+            assert_eq!(
+                half.speed,
+                super::pico_lerp(
+                    super::initial_speed(difficulty),
+                    super::DIFFICULTY_SPEED_TARGET,
+                    super::difficulty_increment(curve.speed_increment, true),
+                )
+            );
+            assert_eq!(
+                half.enemy_est,
+                super::pico_lerp(
+                    super::initial_enemy_est(difficulty),
+                    super::DIFFICULTY_EST_TARGET,
+                    super::difficulty_increment(curve.enemy_increment, true),
+                )
+            );
+            assert_eq!(
+                half.bounce_cap_static,
+                super::pico_lerp(
+                    super::initial_bounce_static(difficulty),
+                    curve.static_target,
+                    super::difficulty_increment(curve.static_increment, true),
+                )
+            );
+            assert_eq!(
+                half.bounce_cap_moving,
+                super::pico_lerp(
+                    super::initial_bounce_moving(difficulty),
+                    curve.moving_target,
+                    super::difficulty_increment(curve.moving_increment, true),
+                )
+            );
+        }
     }
 
     #[test]

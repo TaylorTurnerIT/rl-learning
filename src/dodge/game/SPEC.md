@@ -280,8 +280,19 @@ V147: terminal rendering preserves the camera-directed physical-screen edge
 through the normal clear/project path; it does not force one physical row to a
 constant color.
 V148: a normal collision followed by `die` applies the source shake increment
-twice, once in `collide` and once in `die`, before the next `_update60` camera
-sample.
+ twice, once in `collide` and once in `die`, before the next `_update60` camera
+ sample.
+V149: player collision is enabled only while `shouldcollide` is true, and enemy
+overlap marking is enabled only while `eshouldcollide` is true; both controls
+are part of the canonical replay state.
+V150: every source `difficultycurve(half)` call uses the difficulty-indexed speed,
+spawn-rate, static-bounce, and moving-bounce increments and targets, dividing
+each increment by two only for the `half` call.
+V151: difficulty configuration maps only to bounded curve-table entries; invalid
+configuration values cannot reach unchecked table indexing.
+V152: native snapshot wire-version changes update every producer, decoder, and
+fixture constructor together; current fixtures decode through the current field
+layout before differential comparison.
 
 §T
 
@@ -348,7 +359,7 @@ T59|x|add field/pixel differential comparison + source-map diagnostics|V100,I.fi
 T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches; classify visual boundary for P4|V94-V100,V117,V118
 T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
 P4-T1|x|port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries|V119,V120,V128,V143-V145
-P4-T2|.|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128
+P4-T2|~|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128,V149,V150
 P4-T3|.|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125
 P4-T4|.|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123
 P4-T5|.|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126
@@ -482,3 +493,5 @@ B119|2026-09-02|settings-to-game replay kept transition_to_game for one frame af
 B120|2026-09-02|generic transition-boundary trail compensation added a second settings-to-game trail that the source does not retain|V146
 B121|2026-09-02|terminal rendering forced the physical bottom row to zero and broke a source trace whose quantized camera offset retained background there|V147
 B122|2026-09-02|native die omitted the source's second shake increment, changing terminal camera quantization and the retained edge|V148
+B123|2026-09-02|new difficulty tables used direct indexing under workspace no-panic lint|V151
+B124|2026-09-02|native snapshot wire version changed without updating the Python fixture constructor|V152

@@ -17,7 +17,7 @@ FRAME_HEIGHT = 128
 FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT
 FIXED_SCALE = 1 << 16
 SNAPSHOT_MAGIC = b"DGSN"
-SNAPSHOT_WIRE_VERSION = 5
+SNAPSHOT_WIRE_VERSION = 6
 MAX_ENEMIES = 4_096
 
 NATIVE_MODES = {
@@ -196,6 +196,8 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     reader.boolean()
     reader.u32()
     reader.u32()
+    reader.boolean()
+    reader.boolean()
     reader.boolean()
     reader.boolean()
     reader.boolean()

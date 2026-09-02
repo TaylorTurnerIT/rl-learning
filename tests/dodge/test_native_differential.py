@@ -22,7 +22,7 @@ def _snapshot_hex(
     pixels: bytes = bytes(128 * 128),
 ) -> str:
     output = bytearray(b"DGSN")
-    output.extend(struct.pack("<II", 5, 1))
+    output.extend(struct.pack("<II", 6, 1))
     output.extend(SOURCE_HASH)
     output.extend(struct.pack("<II", 42, frame))
     output.extend(struct.pack("<Bh", 1, -108))
@@ -41,8 +41,8 @@ def _snapshot_hex(
     output.extend(struct.pack("<I", 0))
     output.extend(
         struct.pack(
-            "<ii5iIBiiiBIiBBIIBBBBiiiiIiiih",
-            *([0] * 31),
+            "<ii5iIBiiiBIiBBIIBBBBBBiiiiIiiih",
+            *([0] * 33),
             -108,
         )
     )

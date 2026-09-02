@@ -12,7 +12,7 @@ pub const FRAMEBUFFER_WIDTH: usize = 128;
 pub const FRAMEBUFFER_HEIGHT: usize = 128;
 pub const FRAMEBUFFER_SIZE: usize = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT;
 pub const PALETTE_SIZE: usize = 16;
-pub const SNAPSHOT_WIRE_VERSION: u32 = 5;
+pub const SNAPSHOT_WIRE_VERSION: u32 = 6;
 pub const CARTRIDGE_SOURCE_SHA256: [u8; 32] = [
     0x74, 0x53, 0xa9, 0x65, 0x8f, 0xd3, 0x25, 0x77, 0x38, 0x5a, 0xd7, 0x26, 0x72, 0xa5, 0x4a, 0xd8,
     0x4f, 0xf7, 0x05, 0x67, 0xfa, 0xdb, 0xde, 0x75, 0xba, 0x66, 0x34, 0xaa, 0x5c, 0xc6, 0x84, 0xa3,
@@ -81,6 +81,8 @@ pub struct FullState {
     pub new_highscore: bool,
     pub can_click: bool,
     pub has_played: bool,
+    pub should_collide: bool,
+    pub enemy_should_collide: bool,
     pub bounce_cap_static: PicoFixed,
     pub bounce_cap_moving: PicoFixed,
     pub bounce_cap: PicoFixed,
@@ -1304,6 +1306,8 @@ fn write_full_state(writer: &mut Writer, state: &FullState) {
     writer.bool(state.new_highscore);
     writer.bool(state.can_click);
     writer.bool(state.has_played);
+    writer.bool(state.should_collide);
+    writer.bool(state.enemy_should_collide);
     writer.i32(state.bounce_cap_static.raw());
     writer.i32(state.bounce_cap_moving.raw());
     writer.i32(state.bounce_cap.raw());
@@ -1410,6 +1414,8 @@ fn read_full_state(reader: &mut Reader<'_>) -> Result<FullState, CoreError> {
     let new_highscore = reader.bool()?;
     let can_click = reader.bool()?;
     let has_played = reader.bool()?;
+    let should_collide = reader.bool()?;
+    let enemy_should_collide = reader.bool()?;
     let bounce_cap_static = PicoFixed::from_raw(reader.i32()?);
     let bounce_cap_moving = PicoFixed::from_raw(reader.i32()?);
     let bounce_cap = PicoFixed::from_raw(reader.i32()?);
@@ -1478,6 +1484,8 @@ fn read_full_state(reader: &mut Reader<'_>) -> Result<FullState, CoreError> {
         new_highscore,
         can_click,
         has_played,
+        should_collide,
+        enemy_should_collide,
         bounce_cap_static,
         bounce_cap_moving,
         bounce_cap,
