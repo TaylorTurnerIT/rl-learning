@@ -306,6 +306,9 @@ identities without sentinel substitutions.
 V156: native rounding uses the source modulo-positive fractional part for
 negative coordinates, so pattern interpolation and raster coordinates round
 with the same floor/half-up boundary as PICO-8.
+V157: active patterns generate source warnings, apply rectangle targets in order,
+perform visibility/fade completion, restore default friendly/spawn state, and
+reinitialize generated pattern data while preserving counters/probabilities.
 
 §T
 
@@ -373,8 +376,8 @@ T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches
 T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
 P4-T1|x|port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries|V119,V120,V128,V143-V145
 P4-T2|x|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128,V149,V150,V153
-P4-T3|~|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154
-P4-T4|.|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123
+P4-T3|x|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154
+P4-T4|~|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123,V157
 P4-T5|.|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126
 P4-T6|.|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
 P4-T7|.|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129
@@ -512,3 +515,4 @@ B125|2026-09-02|native P2 collision removed initiating enemy before source mutab
 B126|2026-09-02|native enemy update reused one size/position view across source pre-growth and post-growth checks|V154
 B127|2026-09-02|pattern metadata wire and constructors assumed autovar could stand in for special values|V155
 B128|2026-09-02|native round used signed remainder and rounded negative subpixels toward floor|V156
+B129|2026-09-02|native pattern scheduler only opened rectangles and never executed source targets or completion reset|V157

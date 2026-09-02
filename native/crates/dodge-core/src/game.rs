@@ -1461,7 +1461,7 @@ impl NativeGame {
                 continue;
             };
             if pattern_snapshot.pattern_type == 1 && rect_snapshot.sh < PicoFixed::from_int(2) {
-                let warnings = moving_pattern_warnings(&rect_snapshot, increment);
+                let warnings = moving_pattern_warnings(&rect_snapshot);
                 if let Some(rect) = self
                     .patterns
                     .get_mut(pattern_index)
@@ -1862,139 +1862,80 @@ fn move_toward(
     }
 }
 
-fn moving_pattern_warnings(
-    rect: &crate::PatternRect,
-    _increment: PicoFixed,
-) -> Vec<crate::WarningLine> {
+fn moving_pattern_warnings(rect: &crate::PatternRect) -> Vec<crate::WarningLine> {
     let x = rect.x;
     let y = rect.y;
     let width = rect.width;
     let height = rect.height;
     let offset = PicoFixed::from_int(6);
+    let half_width = width
+        .div_fixed(PicoFixed::from_int(2))
+        .unwrap_or(PicoFixed::ZERO);
+    let half_height = height
+        .div_fixed(PicoFixed::from_int(2))
+        .unwrap_or(PicoFixed::ZERO);
+    let center_x = x.add(half_width);
+    let center_y = y.add(half_height);
     let sh = rect.sh.min(PicoFixed::ONE);
     let mut warnings = Vec::new();
     if rect.dx > PicoFixed::ZERO {
         warnings = vec![
             crate::WarningLine {
                 x0: x.add(width).add(offset),
-                y0: y.add(
-                    height
-                        .div_fixed(PicoFixed::from_int(2))
-                        .unwrap_or(PicoFixed::ZERO),
-                ),
+                y0: center_y,
                 x1: x.add(width).add(offset),
-                y1: pico_lerp(
-                    y.add(
-                        height
-                            .div_fixed(PicoFixed::from_int(2))
-                            .unwrap_or(PicoFixed::ZERO),
-                    ),
-                    y.add(PicoFixed::ONE),
-                    sh,
-                ),
+                y1: pico_lerp(center_y, y.add(PicoFixed::ONE), sh),
             },
             crate::WarningLine {
                 x0: x.add(width).add(offset),
-                y0: y.add(
-                    height
-                        .div_fixed(PicoFixed::from_int(2))
-                        .unwrap_or(PicoFixed::ZERO),
-                ),
+                y0: center_y,
                 x1: x.add(width).add(offset),
-                y1: pico_lerp(
-                    y.add(
-                        height
-                            .div_fixed(PicoFixed::from_int(2))
-                            .unwrap_or(PicoFixed::ZERO),
-                    ),
-                    y.add(height).sub(PicoFixed::from_int(2)),
-                    sh,
-                ),
+                y1: pico_lerp(center_y, y.add(height).sub(PicoFixed::from_int(2)), sh),
             },
         ];
     } else if rect.dx < PicoFixed::ZERO {
         warnings = vec![
             crate::WarningLine {
                 x0: x.sub(offset),
-                y0: y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                y0: center_y,
                 x1: x.sub(offset),
-                y1: pico_lerp(
-                    y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
-                    y.add(PicoFixed::ONE),
-                    sh,
-                ),
+                y1: pico_lerp(center_y, y.add(PicoFixed::ONE), sh),
             },
             crate::WarningLine {
                 x0: x.sub(offset),
-                y0: y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
+                y0: center_y,
                 x1: x.sub(offset),
-                y1: pico_lerp(
-                    y.add(height).div_fixed(PicoFixed::from_int(2)).unwrap_or(y),
-                    y.add(height).sub(PicoFixed::from_int(2)),
-                    sh,
-                ),
+                y1: pico_lerp(center_y, y.add(height).sub(PicoFixed::from_int(2)), sh),
             },
         ];
     }
     if rect.dy > PicoFixed::ZERO {
         warnings = vec![
             crate::WarningLine {
-                x0: x.add(
-                    width
-                        .div_fixed(PicoFixed::from_int(2))
-                        .unwrap_or(PicoFixed::ZERO),
-                ),
+                x0: center_x,
                 y0: y.add(height).add(offset),
-                x1: pico_lerp(
-                    x.add(
-                        width
-                            .div_fixed(PicoFixed::from_int(2))
-                            .unwrap_or(PicoFixed::ZERO),
-                    ),
-                    x.add(PicoFixed::ONE),
-                    sh,
-                ),
+                x1: pico_lerp(center_x, x.add(PicoFixed::ONE), sh),
                 y1: y.add(height).add(offset),
             },
             crate::WarningLine {
-                x0: x.add(
-                    width
-                        .div_fixed(PicoFixed::from_int(2))
-                        .unwrap_or(PicoFixed::ZERO),
-                ),
+                x0: center_x,
                 y0: y.add(height).add(offset),
-                x1: pico_lerp(
-                    x.add(
-                        width
-                            .div_fixed(PicoFixed::from_int(2))
-                            .unwrap_or(PicoFixed::ZERO),
-                    ),
-                    x.add(width).sub(PicoFixed::from_int(2)),
-                    sh,
-                ),
+                x1: pico_lerp(center_x, x.add(width).sub(PicoFixed::from_int(2)), sh),
                 y1: y.add(height).add(offset),
             },
         ];
     } else if rect.dy < PicoFixed::ZERO {
         warnings = vec![
             crate::WarningLine {
-                x0: x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                x0: center_x,
                 y0: y.sub(offset),
-                x1: pico_lerp(
-                    x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
-                    x.add(PicoFixed::ONE),
-                    sh,
-                ),
+                x1: pico_lerp(center_x, x.add(PicoFixed::ONE), sh),
                 y1: y.sub(offset),
             },
             crate::WarningLine {
-                x0: x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
+                x0: center_x,
                 y0: y.sub(offset),
-                x1: pico_lerp(
-                    x.add(width).div_fixed(PicoFixed::from_int(2)).unwrap_or(x),
-                    x.add(width).sub(PicoFixed::from_int(2)),
-                    sh,
-                ),
+                x1: pico_lerp(center_x, x.add(width).sub(PicoFixed::from_int(2)), sh),
                 y1: y.sub(offset),
             },
         ];
@@ -2131,7 +2072,10 @@ fn settings_row(cursor: u8) -> i16 {
 #[cfg(test)]
 mod tests {
     use super::NativeGame;
-    use crate::{Action, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PicoFixed};
+    use crate::{
+        Action, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PatternRect,
+        PatternState, PatternTarget, PicoFixed,
+    };
 
     fn start_game(game: &mut NativeGame) {
         assert!(game.advance_frame(BUTTON_X_MASK).is_ok());
@@ -2601,6 +2545,92 @@ mod tests {
                 expected.snapshot.canonical_bytes()
             );
         }
+    }
+
+    #[test]
+    fn v157_pattern_targets_warnings_and_completion_follow_source_order() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        let moving = PatternRect {
+            x: PicoFixed::from_int(10),
+            y: PicoFixed::from_int(20),
+            width: PicoFixed::from_int(16),
+            height: PicoFixed::from_int(6),
+            speed: PicoFixed::from_f32(0.7),
+            dx: PicoFixed::from_int(1),
+            dy: PicoFixed::ZERO,
+            targets: vec![
+                PatternTarget::SetFyou(false),
+                PatternTarget::Wait(PicoFixed::from_f32(0.05)),
+            ],
+            target_index: 0,
+            wait: PicoFixed::ZERO,
+            shown: true,
+            sh: PicoFixed::ZERO,
+            warnings: Vec::new(),
+            collision_done: false,
+            finished: false,
+        };
+        game.patterns = vec![PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::from_int(15),
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 1,
+            bounce_cap: false,
+            spawn_enabled: true,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
+            counter: 7,
+            timer: PicoFixed::ZERO,
+            rects: vec![moving],
+        }];
+        game.active_pattern = Some(0);
+        game.friendly_enabled = true;
+
+        game.update_active_pattern();
+        let moving = game
+            .patterns
+            .first()
+            .and_then(|pattern| pattern.rects.first());
+        assert_eq!(moving.map(|rect| rect.sh), Some(PicoFixed::from_f32(0.02)));
+        assert_eq!(moving.map(|rect| rect.warnings.len()), Some(2));
+        assert_eq!(
+            moving
+                .and_then(|rect| rect.warnings.first())
+                .map(|warning| warning.x0),
+            Some(PicoFixed::from_int(32))
+        );
+        assert!(game.friendly_enabled);
+
+        for _ in 0..99 {
+            game.update_active_pattern();
+        }
+        assert_eq!(
+            game.patterns
+                .first()
+                .and_then(|pattern| pattern.rects.first())
+                .map(|rect| rect.sh),
+            Some(PicoFixed::from_int(2))
+        );
+        game.update_active_pattern();
+        assert!(!game.friendly_enabled);
+        assert_eq!(
+            game.patterns
+                .first()
+                .and_then(|pattern| pattern.rects.first())
+                .map(|rect| rect.target_index),
+            Some(1)
+        );
+        for _ in 0..2 {
+            game.update_active_pattern();
+        }
+        assert!(game.active_pattern.is_some());
+        game.update_active_pattern();
+        assert!(game.active_pattern.is_none());
+        assert!(game.friendly_enabled);
+        assert_eq!(game.spawns.len(), 4);
     }
 
     #[test]
