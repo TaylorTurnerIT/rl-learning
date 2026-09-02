@@ -38,6 +38,19 @@ impl InputState {
         }
     }
 
+    pub(crate) const fn from_masks(current_mask: u8, previous_mask: u8) -> Result<Self, CoreError> {
+        if current_mask > BUTTON_MASK_LIMIT {
+            return Err(CoreError::InvalidButtonMask(current_mask));
+        }
+        if previous_mask > BUTTON_MASK_LIMIT {
+            return Err(CoreError::InvalidButtonMask(previous_mask));
+        }
+        Ok(Self {
+            current_mask,
+            previous_mask,
+        })
+    }
+
     pub const fn current_mask(self) -> u8 {
         self.current_mask
     }

@@ -8,6 +8,7 @@ mod game;
 mod input;
 mod lifecycle;
 mod rng;
+mod snapshot;
 mod state;
 
 pub use action::{Action, BUTTON_X_MASK};
@@ -18,6 +19,10 @@ pub use game::{FrameResult, NativeGame};
 pub use input::{BUTTON_MASK_LIMIT, Button, InputState};
 pub use lifecycle::{LifecycleState, Mode};
 pub use rng::{PicoRng, RngCheckpoint};
+pub use snapshot::{
+    CARTRIDGE_SOURCE_SHA256, FRAMEBUFFER_HEIGHT, FRAMEBUFFER_SIZE, FRAMEBUFFER_WIDTH, FullState,
+    IndexedFramebuffer, RenderState, Snapshot, SnapshotProvenance,
+};
 pub use state::{EnemyState, PlayerState};
 
 /// Workspace-level version of native state contract.

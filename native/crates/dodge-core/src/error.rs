@@ -9,6 +9,11 @@ pub enum CoreError {
     InvalidFrameCount(u32),
     DivisionByZero,
     InvalidRngCheckpoint,
+    InvalidSnapshotMagic,
+    InvalidSnapshotVersion(u32),
+    InvalidSnapshotTruncated,
+    InvalidSnapshotValue,
+    InvalidSnapshotTrailingBytes,
 }
 
 impl Display for CoreError {
@@ -26,6 +31,15 @@ impl Display for CoreError {
             }
             Self::DivisionByZero => formatter.write_str("PICO-8 fixed division by zero"),
             Self::InvalidRngCheckpoint => formatter.write_str("invalid PICO-8 RNG checkpoint"),
+            Self::InvalidSnapshotMagic => formatter.write_str("invalid native snapshot magic"),
+            Self::InvalidSnapshotVersion(version) => {
+                write!(formatter, "invalid native snapshot version: {version}")
+            }
+            Self::InvalidSnapshotTruncated => formatter.write_str("truncated native snapshot"),
+            Self::InvalidSnapshotValue => formatter.write_str("invalid native snapshot value"),
+            Self::InvalidSnapshotTrailingBytes => {
+                formatter.write_str("native snapshot has trailing bytes")
+            }
         }
     }
 }

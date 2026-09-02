@@ -1,6 +1,6 @@
 use crate::{
-    Action, Button, CoreError, EnemyState, InputState, LifecycleState, Mode, NativeConfig,
-    PicoFixed, PicoRng, PlayerState, pico_mid,
+    Action, Button, CoreError, EnemyState, FullState, InputState, LifecycleState, Mode,
+    NativeConfig, PicoFixed, PicoRng, PlayerState, Snapshot, pico_mid,
 };
 
 const PLAYER_MIN: PicoFixed = PicoFixed::from_int(2);
@@ -14,8 +14,8 @@ const SPAWN_EDGE: PicoFixed = PicoFixed::from_int(-10);
 const SPAWN_EDGE_FAR: PicoFixed = PicoFixed::from_int(138);
 const SPAWN_INTERVAL: PicoFixed = PicoFixed::from_int(60);
 
-/// Result of one native simulation frame before Snapshot is added in T57.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Result of one native simulation frame and its canonical observation.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FrameResult {
     pub frame: u32,
     pub mode: Mode,
@@ -26,6 +26,7 @@ pub struct FrameResult {
     pub dead: bool,
     pub done: bool,
     pub reward: PicoFixed,
+    pub snapshot: Snapshot,
 }
 
 /// Deterministic, engine-free native game boundary.
@@ -67,7 +68,7 @@ impl NativeGame {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self) -> Snapshot {
         self.lifecycle = LifecycleState::new();
         self.input = InputState::new();
         self.rng.seed(self.config.seed);
@@ -81,6 +82,7 @@ impl NativeGame {
         self.score = PicoFixed::ZERO;
         self.survival_frames = 0;
         self.transition_render_y = -128;
+        self.snapshot()
     }
 
     pub fn advance_frame(&mut self, input_mask: u8) -> Result<FrameResult, CoreError> {
@@ -107,17 +109,20 @@ impl NativeGame {
         }
         let _ = self.rng.rnd(PicoFixed::from_int(32));
         let _ = self.rng.rnd(PicoFixed::from_int(32));
-        if mode_before == Mode::Game && !self.lifecycle.dead {
+        let reward = if mode_before == Mode::Game && !self.lifecycle.dead {
             self.survival_frames += 1;
-        }
-        Ok(self.result())
+            PicoFixed::ONE
+        } else {
+            PicoFixed::ZERO
+        };
+        Ok(self.result(reward))
     }
 
     pub fn step(&mut self, action: Action, frames: u32) -> Result<FrameResult, CoreError> {
         if frames == 0 {
             return Err(CoreError::InvalidFrameCount(frames));
         }
-        let mut result = self.result();
+        let mut result = self.result(PicoFixed::ZERO);
         for _ in 0..frames {
             result = self.advance_frame(action.mask())?;
             if result.done {
@@ -157,6 +162,29 @@ impl NativeGame {
 
     pub const fn transition_render_y(&self) -> i16 {
         self.transition_render_y
+    }
+
+    pub(crate) fn full_state(&self) -> FullState {
+        FullState {
+            seed: self.config.seed,
+            lifecycle: self.lifecycle,
+            input: self.input,
+            rng: self.rng.checkpoint(),
+            player: self.player,
+            enemies: self.enemies.clone(),
+            enemy_timer: self.enemy_timer,
+            friendly_timer: self.friendly_timer,
+            enemy_max_size: self.enemy_max_size,
+            speed: self.speed,
+            freeze_rate: self.freeze_rate,
+            score: self.score,
+            survival_frames: self.survival_frames,
+            transition_render_y: self.transition_render_y,
+        }
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot::from_game(self)
     }
 
     fn update_game_frame(&mut self) {
@@ -329,7 +357,7 @@ impl NativeGame {
         }
     }
 
-    fn result(&self) -> FrameResult {
+    fn result(&self, reward: PicoFixed) -> FrameResult {
         FrameResult {
             frame: self.lifecycle.frame,
             mode: self.lifecycle.mode,
@@ -339,11 +367,8 @@ impl NativeGame {
             started: self.lifecycle.started,
             dead: self.lifecycle.dead,
             done: self.lifecycle.dead,
-            reward: if self.lifecycle.dead || self.lifecycle.mode != Mode::Game {
-                PicoFixed::ZERO
-            } else {
-                PicoFixed::ONE
-            },
+            reward,
+            snapshot: self.snapshot(),
         }
     }
 }
@@ -382,8 +407,8 @@ mod tests {
         assert_eq!(game.lifecycle().mode, Mode::TransitionToGame);
         let ready = game.advance_frame(0);
         assert!(ready.is_ok());
-        assert_eq!(ready.map(|value| value.frame), Ok(13));
-        assert_eq!(ready.map(|value| value.mode), Ok(Mode::Game));
+        assert_eq!(ready.as_ref().map(|value| value.frame), Ok(13));
+        assert_eq!(ready.as_ref().map(|value| value.mode), Ok(Mode::Game));
         assert!(game.lifecycle().game_ready);
     }
 
@@ -392,9 +417,12 @@ mod tests {
         let mut game = NativeGame::new(NativeConfig::default());
         let result = game.step(Action::Neutral, 4);
         assert!(result.is_ok());
-        assert_eq!(result.map(|value| value.frame), Ok(4));
-        assert_eq!(result.map(|value| value.input_mask), Ok(0));
-        assert_eq!(result.map(|value| value.previous_input_mask), Ok(0));
+        assert_eq!(result.as_ref().map(|value| value.frame), Ok(4));
+        assert_eq!(result.as_ref().map(|value| value.input_mask), Ok(0));
+        assert_eq!(
+            result.as_ref().map(|value| value.previous_input_mask),
+            Ok(0)
+        );
     }
 
     #[test]
@@ -458,9 +486,12 @@ mod tests {
             PicoFixed::from_int(3),
         ));
         let result = game.advance_frame(0);
-        assert_eq!(result.map(|value| value.done), Ok(true));
+        assert_eq!(result.as_ref().map(|value| value.done), Ok(true));
         assert!(game.lifecycle().dead);
         assert_eq!(game.survival_frames(), 0);
-        assert_eq!(result.map(|value| value.reward), Ok(PicoFixed::ZERO));
+        assert_eq!(
+            result.as_ref().map(|value| value.reward),
+            Ok(PicoFixed::ZERO)
+        );
     }
 }

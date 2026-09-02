@@ -268,7 +268,7 @@ T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
 T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
 T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
 T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104
-T57|.|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
+T57|x|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
 T58|.|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
 T59|.|add field/pixel differential comparison + source-map diagnostics|V100,I.file
 T60|.|run defined slice corpus every frame + resolve parity mismatches|V94-V100
@@ -336,3 +336,6 @@ B56|2026-09-02|movement test compared a fixed result with an inexact decimal f32
 B57|2026-09-02|collision fixture placed a size-one normal enemy outside the source strict boundary|mechanical test fixture
 B58|2026-09-02|native transition render cursor omitted the same-frame ten-pixel tick|V104
 B59|2026-09-02|enemy movement test compared negative fixed arithmetic with an inexact decimal f32 conversion|mechanical test expectation
+B60|2026-09-02|snapshot-owned FrameResult made legacy tests consume non-Copy Results|mechanical test ownership fix
+B61|2026-09-02|snapshot module imported its own FullState type|mechanical import fix
+B62|2026-09-02|snapshot validation and truncation test used unchecked indexing syntax|V8
