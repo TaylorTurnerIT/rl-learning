@@ -803,7 +803,7 @@ fn transpose_target(target: &PatternTarget) -> PatternTarget {
 #[cfg(test)]
 mod tests {
     use super::init_patterns;
-    use crate::{PicoFixed, PicoRng};
+    use crate::{PatternTarget, PicoFixed, PicoRng};
 
     #[test]
     fn v155_special_values_and_automatic_variants_are_independent() {
@@ -821,5 +821,55 @@ mod tests {
         );
         assert_eq!(patterns.get(24).and_then(|p| p.automatic_variant), None);
         assert_eq!(patterns.get(24).map(|p| p.special), Some(PicoFixed::ZERO));
+    }
+
+    #[test]
+    fn v157_source_pattern_inventory_contains_generated_and_dynamic_shapes() {
+        let mut rng = PicoRng::new(42);
+        let patterns = init_patterns(&mut rng);
+
+        assert_eq!(patterns.len(), 39);
+        assert!(
+            patterns
+                .iter()
+                .enumerate()
+                .all(|(index, pattern)| pattern.id == u8::try_from(index + 1).unwrap_or(0))
+        );
+
+        let id3 = patterns.get(2).and_then(|pattern| pattern.rects.first());
+        let id4 = patterns.get(3).and_then(|pattern| pattern.rects.first());
+        assert_eq!(id3.map(|rect| rect.x), Some(PicoFixed::from_int(56)));
+        assert_eq!(id3.map(|rect| rect.y), Some(PicoFixed::ZERO));
+        assert_eq!(id4.map(|rect| rect.x), Some(PicoFixed::ZERO));
+        assert_eq!(id4.map(|rect| rect.y), Some(PicoFixed::from_int(56)));
+        assert_eq!(id4.map(|rect| rect.width), Some(PicoFixed::from_int(42)));
+        assert_eq!(id4.map(|rect| rect.height), Some(PicoFixed::from_int(16)));
+
+        assert_eq!(patterns.get(14).map(|pattern| pattern.rects.len()), Some(5));
+        assert_eq!(patterns.get(15).map(|pattern| pattern.rects.len()), Some(5));
+        assert_eq!(patterns.get(16).map(|pattern| pattern.rects.len()), Some(1));
+        assert_eq!(
+            patterns.get(17).map(|pattern| pattern.rects.len()),
+            Some(16)
+        );
+        assert_eq!(patterns.get(18).map(|pattern| pattern.rects.len()), Some(9));
+        assert_eq!(
+            patterns.get(19).map(|pattern| pattern.rects.len()),
+            Some(13)
+        );
+        assert_eq!(patterns.get(23).map(|pattern| pattern.rects.len()), Some(3));
+        assert_eq!(patterns.get(26).map(|pattern| pattern.rects.len()), Some(2));
+
+        let special_rect = patterns.get(14).and_then(|pattern| pattern.rects.first());
+        assert!(special_rect.is_some_and(|rect| {
+            rect.targets
+                .first()
+                .is_some_and(|target| matches!(target, PatternTarget::SetFyou(false)))
+        }));
+        assert!(special_rect.is_some_and(|rect| {
+            rect.targets
+                .get(1)
+                .is_some_and(|target| matches!(target, PatternTarget::Wait(_)))
+        }));
     }
 }

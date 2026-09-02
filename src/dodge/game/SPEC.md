@@ -516,3 +516,4 @@ B126|2026-09-02|native enemy update reused one size/position view across source 
 B127|2026-09-02|pattern metadata wire and constructors assumed autovar could stand in for special values|V155
 B128|2026-09-02|native round used signed remainder and rounded negative subpixels toward floor|V156
 B129|2026-09-02|native pattern scheduler only opened rectangles and never executed source targets or completion reset|V157
+B130|2026-09-02|pattern inventory regression test used one-based pattern IDs as zero-based vector indexes|V157
