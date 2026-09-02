@@ -1,0 +1,87 @@
+{
+  "phase": "P3",
+  "schema_version": 1,
+  "status": "accepted_slice_visual_deferred",
+  "handoff": "p4_full_port_review_go",
+  "source": {
+    "path": "src/dodge/game/dodge.p8",
+    "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "pemsa": {
+    "path": "src/dodge/runtime/pemsa",
+    "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+  },
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo_lock_sha256": "2c3794e25512263d8ceb11c0b4075b7eb61556f61c9d2a99209622c87fe25ef0"
+  },
+  "capture": {
+    "mode": "full_draw",
+    "boundary": "post_update_post_draw",
+    "pixels": {
+      "encoding": "palette_index_u8_row_major",
+      "width": 128,
+      "height": 128
+    }
+  },
+  "corpus": [
+    {
+      "fixture": "seed-42-movement",
+      "seed": 42,
+      "frames": 501,
+      "result": {
+        "score": 3,
+        "survival_frames": 487,
+        "died": true
+      },
+      "logical_parity": "match",
+      "source_frames_sha256": "c20c557f6e38eaab5fcf872c20827979e931eb9865b65c79d4e4f8459d40bfca"
+    },
+    {
+      "fixture": "seed-7-neutral",
+      "seed": 7,
+      "frames": 204,
+      "result": {
+        "score": 1,
+        "survival_frames": 190,
+        "died": true
+      },
+      "logical_parity": "match",
+      "source_frames_sha256": "82e80d870f4fb735a2d23312f2bd8c1fa137e88db6b6fa189412ca62957b75e7"
+    },
+    {
+      "fixture": "seed-99-diagonal",
+      "seed": 99,
+      "frames": 217,
+      "result": {
+        "score": 0,
+        "survival_frames": 203,
+        "died": true
+      },
+      "logical_parity": "match",
+      "source_frames_sha256": "8e0dbaeaa702178815683ad112c89f3967a41aff8f9f0afb63d03497635f94c8"
+    }
+  ],
+  "pixel_boundary": {
+    "status": "deferred_to_p4",
+    "first_mismatch": {
+      "frame": 1,
+      "coordinate": [20, 17],
+      "expected": 7,
+      "actual": 12,
+      "source": {
+        "function": "drawtransition",
+        "span": [502, 527]
+      }
+    }
+  },
+  "deferred": [
+    "complete_mutable_state",
+    "full_source_update_and_draw_order",
+    "menu_settings_death_transition_raster",
+    "particles_and_dynamic_patterns",
+    "palette_camera_fill_and_sound_events",
+    "restore_api",
+    "held_out_full_game_corpus"
+  ]
+}

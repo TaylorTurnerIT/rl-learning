@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 
 from dodge.control import ControlRuntimeError, MovementCommand
@@ -110,7 +111,7 @@ def parse_full_draw_stdout(
 ) -> tuple[tuple[OracleFrame, ...], dict[str, int | float | bool]]:
     states: dict[int, RawState] = {}
     pixel_rows: dict[int, dict[int, tuple[int, ...]]] = {}
-    metadata: dict[int, tuple[int, int, int, bool, tuple[str, ...]]] = {}
+    metadata: dict[int, tuple[int, int, int, bool, float, tuple[str, ...]]] = {}
     result_lines = 0
 
     for raw_line in stdout.splitlines():
@@ -123,12 +124,14 @@ def parse_full_draw_stdout(
                 )
             states[state.frame] = state
         elif line.startswith(FRAME_PREFIX):
-            frame, mask, previous_mask, mode, dead, events = parse_frame_line(line)
+            frame, mask, previous_mask, mode, dead, reward, events = parse_frame_line(
+                line
+            )
             if frame in metadata:
                 raise ControlRuntimeError(
                     f"duplicate full-draw metadata for frame {frame}"
                 )
-            metadata[frame] = (mask, previous_mask, mode, dead, events)
+            metadata[frame] = (mask, previous_mask, mode, dead, reward, events)
         elif line.startswith(PIXEL_PREFIX):
             frame, row, pixels = parse_pixel_line(line)
             frame_rows = pixel_rows.setdefault(frame, {})
@@ -173,10 +176,11 @@ def parse_full_draw_stdout(
                 state=states[frame_index],
                 pixels=pixels,
                 done=done,
+                reward=metadata[frame_index][4],
                 events=(
-                    (*metadata[frame_index][4], "terminal")
+                    (*metadata[frame_index][5], "terminal")
                     if done
-                    else metadata[frame_index][4]
+                    else metadata[frame_index][5]
                 ),
                 input_mask=metadata[frame_index][0],
                 previous_input_mask=metadata[frame_index][1],
@@ -217,22 +221,30 @@ def parse_pixel_line(line: str) -> tuple[int, int, tuple[int, ...]]:
 
 def parse_frame_line(
     line: str,
-) -> tuple[int, int, int, int, bool, tuple[str, ...]]:
+) -> tuple[int, int, int, int, bool, float, tuple[str, ...]]:
     values = line.removeprefix(FRAME_PREFIX).split("|")
-    if len(values) != 6:
+    if len(values) not in {6, 7}:
         raise ControlRuntimeError("invalid full-draw metadata field count")
     try:
         frame, mask, previous_mask, mode, dead = (int(value) for value in values[:5])
+        if len(values) == 7:
+            reward = float(values[5])
+            events_value = values[6]
+        else:
+            reward = 0.0
+            events_value = values[5]
     except ValueError as error:
         raise ControlRuntimeError("invalid full-draw metadata values") from error
     if frame < 0 or not 0 <= mask <= 63 or not 0 <= previous_mask <= 63:
         raise ControlRuntimeError("invalid full-draw input mask")
     if not 0 <= mode <= 4 or dead not in {0, 1}:
         raise ControlRuntimeError("invalid full-draw lifecycle metadata")
-    events = tuple(event for event in values[5].split(",") if event)
+    if not math.isfinite(reward) or reward < 0:
+        raise ControlRuntimeError("invalid full-draw reward")
+    events = tuple(event for event in events_value.split(",") if event)
     if any(not event.replace("_", "").isalnum() for event in events):
         raise ControlRuntimeError("invalid full-draw event name")
-    return frame, mask, previous_mask, mode, bool(dead), events
+    return frame, mask, previous_mask, mode, bool(dead), reward, events
 
 
 def command_schedule(commands: list[MovementCommand]) -> list[dict[str, object]]:

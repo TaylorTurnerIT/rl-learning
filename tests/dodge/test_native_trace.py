@@ -25,7 +25,10 @@ def _pixel_rows(frame: int) -> list[str]:
 def _stdout(*frames: int, terminal: int) -> str:
     lines: list[str] = []
     for frame in frames:
-        lines.append(f"__dodge_frame__{frame}|32|0|2|{int(frame == terminal)}|")
+        reward = 0 if frame == terminal else 1
+        lines.append(
+            f"__dodge_frame__{frame}|32|0|2|{int(frame == terminal)}|{reward}|"
+        )
         lines.append(f"__dodge_state__{frame}|64,64,0,0,4||")
         lines.extend(_pixel_rows(frame))
     lines.append(f"__dodge_result__0|{terminal}|{terminal - 1}|42|true|true")
@@ -46,7 +49,9 @@ def test_parse_full_draw_stdout_builds_post_draw_terminal_frame() -> None:
     assert result["frames"] == 8
     assert [frame.frame_index for frame in frames] == [3, 8]
     assert frames[0].done is False
+    assert frames[0].reward == 1
     assert frames[1].done is True
+    assert frames[1].reward == 0
     assert frames[1].input_mask == 32
     assert frames[1].mode == 2
     assert frames[1].dead is True

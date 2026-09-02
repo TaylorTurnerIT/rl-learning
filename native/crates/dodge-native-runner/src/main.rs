@@ -52,6 +52,7 @@ struct OutputFrame {
     dead: bool,
     done: bool,
     reward_raw: i32,
+    events: Vec<String>,
     state_hash: u64,
     pixel_hash: u64,
     snapshot_hex: String,
@@ -97,12 +98,13 @@ fn run() -> Result<(), String> {
     let schedule = expand_schedule(&commands)?;
     let mut game = NativeGame::new(NativeConfig::new(options.seed));
     let mut frames = Vec::new();
-    for mask in schedule.into_iter().chain(std::iter::repeat(0)) {
+    for (simulation_mask, post_frame_mask) in schedule.into_iter().chain(std::iter::repeat((0, 0)))
+    {
         if frames.len() >= options.max_frames as usize {
             break;
         }
         let result = game
-            .advance_frame(mask)
+            .advance_frame_with_post_mask(simulation_mask, post_frame_mask)
             .map_err(|error| format!("native frame failed: {error}"))?;
         frames.push(output_frame(&result));
         if result.done {
@@ -224,14 +226,19 @@ fn duration_to_frames(duration_ms: u32) -> u32 {
     (duration_ms * 60).div_ceil(1_000)
 }
 
-fn expand_schedule(commands: &[InputCommand]) -> Result<Vec<u8>, String> {
+fn expand_schedule(commands: &[InputCommand]) -> Result<Vec<(u8, u8)>, String> {
     let mut schedule = Vec::new();
-    schedule.extend(std::iter::repeat_n(BUTTON_X_MASK, START_HOLD_FRAMES));
+    schedule.extend(std::iter::repeat_n(
+        (BUTTON_X_MASK, BUTTON_X_MASK),
+        START_HOLD_FRAMES,
+    ));
     for command in commands.iter().skip(1) {
         let frames = duration_to_frames(command.duration_ms);
         let mask = command.mask()?;
-        schedule.extend(std::iter::repeat_n(mask, frames.saturating_sub(1) as usize));
-        schedule.push(0);
+        for frame in 0..frames {
+            let post_frame_mask = if frame + 1 == frames { 0 } else { mask };
+            schedule.push((mask, post_frame_mask));
+        }
     }
     Ok(schedule)
 }
@@ -259,6 +266,11 @@ fn output_frame(result: &dodge_core::FrameResult) -> OutputFrame {
         dead: result.dead,
         done: result.done,
         reward_raw: result.reward.raw(),
+        events: result
+            .events
+            .iter()
+            .map(|event| event.name().to_owned())
+            .collect(),
         state_hash: snapshot.state_hash(),
         pixel_hash: snapshot.pixel_hash(),
         snapshot_hex: hex_encode(&snapshot.canonical_bytes()),
@@ -320,9 +332,9 @@ mod tests {
         assert!(schedule.is_ok());
         assert_eq!(
             schedule.unwrap_or_default(),
-            [BUTTON_X_MASK; 13]
+            [(BUTTON_X_MASK, BUTTON_X_MASK); 13]
                 .into_iter()
-                .chain([1, 1, 1, 1, 1, 0])
+                .chain([(1, 1), (1, 1), (1, 1), (1, 1), (1, 1), (1, 0)])
                 .collect::<Vec<_>>()
         );
     }
@@ -345,8 +357,11 @@ mod tests {
         let schedule = expand_schedule(&commands);
         assert!(schedule.is_ok());
         let mut game = NativeGame::new(NativeConfig::new(42));
-        for mask in schedule.unwrap_or_default() {
-            assert!(game.advance_frame(mask).is_ok());
+        for (simulation_mask, post_frame_mask) in schedule.unwrap_or_default() {
+            assert!(
+                game.advance_frame_with_post_mask(simulation_mask, post_frame_mask)
+                    .is_ok()
+            );
         }
         assert_eq!(game.lifecycle().frame, 13);
     }

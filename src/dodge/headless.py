@@ -136,7 +136,8 @@ function __dodge_emit_frame()
  if cp then events=events..(events!="" and "," or "").."pattern_active" end
  printh("{FRAME_PREFIX}"..tostr(__dodge_frames).."|"..
   tostr(__dodge_mask).."|"..tostr(__dodge_previous_mask).."|"..
-  tostr(mode).."|"..tostr(isdead and 1 or 0).."|"..events)
+  tostr(mode).."|"..tostr(isdead and 1 or 0).."|"..
+  tostr(__dodge_reward).."|"..events)
 end
 
 function __dodge_emit_pixels()
@@ -287,6 +288,7 @@ __dodge_last_draw_frame=-1
 __dodge_events=""
 __dodge_done=false
 __dodge_result_emitted=false
+__dodge_reward=0
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -309,6 +311,7 @@ end
 function __dodge_step()
  local command=__dodge_commands[__dodge_command]
  __dodge_mask=command and command[1] or 0
+ __dodge_reward=0
 {capture_boot} if __dodge_wait_for_game_start and _upd==updategame then
   __dodge_wait_for_game_start=false
   __dodge_mask=0
@@ -322,6 +325,7 @@ function __dodge_step()
  __dodge_game_update60()
  if game_frame and not isdead then
   __dodge_survival_frames+=1
+  __dodge_reward=1
  end
 {transition_tick}
  __dodge_frames+=1

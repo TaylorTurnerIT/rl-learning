@@ -135,10 +135,13 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
     enemies = tuple(_read_enemy(reader) for _ in range(enemy_count))
 
     reader.i32()
+    reader.i32()
     reader.u32()
     reader.i32()
     reader.i32()
     reader.i32()
+    reader.u32()
+    reader.boolean()
     score = reader.i32()
     survival_frames = reader.u32()
     reader.i16()
@@ -392,6 +395,47 @@ def _compare_frame(
                 source_map,
             )
 
+    expected_reward = expected.get("reward", 0.0)
+    actual_reward_raw = actual.get("reward_raw", 0)
+    if not isinstance(expected_reward, int | float) or isinstance(
+        expected_reward, bool
+    ):
+        raise NativeDifferentialError(f"oracle frame {frame_number} reward is invalid")
+    if not isinstance(actual_reward_raw, int) or isinstance(actual_reward_raw, bool):
+        raise NativeDifferentialError(
+            f"native frame {frame_number} reward_raw is invalid"
+        )
+    actual_reward = actual_reward_raw / FIXED_SCALE
+    if not math.isclose(float(expected_reward), actual_reward, abs_tol=0.0002):
+        return _mismatch(
+            frame_number,
+            "reward",
+            expected_reward,
+            actual_reward,
+            "updategame",
+            source_map,
+        )
+
+    expected_events = expected.get("events", [])
+    actual_events = actual.get("events", [])
+    if not isinstance(expected_events, list) or not all(
+        isinstance(event, str) for event in expected_events
+    ):
+        raise NativeDifferentialError(f"oracle frame {frame_number} events are invalid")
+    if not isinstance(actual_events, list) or not all(
+        isinstance(event, str) for event in actual_events
+    ):
+        raise NativeDifferentialError(f"native frame {frame_number} events are invalid")
+    if expected_events != actual_events:
+        return _mismatch(
+            frame_number,
+            "events",
+            expected_events,
+            actual_events,
+            "updategame",
+            source_map,
+        )
+
     snapshot = decode_native_snapshot(
         _string_value(actual, "snapshot_hex", frame_number)
     )
@@ -450,8 +494,16 @@ def _compare_frame(
             ("y", expected_enemy.get("y"), actual_enemy.y),
             ("vx", expected_enemy.get("vx"), actual_enemy.vx),
             ("vy", expected_enemy.get("vy"), actual_enemy.vy),
-            ("width", expected_enemy.get("width"), actual_enemy.size),
-            ("height", expected_enemy.get("height"), actual_enemy.size),
+            (
+                "width",
+                expected_enemy.get("width"),
+                8 * FIXED_SCALE if actual_enemy.personality >= 2 else actual_enemy.size,
+            ),
+            (
+                "height",
+                expected_enemy.get("height"),
+                8 * FIXED_SCALE if actual_enemy.personality >= 2 else actual_enemy.size,
+            ),
         )
         for name, expected_value, actual_raw in fields:
             if not isinstance(expected_value, int | float):

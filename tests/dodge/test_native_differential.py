@@ -35,7 +35,9 @@ def _snapshot_hex(
         b"".join(struct.pack("<i", int(value * (1 << 16))) for value in player)
     )
     output.extend(struct.pack("<I", 0))
-    output.extend(struct.pack("<iIiiiiIh", 0, 0, 0, 0, 0, 0, 0, -108))
+    output.extend(
+        struct.pack("<iiIiiiIBiIh", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -108)
+    )
     output.extend(struct.pack("<BH", 6, 0))
     output.extend(bytes(range(16)))
     output.extend(bytes(range(16)))
@@ -60,6 +62,7 @@ def _native_trace(*, player_x: float = 64.0, pixels: bytes = bytes(128 * 128)) -
                 "dead": False,
                 "done": False,
                 "reward_raw": 0,
+                "events": [],
                 "state_hash": 0,
                 "pixel_hash": 0,
                 "snapshot_hex": snapshot,
@@ -180,6 +183,38 @@ def test_equal_trace_is_accepted_without_aggregate_hash_only_comparison() -> Non
 
     assert report["status"] == "match"
     assert report["first_mismatch"] is None
+
+
+def test_reward_mismatch_is_reported_before_state_or_pixel_comparison() -> None:
+    oracle = _oracle_trace()
+    oracle["frames"][0]["reward"] = 1.0
+    report = compare_native_to_oracle(
+        _native_trace(),
+        oracle,
+        source_map=_source_map(),
+        compare_pixels=False,
+    )
+
+    mismatch = report["first_mismatch"]
+    assert mismatch["path"] == "reward"
+    assert mismatch["expected"] == 1.0
+    assert mismatch["actual"] == 0.0
+
+
+def test_event_mismatch_is_reported_as_ordered_frame_data() -> None:
+    oracle = _oracle_trace()
+    oracle["frames"][0]["events"] = ["enemy_spawn"]
+    report = compare_native_to_oracle(
+        _native_trace(),
+        oracle,
+        source_map=_source_map(),
+        compare_pixels=False,
+    )
+
+    mismatch = report["first_mismatch"]
+    assert mismatch["path"] == "events"
+    assert mismatch["expected"] == ["enemy_spawn"]
+    assert mismatch["actual"] == []
 
 
 def test_snapshot_decoder_rejects_trailing_bytes() -> None:

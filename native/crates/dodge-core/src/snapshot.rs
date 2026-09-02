@@ -45,10 +45,13 @@ pub struct FullState {
     pub player: PlayerState,
     pub enemies: Vec<EnemyState>,
     pub enemy_timer: PicoFixed,
+    pub enemy_est: PicoFixed,
     pub friendly_timer: u32,
     pub enemy_max_size: PicoFixed,
     pub speed: PicoFixed,
     pub freeze_rate: PicoFixed,
+    pub pattern_timer: u32,
+    pub pattern_active: bool,
     pub score: PicoFixed,
     pub survival_frames: u32,
     pub transition_render_y: i16,
@@ -351,9 +354,14 @@ fn render_game(state: &FullState, render: &RenderState, framebuffer: &mut Indexe
     for enemy in &state.enemies {
         let x = coordinate(enemy.x);
         let y = coordinate(enemy.y);
-        let size = coordinate(enemy.size).max(0);
-        framebuffer.rect_fill(x, y + 1, x + size, y + size + 1, SHADOW_COLOR, render);
-        framebuffer.rect_fill(x, y, x + size, y + size, ENTITY_COLOR, render);
+        if enemy.personality >= 2 {
+            framebuffer.circle_fill(x, y + 1, 4, SHADOW_COLOR, render);
+            framebuffer.circle_fill(x, y, 4, ENTITY_COLOR, render);
+        } else {
+            let size = coordinate(enemy.size).max(0);
+            framebuffer.rect_fill(x, y + 1, x + size, y + size + 1, SHADOW_COLOR, render);
+            framebuffer.rect_fill(x, y, x + size, y + size, ENTITY_COLOR, render);
+        }
     }
     if !state.lifecycle.dead {
         let x = coordinate(state.player.x);
@@ -413,10 +421,13 @@ fn write_full_state(writer: &mut Writer, state: &FullState) {
         write_enemy_state(writer, *enemy);
     }
     writer.i32(state.enemy_timer.raw());
+    writer.i32(state.enemy_est.raw());
     writer.u32(state.friendly_timer);
     writer.i32(state.enemy_max_size.raw());
     writer.i32(state.speed.raw());
     writer.i32(state.freeze_rate.raw());
+    writer.u32(state.pattern_timer);
+    writer.bool(state.pattern_active);
     writer.i32(state.score.raw());
     writer.u32(state.survival_frames);
     writer.i16(state.transition_render_y);
@@ -451,10 +462,13 @@ fn read_full_state(reader: &mut Reader<'_>) -> Result<FullState, CoreError> {
         player,
         enemies,
         enemy_timer: PicoFixed::from_raw(reader.i32()?),
+        enemy_est: PicoFixed::from_raw(reader.i32()?),
         friendly_timer: reader.u32()?,
         enemy_max_size: PicoFixed::from_raw(reader.i32()?),
         speed: PicoFixed::from_raw(reader.i32()?),
         freeze_rate: PicoFixed::from_raw(reader.i32()?),
+        pattern_timer: reader.u32()?,
+        pattern_active: reader.bool()?,
         score: PicoFixed::from_raw(reader.i32()?),
         survival_frames: reader.u32()?,
         transition_render_y: reader.i16()?,

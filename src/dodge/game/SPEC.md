@@ -210,6 +210,18 @@ V103: collision/death sets the terminal flag while preserving the update-game mo
 V104: the native transition render cursor includes the same-frame transition tick; the source draw-side game update begins on the accepted frame-seven boundary and yields the seed-42 friendly spawn at frame 57.
 V105: post-update frame metadata exposes current and previous masks at the same completed-frame boundary as the oracle; held input therefore records equal masks while `btnp` still sees the pre-frame edge during simulation.
 V106: a command boundary may apply one simulation mask and publish a different cleared post-frame mask; the ordinary `advance_frame(mask)` path remains same-mask.
+V107: native reset consumes the deterministic `initpatterns` random draws before frame updates, including its seed-dependent branch (21 or 25 draws); each source spawn roll therefore sees the same RNG stream for its seed.
+V108: a normal spawn stores its selected `es` value globally; later friendly corner spawns use that current maximum size until another normal spawn changes it.
+V109: normal-enemy overlap uses the source ordered loop: already-marked enemies are removed while iterating, each removed normal enemy consumes 11 shatter draws, adds 0.5 score, and applies the half-step speed/spawn-rate curve.
+V110: native enemy-loop mutations use checked collection access under the workspace no-panic lint profile.
+V111: player collision removes each colliding normal enemy at the source terminal boundary and consumes its 11 shatter RNG draws without adding score.
+V112: normal spawns use the source low-score personality weighting, and personality-1 enemies reduce speed by 0.01 while within the source 25-pixel radius.
+V113: personality-2-or-higher enemies expose an 8-pixel collision/render extent while retaining their typed internal size and source circle primitive.
+V114: full-draw frame accounting consumes exactly two shared RNG draws per visible personality-2-or-higher trail while snapshot rasterization itself remains state-pure.
+V115: power-up collision uses the source four-pixel expanded bounds; personality 4 removes the enemy, sets player size to 2, adds one score, applies full difficulty, and does not set terminal.
+V116: the native pattern scheduler reaches the source first-pattern boundary after 420 game updates and consumes its one selection RNG draw before later frame-side effects.
+V117: canonical differential frames include per-frame reward and ordered events; missing or mismatched values fail before state/pixel comparison.
+V118: P3 report separates accepted logical-slice parity from deferred visual/full-state parity; no P3 artifact claims complete-game equivalence.
 
 §T
 
@@ -269,12 +281,12 @@ T52|x|add stale-output + unresolved-symbol validation|V84,V87,V88,V91,V92
 T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
 T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
 T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
-T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104
-T57|x|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
+T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104,V111,V112,V115
+T57|x|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,V113,V114,V116,I.api
 T58|x|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
 T59|x|add field/pixel differential comparison + source-map diagnostics|V100,I.file
-T60|.|run defined slice corpus every frame + resolve parity mismatches|V94-V100
-T61|.|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,I.file
+T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches; classify visual boundary for P4|V94-V100,V117,V118
+T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
 
 §B
 
@@ -349,3 +361,15 @@ B67|2026-09-02|differential fixture timer packing shifted the canonical render p
 B68|2026-09-02|runner command-boundary frame needed simulation input before post-draw mask clearing|V106
 B69|2026-09-02|P3 logical differential reached the source RNG-selected normal-enemy size at frame 130|T60
 B70|2026-09-02|P3 pixel differential reached the unported menu sprite at frame 1|T60,P4
+B71|2026-09-02|native reset omitted the seed-dependent `initpatterns` RNG draws and shifted every gameplay spawn roll|V107
+B72|2026-09-02|native normal spawns did not persist the selected `es` value for later friendly spawns|V108
+B73|2026-09-02|native omitted ordered normal-enemy overlap deletion and its shatter/difficulty side effects|V109
+B74|2026-09-02|V109 test borrowed logical state from a temporary Snapshot|bind Snapshot before borrowing fields
+B75|2026-09-02|ordered enemy loop used unchecked vector indexing rejected by the native no-panic lint profile|V110
+B76|2026-09-02|checked enemy mutation triggered Clippy collapsible-if under the warnings-as-errors gate|mechanical conditional rewrite
+B77|2026-09-02|terminal collision parity retained colliding enemies that source `collide()` deletes|V111
+B78|2026-09-02|seed-42 corpus reached source personality-1 radius-dependent enemy speed|V112
+B79|2026-09-02|full-draw corpus reached source power-up trail RNG side effects|V114
+B80|2026-09-02|seed-42 corpus reached the source personality-4 collision branch|V115
+B81|2026-09-02|seed-42 corpus reached source first-pattern selection RNG before a later spawn|V116
+B82|2026-09-02|differential comparison omitted canonical per-frame reward and ordered side-effect events|V117
