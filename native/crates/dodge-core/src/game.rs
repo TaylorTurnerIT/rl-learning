@@ -243,6 +243,78 @@ impl NativeGame {
         self.snapshot()
     }
 
+    /// Rebuild a native instance at the exact logical and render boundary held
+    /// by a canonical snapshot. The snapshot provenance and projected pixels
+    /// are validated before any mutable game state is installed.
+    pub fn restore(snapshot: &Snapshot) -> Result<Self, CoreError> {
+        if snapshot.provenance() != crate::SnapshotProvenance::current() {
+            return Err(CoreError::InvalidSnapshotValue);
+        }
+        let state = snapshot.logical_state().clone();
+        let mut rng = PicoRng::new(state.seed);
+        rng.restore(state.rng)?;
+        let config = NativeConfig {
+            seed: state.seed,
+            difficulty: state.settings.difficulty,
+            patterns_enabled: state.patterns_enabled,
+            powerups_enabled: state.powerups_enabled,
+            theme_background: state.settings.theme_background,
+            theme_shadow: state.settings.theme_shadow,
+            highscores: state.highscores,
+        };
+        Ok(Self {
+            config,
+            lifecycle: state.lifecycle,
+            input: state.input,
+            rng,
+            player: state.player,
+            enemies: state.enemies,
+            particles: state.particles,
+            patterns: state.patterns,
+            active_pattern: state.active_pattern,
+            spawns: state.spawns,
+            screen: state.physical_screen,
+            enemy_timer: state.enemy_timer,
+            enemy_est: state.enemy_est,
+            enemy_stats: state.enemy_stats,
+            friendly_timer: state.friendly_timer,
+            friendly_enabled: state.friendly_enabled,
+            enemy_max_size: state.enemy_max_size,
+            speed: state.speed,
+            freeze_rate: state.freeze_rate,
+            freeze_active: state.freeze_active,
+            freeze_timer: state.freeze_timer,
+            size_timer: state.size_timer,
+            patterns_enabled: state.patterns_enabled,
+            powerups_enabled: state.powerups_enabled,
+            pattern_timer: state.pattern_timer,
+            pattern_delay_frames: state.pattern_delay_frames,
+            pattern_active: state.pattern_active,
+            new_highscore: state.new_highscore,
+            can_click: state.can_click,
+            has_played: state.has_played,
+            should_collide: state.should_collide,
+            enemy_should_collide: state.enemy_should_collide,
+            bounce_cap_static: state.bounce_cap_static,
+            bounce_cap_moving: state.bounce_cap_moving,
+            bounce_cap: state.bounce_cap,
+            score: state.score,
+            survival_frames: state.survival_frames,
+            shake: state.shake,
+            camera_x: state.camera_x,
+            camera_y: state.camera_y,
+            transition_render_y: state.transition_render_y,
+            transition_from: state.transition_from,
+            settings: state.settings,
+            highscores: state.highscores,
+        })
+    }
+
+    pub fn restore_bytes(bytes: &[u8]) -> Result<Self, CoreError> {
+        let snapshot = Snapshot::from_canonical_bytes(bytes)?;
+        Self::restore(&snapshot)
+    }
+
     pub fn advance_frame(&mut self, input_mask: u8) -> Result<FrameResult, CoreError> {
         self.advance_frame_with_post_mask(input_mask, input_mask)
     }
@@ -394,6 +466,10 @@ impl NativeGame {
 
     pub fn enemies(&self) -> &[EnemyState] {
         self.enemies.as_slice()
+    }
+
+    pub fn particles(&self) -> &[ParticleState] {
+        self.particles.as_slice()
     }
 
     pub const fn score(&self) -> PicoFixed {
@@ -2492,6 +2568,39 @@ mod tests {
             enemy.map(|value| value.x),
             Some(PicoFixed::from_raw(459_407))
         );
+    }
+
+    #[test]
+    fn v122_restore_replays_the_same_next_frame() {
+        let mut original = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut original);
+        for _ in 0..90 {
+            assert!(original.advance_frame(0).is_ok());
+        }
+        let checkpoint = original.snapshot();
+        let restored_result = NativeGame::restore(&checkpoint);
+        assert!(restored_result.is_ok());
+        let Some(mut restored) = restored_result.ok() else {
+            return;
+        };
+        assert_eq!(
+            restored.snapshot().canonical_bytes(),
+            checkpoint.canonical_bytes()
+        );
+
+        let expected = original.advance_frame(2);
+        let actual = restored.advance_frame(2);
+        assert!(expected.is_ok());
+        assert!(actual.is_ok());
+        if let (Ok(expected), Ok(actual)) = (expected, actual) {
+            assert_eq!(actual.frame, expected.frame);
+            assert_eq!(actual.reward, expected.reward);
+            assert_eq!(actual.events, expected.events);
+            assert_eq!(
+                actual.snapshot.canonical_bytes(),
+                expected.snapshot.canonical_bytes()
+            );
+        }
     }
 
     #[test]
