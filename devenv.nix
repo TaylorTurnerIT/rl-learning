@@ -41,6 +41,25 @@
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec python -m dodge.headless "$@"
     '';
+    dodge-native-oracle.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-native-oracle "$@"
+    '';
+    dodge-native-probe.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-native-probe "$@"
+    '';
+    dodge-native-extract-assets.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-native-extract-assets "$@"
+    '';
+    dodge-native-p2-report.exec = ''
+      export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-native-p2-report "$@"
+    '';
     dodge-replay.exec = ''
       export LD_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.SDL2 ]}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

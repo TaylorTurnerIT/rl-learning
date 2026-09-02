@@ -23,6 +23,8 @@ from dodge.neat.state import RawState, parse_raw_state
 
 RESULT_PREFIX = "__dodge_result__"
 STATE_PREFIX = "__dodge_state__"
+PIXEL_PREFIX = "__dodge_pixel__"
+FRAME_PREFIX = "__dodge_frame__"
 
 COMMAND_MASKS: dict[str, int] = {
     "x": 32,
@@ -60,9 +62,13 @@ def instrument_cartridge(
     wait_for_game_start: bool = False,
     legacy_mouse_input: bool = False,
     capture_states: bool = False,
+    capture_pixels: bool = False,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
+    if capture_pixels and not render:
+        raise ControlInputError("pixel capture requires render mode")
+    capture_frames = capture_states or capture_pixels
 
     init_marker = "function _init()\n"
     gfx_marker = "__gfx__\n"
@@ -95,6 +101,67 @@ end
         if render
         else "function _draw()\nend\n\n"
     )
+    if capture_pixels:
+        draw_override = f"""__dodge_game_draw=_draw
+function __dodge_record_event(event)
+ __dodge_events=__dodge_events..(__dodge_events!="" and "," or "")..event
+end
+
+__dodge_game_collide=collide
+function collide(_e)
+ __dodge_record_event("collision")
+ __dodge_game_collide(_e)
+end
+
+__dodge_game_die=die
+function die()
+ __dodge_record_event("death")
+ __dodge_game_die()
+end
+
+__dodge_game_addenemy=addenemy
+function addenemy(_x,_y,_isdying,_s,_ms,_ep)
+ __dodge_record_event("enemy_spawn")
+ __dodge_game_addenemy(_x,_y,_isdying,_s,_ms,_ep)
+end
+
+function __dodge_emit_frame()
+ local mode=0
+ if _upd and _upd==updatemenu then mode=1
+ elseif _upd and _upd==updategame then mode=2
+ elseif _upd and _upd==updatesettings then mode=3
+ elseif _upd and _upd==updatetransition then mode=4
+ end
+ local events=__dodge_events
+ if cp then events=events..(events!="" and "," or "").."pattern_active" end
+ printh("{FRAME_PREFIX}"..tostr(__dodge_frames).."|"..
+  tostr(__dodge_mask).."|"..tostr(__dodge_previous_mask).."|"..
+  tostr(mode).."|"..tostr(isdead and 1 or 0).."|"..events)
+end
+
+function __dodge_emit_pixels()
+ local row=""
+ for y=0,127 do
+  row=""
+  for x=0,127 do
+   row=row..(x==0 and "" or ",")..tostr(pget(x,y))
+  end
+  printh("{PIXEL_PREFIX}"..tostr(__dodge_frames).."|"..tostr(y).."|"..row)
+ end
+end
+function _draw()
+ __dodge_game_draw()
+ if __dodge_capture_started and __dodge_last_draw_frame!=__dodge_frames then
+  __dodge_last_draw_frame=__dodge_frames
+  __dodge_emit_frame()
+  __dodge_emit_state()
+  __dodge_emit_pixels()
+  __dodge_events=""
+  if __dodge_done then __dodge_emit_result() end
+ end
+end
+
+"""
     transition_harness = """function __dodge_advance_transition()
  trsy+=(target==2 and -10 or 10)
  if (target==2 and trsy<=-128) or (target!=2 and trsy>=128) then
@@ -113,7 +180,9 @@ end
 
 """
     transition_tick = (
-        " if _upd==updatetransition then\n  __dodge_advance_transition()\n end\n"
+        " if _upd and _upd==updatetransition then\n"
+        "  __dodge_advance_transition()\n"
+        " end\n"
     )
     state_harness = (
         f'''function __dodge_join(values)
@@ -153,25 +222,55 @@ function __dodge_emit_state()
 end
 
 '''
-        if capture_states
+        if capture_frames
         else ""
     )
     capture_terminal = (
         " if __dodge_capture_started then __dodge_emit_state() end\n"
-        if capture_states
+        if capture_states and not capture_pixels
         else ""
     )
     capture_game_start = (
-        "  __dodge_capture_started=true\n  __dodge_emit_state()\n"
-        if capture_states
+        "  __dodge_capture_started=true\n"
+        + ("  __dodge_emit_state()\n" if capture_states and not capture_pixels else "")
+        if capture_frames
         else ""
     )
     capture_action_complete = (
         "   if __dodge_capture_started then __dodge_emit_state() end\n"
-        if capture_states
+        if capture_states and not capture_pixels
         else ""
     )
-    harness = f'''__dodge_game_update60=_update60
+    capture_boot = " __dodge_capture_started=true\n" if capture_pixels else ""
+    if capture_pixels:
+        finish_definition = f'''function __dodge_emit_result()
+ if __dodge_result_emitted then return end
+ __dodge_result_emitted=true
+ local started=hasplayed and "true" or "false"
+ local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
+ result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
+ result=result.."|"..started.."|true"
+ printh(result)
+ exit()
+end
+
+function __dodge_finish()
+ __dodge_done=true
+end
+
+'''
+    else:
+        finish_definition = f'''function __dodge_finish()
+{capture_terminal} local started=hasplayed and "true" or "false"
+ local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
+ result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
+ result=result.."|"..started.."|true"
+ printh(result)
+ exit()
+end
+
+'''
+    harness = f"""__dodge_game_update60=_update60
 __dodge_commands={{{encoded_commands}}}
 __dodge_command=1
 __dodge_remaining=__dodge_commands[1][2]
@@ -184,6 +283,10 @@ __dodge_mouse_x={64 if legacy_mouse_input else 0}
 __dodge_mouse_y={64 if legacy_mouse_input else 0}
 __dodge_fast_forward={str(not render).lower()}
 __dodge_capture_started=false
+__dodge_last_draw_frame=-1
+__dodge_events=""
+__dodge_done=false
+__dodge_result_emitted=false
 
 function btn(i)
  return flr(__dodge_mask/(2^i))%2==1
@@ -201,19 +304,12 @@ function stat(i)
  return __dodge_game_stat(i)
 end
 
-{draw_override}{transition_harness}{state_harness}function __dodge_finish()
-{capture_terminal} local started=hasplayed and "true" or "false"
- local result="{RESULT_PREFIX}"..tostr(score).."|"..tostr(__dodge_frames)
- result=result.."|"..tostr(__dodge_survival_frames).."|"..tostr({seed})
- result=result.."|"..started.."|true"
- printh(result)
- exit()
-end
+{draw_override}{transition_harness}{state_harness}{finish_definition}
 
 function __dodge_step()
  local command=__dodge_commands[__dodge_command]
  __dodge_mask=command and command[1] or 0
- if __dodge_wait_for_game_start and _upd==updategame then
+{capture_boot} if __dodge_wait_for_game_start and _upd==updategame then
   __dodge_wait_for_game_start=false
   __dodge_mask=0
   __dodge_previous_mask=0
@@ -232,6 +328,7 @@ function __dodge_step()
  __dodge_previous_mask=__dodge_mask
  if isdead then
   __dodge_finish()
+  return
  end
  if command and not __dodge_wait_for_game_start then
   __dodge_remaining-=1
@@ -258,7 +355,7 @@ function _update60()
  end
 end
 
-'''
+"""
     return seeded.replace(gfx_marker, f"{harness}{gfx_marker}", 1)
 
 

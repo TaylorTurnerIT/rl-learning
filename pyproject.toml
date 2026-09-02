@@ -31,6 +31,10 @@ dodge-dataset-export = "dodge.dataset:export_main"
 dodge-bc-train = "dodge.imitation.train:main"
 dodge-bc-plot = "dodge.imitation.plot:main"
 dodge-ppo-train = "dodge.rl.ppo:main"
+dodge-native-oracle = "dodge.native.oracle:main"
+dodge-native-probe = "dodge.native.probe:main"
+dodge-native-extract-assets = "dodge.native.assets:main"
+dodge-native-p2-report = "dodge.native.p2:main"
 
 [build-system]
 requires = ["hatchling"]

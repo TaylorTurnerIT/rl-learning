@@ -37,6 +37,13 @@ C28: PyTorch ∈ default project dependencies; Marimo ∈ GPU dependency group; 
 C29: cloud transfer uses SQLite backup snapshot; ⊥ copy live WAL main file as dataset handoff.
 C30: development-validation seeds = `29991..30000`; ⊥ collector training or MLP gradients on them.
 C31: behavior-cloning validation = top 10 accepted training seed IDs; split recorded per training history; validation ⊥ gradients.
+C32: native oracle/runtime additive; checked-in `dodge.p8` remains immutable source + oracle.
+C33: canonical native trace = full cartridge draw path + indexed 128×128 pixels; legacy no-op headless trace remains distinct.
+C34: canonical trace artifact includes source/Pemsa identity, seed, initial state, action schedule, capture mode, frame records, and hashes.
+C35: native extraction reads only checked-in cartridge bytes; generated output records generator version + source hash.
+C36: extracted gfx preserves 128×128 palette indices; sprite, sfx, music, and proven static-table records preserve source order + identity.
+C37: compatibility helpers encode only probed PICO-8 behavior; unresolved behavior-affecting semantics block native phase handoff.
+C38: generated asset output is disposable; stale or mismatched source/generator identity fails before consumption.
 
 §I
 
@@ -72,6 +79,13 @@ cli: `dodge-dataset-export OUTPUT [--database PATH]` → write consistent read-o
 notebook: `notebooks/dodge_behavior_cloning.py` → Marimo GPU training UI; imports reusable `dodge.imitation` code.
 db: one collector DB → metadata, seed roles, runs, episodes, ordered decision rows, checkpoints.
 db: seed roles → `training|validation|evaluation`.
+cli: `dodge-native-oracle --commands FILE --seed N --output FILE` → canonical full-draw trace JSON.
+file: canonical trace → schema version, provenance, source/section hashes, scenario, ordered frames, terminal result, state/pixel hashes.
+json: frame → frame index, state, reward/done/events, pixel rows or canonical pixel buffer.
+cli: `dodge-native-extract-assets --source PATH --output DIR` → deterministic indexed assets, source map, compatibility manifest, and hashes.
+file: native asset manifest → generator version, cartridge identity, section identities, asset paths/content hashes, source-map hash, and compatibility report hash.
+file: native source map → PICO-8 symbol/section/source span → planned native module, conversion note, and parity status.
+api: `PicoCompat` → numeric/RNG/input/stat/palette/camera/fill/raster/sprite/sound compatibility primitives.
 
 §R
 
@@ -153,6 +167,27 @@ V68: ∀ completed behavior-cloning epoch → stdout `epoch=N/T train_loss=F [va
 V69: behavior-cloning split → highest 10 accepted training seed IDs validation; validation rows ∉ optimizer; split ∈ saved history.
 V70: training history → per-epoch train/validation loss; `dodge-bc-plot` → PNG loss curves.
 V71: saved behavior-cloning artifact → CNN model type, board shape/channels, nine actions, state dict, mean, and standard deviation.
+V72: native oracle input bytes + source/section hashes unchanged during capture.
+V73: same native-oracle scenario repeated ≥3 → identical canonical frames/results/hashes; timestamp excluded.
+V74: full-draw and no-op-headless capture modes labeled distinct; canonical mode preserves cartridge draw RNG/side effects.
+V75: canonical frame pixels → exactly 128×128 palette indices in row-major order; pixel hash covers all indices.
+V76: canonical frame boundary → one post-update/post-draw record; frame index monotonic; terminal frame captured before exit.
+V77: oracle failure/timeout/parse error → owned Pemsa/Xvfb reaped + no accepted partial output.
+V78: canonical trace → provenance identifies cartridge, Pemsa, seed, action schedule, capture mode, and schema version.
+V79: compatibility probes emit each optional/nullable PICO-8 value as a separate validated record; no unvalidated value enters a concatenated record.
+V80: compatibility probes encode PICO-8 booleans as explicit numeric `0|1` values before `tostr`; probe output never concatenates `tostr(boolean)`.
+V81: harness transition dispatch enters only when `_upd` is present and equals `updatetransition`; absent callbacks never execute transition state.
+V82: canonical frame metadata records current/previous input masks, lifecycle mode, and dead flag at the same post-update/post-draw boundary as state and pixels.
+V83: capture emits at most one canonical post-update/post-draw record for each game-frame index; duplicate renderer ticks cannot create accepted duplicate frames.
+V84: extraction source identity + every section hash equal checked-in input before and after extraction; source mutation fails.
+V85: decoded gfx contains exactly 16,384 row-major values ∈ `0..15`; source rows and implicit zero rows recorded; reassembly matches indexed image.
+V86: sfx records retain 64 source identities and 168-hex payloads; music records retain 32 ordered source lines; no lossy audio normalization.
+V87: same source bytes + generator version → byte-identical asset tree, manifest, source map, and compatibility report.
+V88: every generated asset/compatibility symbol maps to source section + span; every behavior-affecting cartridge function is classified; unresolved status blocks handoff.
+V89: numeric/RNG/input/stat probes record seed, source/Pemsa identity, separate values, and expected native representation; no unprobed substitution accepted.
+V90: software raster state preserves palette remap, transparency, fill pattern, camera, primitive order, and indexed pixels without RGB conversion.
+V91: stale output with changed source hash or generator version fails validation before asset load.
+V92: P2 acceptance report names accepted, deferred, and unresolved semantics; deferred/unresolved behavior-affecting entries prevent P3 acceptance.
 
 §T
 
@@ -198,6 +233,18 @@ T38|x|reserve seed-held development validation partition|V66,C30,I.db
 T39|x|auto-select Dodge training CUDA or CPU; make PyTorch local dependency|V61,V67,C28,I.cli
 T40|x|log behavior-cloning loss after each epoch|V68,I.cli
 T41|x|add behavior-cloning validation loss history + plot CLI|V69,V70,C31,I.cli
+T42|x|add hash-addressed cartridge/section manifest|V72,V78,I.file
+T43|x|define canonical full-draw trace schema + provenance|V73,V74,V76,V78,I.file
+T44|x|capture post-draw indexed pixels + full-draw frame records|V74,V75,V76
+T45|x|add native-oracle CLI, parser tests, and cleanup/error tests|V73,V77,V78,I.cli
+T46|x|extract p8 sections + source hash manifest|V84,V87,I.cli
+T47|x|decode indexed gfx/palette/sprite + preserve sfx/music records|V85,V86,V90,I.file
+T48|x|build static-table/source-span map + unresolved symbol inventory|V88,V92,I.file
+T49|x|add PicoCompat numeric/RNG/input/stat probes|V89,I.api
+T50|x|add indexed software raster palette/fill/camera primitives|V90,I.api
+T51|x|add primitive differential fixtures against P1 indexed frames|V85,V89,V90
+T52|x|add stale-output + unresolved-symbol validation|V84,V87,V88,V91,V92
+T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
 
 §B
 
@@ -238,3 +285,19 @@ B33|2026-08-24|CPU fallback test imports were not Ruff-sorted|mechanical Ruff fi
 B34|2026-08-24|one-row PyTorch `std` used unbiased estimator and produced NaN|V67
 B35|2026-08-24|validation test train imports violated Ruff ordering|mechanical Ruff fix
 B36|2026-08-27|CNN loader retained legacy 221-float assignment after board allocation|V57
+B37|2026-09-01|compatibility probe concatenated multiple PICO-8 values and masked a runtime semantic boundary|V79
+B38|2026-09-01|input probe passed a PICO-8 boolean directly to `tostr`, which returned nil|V80
+B39|2026-09-01|probe harness treated two absent Lua callbacks as equal and entered transition code with nil state|V81
+B40|2026-09-01|visible Pemsa rendered the same update counter more than once before the next update|V83
+B41|2026-09-01|plain devenv pytest did not expose xdotool's transitive libXext runtime path and hid the process failure as a window timeout|external runtime setup
+B42|2026-09-01|initial P2 extractor verification found line-width and import-order violations|mechanical format
+B43|2026-09-01|T47 asset parity tests exceeded configured line width|mechanical format
+B44|2026-09-01|T48 source-map test declaration exceeded configured line width|mechanical format
+B45|2026-09-01|T49 compatibility report verification found unused import and line-width violations|mechanical format
+B46|2026-09-01|T49 compatibility test imports required Ruff reordering|mechanical format
+B47|2026-09-01|T50 raster implementation verification found line-width violations|mechanical format
+B48|2026-09-01|fill-pattern reset value was reused as 16-bit validation maximum after Pemsa orientation fix|V90
+B49|2026-09-01|T50 clip test expected a pixel outside its declared 2x2 clip|mechanical test fix
+B50|2026-09-01|T51 raster fixture imports required Ruff reordering|mechanical format
+B51|2026-09-01|T52 asset validation test import order and declaration exceeded configured style|mechanical format
+B52|2026-09-01|T53 manifest installer verification found line-width violations|mechanical format

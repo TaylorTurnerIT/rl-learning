@@ -1,0 +1,4 @@
+[
+  {"move": "x", "duration_ms": 50},
+  {"move": "neutral", "duration_ms": 1500}
+]

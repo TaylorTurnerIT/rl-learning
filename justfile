@@ -35,6 +35,22 @@ dodge-headless commands *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-headless {{ commands }} {{ options }}
 
 [group("dodge")]
+dodge-native-oracle commands output *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-oracle --commands {{ commands }} --output {{ output }} {{ options }}
+
+[group("dodge")]
+dodge-native-probe *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-probe {{ options }}
+
+[group("dodge")]
+dodge-native-extract-assets source output *options:
+    devenv -q shell -- dodge-native-extract-assets --source {{ source }} --output {{ output }} {{ options }}
+
+[group("dodge")]
+dodge-native-p2-report assets output *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-p2-report --assets {{ assets }} --output {{ output }} {{ options }}
+
+[group("dodge")]
 dodge-dataset-collect *options:
     @DODGE_HEADLESS=1 devenv -q shell -- uv run dodge-dataset-collect {{ options }}
 

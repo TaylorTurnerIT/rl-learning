@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from dodge.control import ControlRuntimeError, MovementCommand
+from dodge.control import ControlInputError, ControlRuntimeError, MovementCommand
 from dodge.headless import (
     COMMAND_MASKS,
+    PIXEL_PREFIX,
     RESULT_PREFIX,
     STATE_PREFIX,
     duration_to_frames,
@@ -91,8 +92,37 @@ def test_instrumented_cartridge_preserves_draw_for_visible_replay() -> None:
     assert "function __dodge_draw_rnd(max)" in result
     assert "__dodge_game_stat=stat" in result
     assert "function __dodge_advance_transition()" in result
-    assert "if _upd==updatetransition then" in result
+    assert "if _upd and _upd==updatetransition then" in result
     assert "if _upd!=updatetransition then" in result
+
+
+def test_instrumented_cartridge_full_draw_capture_reads_indexed_pixels() -> None:
+    source = (
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\nend\nfunction _update60()\nend\n"
+        "function _draw()\nend\n__gfx__\n"
+    )
+
+    result = instrument_cartridge(
+        source,
+        COMMANDS,
+        seed=42,
+        render=True,
+        capture_pixels=True,
+    )
+
+    assert PIXEL_PREFIX in result
+    assert "for y=0,127 do" in result
+    assert "for x=0,127 do" in result
+    assert "pget(x,y)" in result
+    assert "__dodge_done=true" in result
+    assert "__dodge_last_draw_frame=-1" in result
+    assert "__dodge_record_event(event)" in result
+    assert "if __dodge_done then __dodge_emit_result() end" in result
+    assert "__dodge_capture_started=true" in result
+
+    with pytest.raises(ControlInputError, match="pixel capture requires render"):
+        instrument_cartridge(source, COMMANDS, seed=42, capture_pixels=True)
 
 
 def test_instrumented_neat_replay_waits_for_the_game_before_actions() -> None:

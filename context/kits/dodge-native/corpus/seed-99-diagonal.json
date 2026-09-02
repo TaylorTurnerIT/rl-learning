@@ -1,0 +1,8 @@
+[
+  {"move": "x", "duration_ms": 50},
+  {"move": "up_right", "duration_ms": 500},
+  {"move": "down_left", "duration_ms": 500},
+  {"move": "up_left", "duration_ms": 500},
+  {"move": "down_right", "duration_ms": 500},
+  {"move": "neutral", "duration_ms": 500}
+]

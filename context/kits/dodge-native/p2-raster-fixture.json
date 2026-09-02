@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "source": {
+    "path": "src/dodge/game/dodge.p8",
+    "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "pemsa": {
+    "path": "src/dodge/runtime/pemsa",
+    "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+  },
+  "seed": 42,
+  "camera_pixel": 5,
+  "fill_pattern": {
+    "pattern": 1,
+    "color": 7,
+    "width": 4,
+    "height": 4,
+    "pixels": [
+      [7, 7, 7, 7],
+      [7, 7, 7, 7],
+      [7, 7, 7, 7],
+      [7, 7, 7, 0]
+    ]
+  }
+}
