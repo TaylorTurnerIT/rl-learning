@@ -4,6 +4,13 @@
   # System packages available in environment
   packages = [
     pkgs.git
+    pkgs.rustc
+    pkgs.cargo
+    pkgs.rustfmt
+    pkgs.clippy
+    pkgs.rust-analyzer
+    pkgs.cargo-nextest
+    pkgs.bacon
     pkgs.ruff
     pkgs.SDL2
     pkgs.xdotool

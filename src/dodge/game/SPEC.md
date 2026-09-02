@@ -44,6 +44,10 @@ C35: native extraction reads only checked-in cartridge bytes; generated output r
 C36: extracted gfx preserves 128×128 palette indices; sprite, sfx, music, and proven static-table records preserve source order + identity.
 C37: compatibility helpers encode only probed PICO-8 behavior; unresolved behavior-affecting semantics block native phase handoff.
 C38: generated asset output is disposable; stale or mismatched source/generator identity fails before consumption.
+C39: P3 Rust workspace uses pinned stable toolchain; `dodge-core` has no Macroquad, Python, Pemsa, xdotool, subprocess, or window dependency.
+C40: P3 slice scope = menu start → transition → player movement + representative normal enemy; ⊥ complete-game parity claim.
+C41: native slice state uses named typed Rust fields; ⊥ opaque Lua table or untyped remaining-state escape hatch.
+C42: native frame/action APIs separate one-frame inspection from multi-frame training stepping; state + indexed framebuffer share one simulation.
 
 §I
 
@@ -86,6 +90,10 @@ cli: `dodge-native-extract-assets --source PATH --output DIR` → deterministic 
 file: native asset manifest → generator version, cartridge identity, section identities, asset paths/content hashes, source-map hash, and compatibility report hash.
 file: native source map → PICO-8 symbol/section/source span → planned native module, conversion note, and parity status.
 api: `PicoCompat` → numeric/RNG/input/stat/palette/camera/fill/raster/sprite/sound compatibility primitives.
+api: `dodge_core::NativeGame` → reset, advance one frame, exact action step, typed snapshot.
+api: `dodge_core::Snapshot` → typed slice state, 16,384 indexed pixels, render state, provenance, canonical bytes.
+cli: `dodge-native-runner` → consume P1 action JSON, execute native serial slice, emit canonical snapshot/frame JSON.
+file: native differential report → first frame, field or pixel coordinate, expected/actual values, source-map span.
 
 §R
 
@@ -188,6 +196,15 @@ V89: numeric/RNG/input/stat probes record seed, source/Pemsa identity, separate 
 V90: software raster state preserves palette remap, transparency, fill pattern, camera, primitive order, and indexed pixels without RGB conversion.
 V91: stale output with changed source hash or generator version fails validation before asset load.
 V92: P2 acceptance report names accepted, deferred, and unresolved semantics; deferred/unresolved behavior-affecting entries prevent P3 acceptance.
+V93: native workspace toolchain + lock identity recorded; `dodge-core` dependency graph excludes viewer, Python, Pemsa, process, and window APIs.
+V94: same native seed + config + initial persistent state → byte-identical reset Snapshot, typed state hash, and indexed pixels.
+V95: nine actions → exact PICO-8 masks; neutral clears held input; `advance_frame` increments one; `step(action,n)` advances exactly n nonterminal frames.
+V96: every P3 frame exposes named lifecycle, player, representative enemy, input, RNG, reward, terminal, and indexed-render fields; no opaque state.
+V97: native renderer consumes simulation state and owns indexed framebuffer; draw cannot advance gameplay RNG, input, timers, or entities.
+V98: Snapshot canonical serialization roundtrip → identical bytes, typed state, render state, and pixel hash.
+V99: serial native runner consumes P1 scenarios without emulator IPC; invalid action/frame count fails before simulation mutation.
+V100: native/Pemsa mismatch → first frame + field path or pixel coordinate + expected/actual + source-map span; aggregate hashes alone insufficient.
+V101: P3 corpus acceptance report names exact slice boundary, corpus, parity result, deferred systems, and P4 handoff; no full-port claim.
 
 §T
 
@@ -245,6 +262,14 @@ T50|x|add indexed software raster palette/fill/camera primitives|V90,I.api
 T51|x|add primitive differential fixtures against P1 indexed frames|V85,V89,V90
 T52|x|add stale-output + unresolved-symbol validation|V84,V87,V88,V91,V92
 T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
+T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
+T55|.|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
+T56|.|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96
+T57|.|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
+T58|.|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
+T59|.|add field/pixel differential comparison + source-map diagnostics|V100,I.file
+T60|.|run defined slice corpus every frame + resolve parity mismatches|V94-V100
+T61|.|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,I.file
 
 §B
 

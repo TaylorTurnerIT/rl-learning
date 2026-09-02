@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/dodge-core"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"

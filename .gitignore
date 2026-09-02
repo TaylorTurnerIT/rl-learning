@@ -18,3 +18,4 @@ build/
 
 # Locally saved Dodge winner replays.
 /history/dodge/
+/native/target/
