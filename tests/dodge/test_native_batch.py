@@ -88,3 +88,49 @@ def test_single_lane_compatibility_adapter_preserves_observation_and_restart_con
     assert restarted.raw_state.frame == 13
     assert restarted.raw_state.player.x == 64.0
     environment.close()
+
+
+def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
+    kwargs = {
+        "step_frames": 4,
+        "full_state": True,
+        "pixels": True,
+        "board": True,
+    }
+    serial = NativeBatchEnvironment(execution="serial", **kwargs)
+    parallel = NativeBatchEnvironment(execution="parallel", **kwargs)
+    seeds = [13, 27, 58, 101]
+    serial_reset = serial.reset_batch(seeds)
+    parallel_reset = parallel.reset_batch(seeds)
+
+    for left, right in (
+        (serial_reset.frames, parallel_reset.frames),
+        (serial_reset.state_hashes, parallel_reset.state_hashes),
+        (serial_reset.pixel_hashes, parallel_reset.pixel_hashes),
+        (serial_reset.board, parallel_reset.board),
+        (serial_reset.pixels, parallel_reset.pixels),
+    ):
+        np.testing.assert_array_equal(left, right)
+    assert serial_reset.snapshot_bytes == parallel_reset.snapshot_bytes
+
+    for step in range(90):
+        actions = [(step + lane * 3) % 9 for lane in range(len(seeds))]
+        serial_step = serial.step_batch(actions)
+        parallel_step = parallel.step_batch(actions)
+        np.testing.assert_array_equal(serial_step.frames, parallel_step.frames)
+        np.testing.assert_array_equal(serial_step.rewards, parallel_step.rewards)
+        np.testing.assert_array_equal(serial_step.done, parallel_step.done)
+        np.testing.assert_array_equal(
+            serial_step.state_hashes, parallel_step.state_hashes
+        )
+        np.testing.assert_array_equal(
+            serial_step.pixel_hashes, parallel_step.pixel_hashes
+        )
+        np.testing.assert_array_equal(serial_step.board, parallel_step.board)
+        np.testing.assert_array_equal(serial_step.pixels, parallel_step.pixels)
+        assert serial_step.snapshot_bytes == parallel_step.snapshot_bytes
+        if bool(np.any(serial_step.done)):
+            break
+
+    serial.close()
+    parallel.close()

@@ -123,7 +123,7 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 | P6-T2 | . | Add native batch crate/API over accepted P4 core with serial lane mode | V1,V3 |
 | P6-T3 | x | Add typed full-state, pixel, and derived-board buffer views with shape/dtype tests | V5,V9 |
 | P6-T4 | ~ | Add Python binding and native DodgeEnv compatibility adapter | V4,V6,V8 |
-| P6-T5 | . | Add reset_batch/step_batch and compare serial vs parallel lanes | V1,V2,V3 |
+| P6-T5 | ~ | Add reset_batch/step_batch and compare serial vs parallel lanes | V1,V2,V3 |
 | P6-T6 | . | Add PPO native backend, preserve fallback path, and record backend/observation config | V6,V12 |
 | P6-T7 | . | Add forbidden-IPC tests and short deterministic backend comparison | V4,V7,V8,V12 |
 | P6-T8 | . | Run fixed throughput benchmark with full-state and pixels, then pixels-off control | V10,V11 |
