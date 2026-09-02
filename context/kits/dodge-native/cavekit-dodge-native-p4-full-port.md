@@ -104,7 +104,7 @@ RNG delta, and trace artifacts.
 | P4-T2 | . | Port player movement, collision, death, progression, freeze, sizing, and difficulty behavior | V2,V3,V10 |
 | P4-T3 | . | Port particles, trails, enemy families, growth/shrink/death states, and spawn logic | V1,V3,V5,V7 |
 | P4-T4 | x | Port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion | V1,V2,V3,V5 |
-| P4-T5 | ~ | Port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound-event emission | V6,V7,V8 |
+| P4-T5 | x | Port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound-event emission | V6,V7,V8 |
 | P4-T6 | . | Expand FullState inventory, restore, canonical serializer, and source-map coverage | V1,V4,V5 |
 | P4-T7 | . | Differential-run full corpus frame-by-frame; add targeted fixtures for every first mismatch | V2,V6,V11 |
 | P4-T8 | . | Run held-out randomized seed/action traces and legacy regression suite | V2,V12 |
