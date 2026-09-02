@@ -297,6 +297,9 @@ V153: P2 collision iterates source mutable enemy order, including newly appended
 P1 kamikaze entries; each visited entry adds one score and full difficulty step,
 non-P1/non-P2 explosion entries shatter before removal, and initiating P2 is
 visited again after its outer collision shatter.
+V154: enemy updates preserve source pre-growth local position/size for pattern and
+crush checks, then use post-growth entity position/size for overlap, edge bounce,
+kamikaze speed, and movement.
 
 §T
 
@@ -363,8 +366,8 @@ T59|x|add field/pixel differential comparison + source-map diagnostics|V100,I.fi
 T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches; classify visual boundary for P4|V94-V100,V117,V118
 T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
 P4-T1|x|port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries|V119,V120,V128,V143-V145
-P4-T2|~|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128,V149,V150
-P4-T3|.|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125
+P4-T2|x|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128,V149,V150,V153
+P4-T3|~|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154
 P4-T4|.|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123
 P4-T5|.|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126
 P4-T6|.|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
@@ -500,3 +503,4 @@ B122|2026-09-02|native die omitted the source's second shake increment, changing
 B123|2026-09-02|new difficulty tables used direct indexing under workspace no-panic lint|V151
 B124|2026-09-02|native snapshot wire version changed without updating the Python fixture constructor|V152
 B125|2026-09-02|native P2 collision removed initiating enemy before source mutable-list iteration|V153
+B126|2026-09-02|native enemy update reused one size/position view across source pre-growth and post-growth checks|V154

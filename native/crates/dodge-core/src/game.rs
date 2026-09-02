@@ -981,7 +981,10 @@ impl NativeGame {
             let y = original.y;
             let mut vx = original.vx.mul_fixed(ENEMY_FRICTION);
             let mut vy = original.vy.mul_fixed(ENEMY_FRICTION);
-            let mut size = original.size;
+            // `updateenemies` keeps the pre-growth `s` local for pattern and
+            // crush checks, while later overlap/edge code reads `_e.s`.
+            let source_size = original.size;
+            let mut size = source_size;
             let mut next_x = original.x;
             let mut next_y = original.y;
             let mut isizing = original.isizing;
@@ -1026,7 +1029,7 @@ impl NativeGame {
 
             if original.is_dying {
                 self.enemies.remove(index);
-                self.resolve_enemy_death(current);
+                self.resolve_enemy_death(current, x, y);
                 continue;
             }
             if let Some(slot) = self.enemies.get_mut(index) {
@@ -1048,10 +1051,13 @@ impl NativeGame {
                 }
             }
 
-            self.apply_pattern_enemy_collision(index, &mut vx, &mut vy, x, y, size);
-            self.apply_pattern_crush(index, x, y, size);
+            self.apply_pattern_enemy_collision(index, &mut vx, &mut vy, x, y, source_size);
+            self.apply_pattern_crush(index, x, y, source_size);
 
-            let current_offset = if original.personality >= 2 {
+            let Some(current_enemy) = self.enemies.get(index).copied() else {
+                break;
+            };
+            let current_offset = if current_enemy.personality >= 2 {
                 PicoFixed::from_int(4)
             } else {
                 PicoFixed::ZERO
@@ -1069,12 +1075,12 @@ impl NativeGame {
                     PicoFixed::ZERO
                 };
                 if self.enemy_should_collide
-                    && inside
+                    && current_enemy.inside
                     && other.inside
-                    && x.add(size) > other.x.sub(other_offset)
-                    && y.add(size) > other.y.sub(other_offset)
-                    && x.sub(current_offset) < other.x.add(other.size)
-                    && y.sub(current_offset) < other.y.add(other.size)
+                    && current_enemy.x.add(current_enemy.size) > other.x.sub(other_offset)
+                    && current_enemy.y.add(current_enemy.size) > other.y.sub(other_offset)
+                    && current_enemy.x.sub(current_offset) < other.x.add(other.size)
+                    && current_enemy.y.sub(current_offset) < other.y.add(other.size)
                 {
                     if let Some(current_enemy) = self.enemies.get_mut(index) {
                         current_enemy.is_dying = true;
@@ -1085,15 +1091,15 @@ impl NativeGame {
                 }
             }
 
-            if inside && original.personality != -1 {
-                if y >= PicoFixed::from_int(129).sub(size) {
+            if current_enemy.inside && current_enemy.personality != -1 {
+                if current_enemy.y >= PicoFixed::from_int(129).sub(current_enemy.size) {
                     vy = fixed_abs(vy).neg();
-                } else if y <= PicoFixed::from_int(-2) {
+                } else if current_enemy.y <= PicoFixed::from_int(-2) {
                     vy = fixed_abs(vy);
                 }
-                if x >= PicoFixed::from_int(129).sub(size) {
+                if current_enemy.x >= PicoFixed::from_int(129).sub(current_enemy.size) {
                     vx = fixed_abs(vx).neg();
-                } else if x <= PicoFixed::from_int(-2) {
+                } else if current_enemy.x <= PicoFixed::from_int(-2) {
                     vx = fixed_abs(vx);
                 }
             }
@@ -1102,12 +1108,12 @@ impl NativeGame {
                 break;
             };
             updated.speed = update_enemy_speed(updated, player);
-            updated.x = next_x.add(
+            updated.x = current_enemy.x.add(
                 vx.mul_fixed(self.speed)
                     .mul_fixed(self.freeze_rate)
                     .mul_fixed(updated.speed),
             );
-            updated.y = next_y.add(
+            updated.y = current_enemy.y.add(
                 vy.mul_fixed(self.speed)
                     .mul_fixed(self.freeze_rate)
                     .mul_fixed(updated.speed),
@@ -1233,11 +1239,16 @@ impl NativeGame {
         }
     }
 
-    fn resolve_enemy_death(&mut self, enemy: EnemyState) {
+    fn resolve_enemy_death(
+        &mut self,
+        enemy: EnemyState,
+        shatter_x: PicoFixed,
+        shatter_y: PicoFixed,
+    ) {
         if enemy.personality == 1 {
             self.add_kamikaze(enemy);
         } else {
-            self.shatter(enemy.x, enemy.y);
+            self.shatter(shatter_x, shatter_y);
         }
         self.score = self.score.add(SCORE_PER_SHATTER);
         self.shake = self.shake.add(PicoFixed::from_f32(0.07));
@@ -2074,6 +2085,62 @@ mod tests {
         assert_eq!(
             game.enemies.first().map(|enemy| enemy.x),
             Some(PicoFixed::from_f32(30.5))
+        );
+    }
+
+    #[test]
+    fn v154_powerup_pattern_collision_uses_pre_growth_source_size() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        game.patterns = vec![crate::PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::ONE,
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 0,
+            bounce_cap: false,
+            spawn_enabled: false,
+            special: 0,
+            counter: 0,
+            timer: PicoFixed::ZERO,
+            rects: vec![crate::PatternRect {
+                x: PicoFixed::from_int(10),
+                y: PicoFixed::from_int(10),
+                width: PicoFixed::from_int(10),
+                height: PicoFixed::from_int(10),
+                speed: PicoFixed::from_int(12),
+                dx: PicoFixed::ZERO,
+                dy: PicoFixed::ZERO,
+                targets: Vec::new(),
+                target_index: 0,
+                wait: PicoFixed::ZERO,
+                shown: true,
+                sh: PicoFixed::from_int(2),
+                warnings: Vec::new(),
+                collision_done: false,
+                finished: false,
+            }],
+        }];
+        game.active_pattern = Some(0);
+        game.enemies.push(EnemyState {
+            personality: 2,
+            inside: true,
+            ..EnemyState::normal(
+                PicoFixed::from_int(7),
+                PicoFixed::from_int(10),
+                PicoFixed::from_int(3),
+            )
+        });
+
+        game.update_enemies();
+
+        let enemy = game.enemies.first().copied();
+        assert_eq!(enemy.map(|value| value.size), Some(PicoFixed::from_int(4)));
+        assert_eq!(enemy.map(|value| value.vx), Some(PicoFixed::from_f32(0.01)));
+        assert_eq!(
+            enemy.map(|value| value.x),
+            Some(PicoFixed::from_raw(459_407))
         );
     }
 
