@@ -1,0 +1,16 @@
+[
+  {"move": "x", "duration_ms": 50},
+  {"move": "right", "duration_ms": 115},
+  {"move": "up", "duration_ms": 75},
+  {"move": "neutral", "duration_ms": 135},
+  {"move": "down_left", "duration_ms": 105},
+  {"move": "left", "duration_ms": 145},
+  {"move": "up_right", "duration_ms": 65},
+  {"move": "neutral", "duration_ms": 90},
+  {"move": "down", "duration_ms": 125},
+  {"move": "down_right", "duration_ms": 80},
+  {"move": "right", "duration_ms": 155},
+  {"move": "neutral", "duration_ms": 180},
+  {"move": "up_left", "duration_ms": 95},
+  {"move": "neutral", "duration_ms": 260}
+]

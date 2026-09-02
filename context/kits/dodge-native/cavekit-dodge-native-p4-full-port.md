@@ -68,6 +68,7 @@ RNG delta, and trace artifacts.
 | R1 | Dafny target limits | Current Dafny documentation describes Rust support as partial and growing; generated code also relies on a Dafny-specific runtime and verified scope | https://dafny.org/latest/Installation |
 | R2 | Dafny verification boundary | Dafny verifies Dafny-originated code through Boogie/Z3; generated target code is not a general proof that arbitrary translated Rust is equivalent | https://dafny.org/dafny/DafnyRef/DafnyRef |
 | R3 | Kani role | Kani can prove local Rust safety/correctness properties or produce counterexamples, but resource exhaustion is a possible result | https://model-checking.github.io/kani/ |
+| R4 | Pemsa math bridge | `sin`/`cos` receive `float` values from fixed-point state, evaluate C math, then convert the `float` result back to fixed point | https://github.com/egordorichev/pemsa/blob/master/src/pemsa/util/pemsa_math_api.cpp |
 
 ### §V INVARIANTS
 
@@ -102,12 +103,12 @@ RNG delta, and trace artifacts.
 |----|--------|------|-------|
 | P4-T1 | . | Port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries | V1,V2,V10 |
 | P4-T2 | . | Port player movement, collision, death, progression, freeze, sizing, and difficulty behavior | V2,V3,V10 |
-| P4-T3 | . | Port particles, trails, enemy families, growth/shrink/death states, and spawn logic | V1,V3,V5,V7 |
+| P4-T3 | . | Port particles, trails, enemy families, growth/shrink/death states, and spawn logic | V1,V3,V5,V7,V159 |
 | P4-T4 | x | Port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion | V1,V2,V3,V5 |
 | P4-T5 | x | Port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound-event emission | V6,V7,V8 |
 | P4-T6 | x | Expand FullState inventory, restore, canonical serializer, and source-map coverage | V1,V4,V5 |
-| P4-T7 | . | Differential-run full corpus frame-by-frame; add targeted fixtures for every first mismatch | V2,V6,V11 |
-| P4-T8 | . | Run held-out randomized seed/action traces and legacy regression suite | V2,V12 |
+| P4-T7 | x | Differential-run full corpus frame-by-frame; add targeted fixtures for every first mismatch | V2,V6,V11,V159 |
+| P4-T8 | x | Run held-out randomized seed/action traces and legacy regression suite | V2,V12 |
 | P4-T9 | . | Produce full-port acceptance report and stable core handoff to P5/P6 | V1-V12 |
 
 ### §B BUGS

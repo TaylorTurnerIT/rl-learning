@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "P4",
+  "source": "src/dodge/game/dodge.p8",
+  "fixtures": [
+    {
+      "name": "seed-7-particle-trig-precision",
+      "corpus": "context/kits/dodge-native/corpus/seed-7-neutral.json",
+      "seed": 7,
+      "first_mismatch_before_fix": {
+        "frame": 135,
+        "path": "particles[0].x",
+        "source_value": 12.4309,
+        "native_value": 12.430679321289062,
+        "source_span": [806, 834]
+      },
+      "resolution": {
+        "status": "resolved",
+        "cause": "native f32-only trig evaluation differed from Pemsa f32-input/double-math/f32-output conversion",
+        "invariant": "V159",
+        "regression_test": "dodge_core::game::tests::v159_trig_bridge_narrows_after_double_evaluation"
+      },
+      "current_differential": "src/dodge/runtime/.native-p4-seed7-diff-f64-20260902.json"
+    }
+  ]
+}

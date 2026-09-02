@@ -101,6 +101,7 @@ R1|Pemsa `printh`|writes arguments + newline to stdout via `printf`|https://gith
 R2|Pemsa `exit`|calls emulator stop; binary probe exited `0` + flushed `printh`|https://github.com/egordorichev/pemsa/blob/6c13c5879c800af33543f702a353285cfa9e6fb0/src/pemsa/util/pemsa_system_api.cpp#L100-L103
 R3|Pemsa cart data|relative `.cartdata/` path ∴ isolate cwd per process|https://github.com/egordorichev/pemsa/blob/6c13c5879c800af33543f702a353285cfa9e6fb0/src/pemsa/cart/pemsa_cartridge_module.cpp#L621-L637
 R4|SDL driver selection|`SDL_VIDEODRIVER` + `SDL_AUDIODRIVER` select backends|https://wiki.libsdl.org/SDL2/FAQUsingSDL
+R5|Pemsa math bridge|`sin`/`cos` receive fixed values as `float`, evaluate C math, narrow to `float`, then convert back to fixed|https://github.com/egordorichev/pemsa/blob/master/src/pemsa/util/pemsa_math_api.cpp
 
 §V
 
@@ -312,6 +313,9 @@ reinitialize generated pattern data while preserving counters/probabilities.
 V158: audio events preserve source call order, identity, and channel metadata;
 terminal restart resets gameplay fields in-place while retaining the active
 game lifecycle boundary.
+V159: source `sin`/`cos` converts fixed input to `f32`, evaluates the Pemsa C
+double-math path, narrows the result to `f32`, then converts to Q16.16; native
+code never substitutes `f32`-only trig evaluation.
 
 §T
 
@@ -379,12 +383,12 @@ T60|x|run defined slice corpus every frame + resolve in-scope logical mismatches
 T61|x|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,V117,V118,I.file
 P4-T1|x|port lifecycle, initialization, settings, menu, transitions, persistent state, and high-score boundaries|V119,V120,V128,V143-V145
 P4-T2|x|port player movement, collision, death, progression, freeze, sizing, and difficulty behavior|V120,V121,V128,V149,V150,V153
-P4-T3|x|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154
+P4-T3|x|port particles, trails, enemy families, growth/shrink/death states, and spawn logic|V119,V121,V123,V125,V154,V159
 P4-T4|x|port pattern tables, dynamic variants, interpolation, warnings, visibility, and completion|V119,V120,V121,V123,V157
 P4-T5|x|port complete indexed draw path, palette/camera/fill state, sprite/text primitives, and sound events|V124,V125,V126,V158
 P4-T6|x|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
-P4-T7|.|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129
-P4-T8|.|run held-out randomized traces and legacy regression suite|V120,V127,V130
+P4-T7|x|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129,V159
+P4-T8|x|run held-out randomized traces and legacy regression suite|V120,V127,V130
 P4-T9|.|produce P4 acceptance report and stable core handoff to P5/P6|V119-V130
 
 §B
@@ -520,3 +524,4 @@ B127|2026-09-02|pattern metadata wire and constructors assumed autovar could sta
 B128|2026-09-02|native round used signed remainder and rounded negative subpixels toward floor|V156
 B129|2026-09-02|native pattern scheduler only opened rectangles and never executed source targets or completion reset|V157
 B130|2026-09-02|pattern inventory regression test used one-based pattern IDs as zero-based vector indexes|V157
+B131|2026-09-02|native particle trig evaluated `f32` sin/cos while Pemsa uses `f32` input plus C double math before `f32` fixed conversion|V159

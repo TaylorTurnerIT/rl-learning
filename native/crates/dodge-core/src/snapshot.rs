@@ -1011,8 +1011,8 @@ fn render_wave(state: &FullState, render: &RenderState, framebuffer: &mut Indexe
 }
 
 fn source_sine(angle: PicoFixed) -> PicoFixed {
-    let radians = angle.to_f32() * std::f32::consts::TAU;
-    PicoFixed::from_f32(-radians.sin())
+    let radians = f64::from(angle.to_f32()) * std::f64::consts::TAU;
+    PicoFixed::from_f32(-(radians.sin() as f32))
 }
 
 fn render_pattern(

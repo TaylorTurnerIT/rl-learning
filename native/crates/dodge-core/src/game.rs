@@ -1902,13 +1902,13 @@ fn particle_color(particle: ParticleState) -> u8 {
 }
 
 fn pico_sine(angle: PicoFixed) -> PicoFixed {
-    let radians = angle.to_f32() * std::f32::consts::TAU;
-    PicoFixed::from_f32(-radians.sin())
+    let radians = f64::from(angle.to_f32()) * std::f64::consts::TAU;
+    PicoFixed::from_f32(-(radians.sin() as f32))
 }
 
 fn pico_cosine(angle: PicoFixed) -> PicoFixed {
-    let radians = angle.to_f32() * std::f32::consts::TAU;
-    PicoFixed::from_f32(radians.cos())
+    let radians = f64::from(angle.to_f32()) * std::f64::consts::TAU;
+    PicoFixed::from_f32(radians.cos() as f32)
 }
 
 fn enemy_max_size_from_roll(roll: PicoFixed) -> PicoFixed {
@@ -2205,7 +2205,7 @@ fn settings_row(cursor: u8) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use super::NativeGame;
+    use super::{NativeGame, pico_cosine, pico_sine};
     use crate::{
         Action, AudioEvent, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PatternRect,
         PatternState, PatternTarget, PicoFixed,
@@ -2945,5 +2945,16 @@ mod tests {
             game.enemies().last().map(|enemy| enemy.speed),
             Some(PicoFixed::from_raw(64_881))
         );
+    }
+
+    #[test]
+    fn v159_trig_bridge_narrows_after_double_evaluation() {
+        let angle = PicoFixed::from_f32(0.123456);
+        let radians = f64::from(angle.to_f32()) * std::f64::consts::TAU;
+        let expected_sine = PicoFixed::from_f32(-(radians.sin() as f32));
+        let expected_cosine = PicoFixed::from_f32(radians.cos() as f32);
+
+        assert_eq!(pico_sine(angle), expected_sine);
+        assert_eq!(pico_cosine(angle), expected_cosine);
     }
 }
