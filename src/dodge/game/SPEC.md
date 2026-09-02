@@ -293,6 +293,10 @@ configuration values cannot reach unchecked table indexing.
 V152: native snapshot wire-version changes update every producer, decoder, and
 fixture constructor together; current fixtures decode through the current field
 layout before differential comparison.
+V153: P2 collision iterates source mutable enemy order, including newly appended
+P1 kamikaze entries; each visited entry adds one score and full difficulty step,
+non-P1/non-P2 explosion entries shatter before removal, and initiating P2 is
+visited again after its outer collision shatter.
 
 §T
 
@@ -495,3 +499,4 @@ B121|2026-09-02|terminal rendering forced the physical bottom row to zero and br
 B122|2026-09-02|native die omitted the source's second shake increment, changing terminal camera quantization and the retained edge|V148
 B123|2026-09-02|new difficulty tables used direct indexing under workspace no-panic lint|V151
 B124|2026-09-02|native snapshot wire version changed without updating the Python fixture constructor|V152
+B125|2026-09-02|native P2 collision removed initiating enemy before source mutable-list iteration|V153

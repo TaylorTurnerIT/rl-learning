@@ -814,10 +814,15 @@ impl NativeGame {
     }
 
     fn explode_powerup_enemy(&mut self, index: usize) {
-        let _ = self.remove_enemy_at(index);
-        let mut other_index = 0;
-        while other_index < self.enemies.len() {
-            let Some(other) = self.enemies.get(other_index).copied() else {
+        if index >= self.enemies.len() {
+            return;
+        }
+        // PICO-8's `all(enemies)` iterator observes the source list mutation:
+        // deleting the current entry advances the next entry into its slot,
+        // while `kamikaze` appends a new -1 entry that is visited later.
+        let mut cursor = 0;
+        while cursor < self.enemies.len() {
+            let Some(other) = self.enemies.get(cursor).copied() else {
                 break;
             };
             if other.personality == 1 {
@@ -826,9 +831,9 @@ impl NativeGame {
                 self.shatter(other.x, other.y);
             }
             if other.personality != -1 {
-                self.remove_enemy_at(other_index);
+                self.remove_enemy_at(cursor);
             } else {
-                other_index += 1;
+                cursor += 1;
             }
             self.score = self.score.add(PicoFixed::ONE);
             self.apply_difficulty(false);
@@ -2018,6 +2023,58 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn v153_powerup_explosion_preserves_source_mutable_list_order() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        game.enemies.push(EnemyState {
+            personality: 2,
+            ..EnemyState::normal(
+                PicoFixed::from_int(60),
+                PicoFixed::from_int(60),
+                PicoFixed::from_int(3),
+            )
+        });
+        game.enemies.push(EnemyState::normal(
+            PicoFixed::from_int(20),
+            PicoFixed::from_int(20),
+            PicoFixed::from_int(3),
+        ));
+        game.enemies.push(EnemyState {
+            personality: 1,
+            ..EnemyState::normal(
+                PicoFixed::from_int(30),
+                PicoFixed::from_int(30),
+                PicoFixed::from_int(3),
+            )
+        });
+        game.enemies.push(EnemyState {
+            personality: 3,
+            ..EnemyState::normal(
+                PicoFixed::from_int(40),
+                PicoFixed::from_int(40),
+                PicoFixed::from_int(3),
+            )
+        });
+        let initiating = game.enemies.first().copied();
+        assert!(initiating.is_some());
+        let mut events = Vec::new();
+        if let Some(initiating) = initiating {
+            game.collide_enemy(0, initiating, &mut events);
+        }
+
+        assert_eq!(game.score, PicoFixed::from_int(5));
+        assert_eq!(game.enemies.len(), 1);
+        assert_eq!(
+            game.enemies.first().map(|enemy| enemy.personality),
+            Some(-1)
+        );
+        assert_eq!(game.particles.len(), 44);
+        assert_eq!(
+            game.enemies.first().map(|enemy| enemy.x),
+            Some(PicoFixed::from_f32(30.5))
+        );
     }
 
     #[test]
