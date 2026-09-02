@@ -115,6 +115,7 @@ impl NativeGame {
         } else {
             PicoFixed::ZERO
         };
+        self.input.finalize_frame();
         Ok(self.result(reward))
     }
 

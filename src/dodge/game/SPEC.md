@@ -208,6 +208,7 @@ V101: P3 corpus acceptance report names exact slice boundary, corpus, parity res
 V102: menu start `btnp` → transition advances on same frame; default game-ready frame = 13.
 V103: collision/death sets the terminal flag while preserving the update-game mode; terminal reward/survival accounting stops on that frame.
 V104: the native transition render cursor includes the same-frame transition tick; the source draw-side game update begins on the accepted frame-seven boundary and yields the seed-42 friendly spawn at frame 57.
+V105: post-update frame metadata exposes current and previous masks at the same completed-frame boundary as the oracle; held input therefore records equal masks while `btnp` still sees the pre-frame edge during simulation.
 
 §T
 
@@ -269,7 +270,7 @@ T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
 T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
 T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104
 T57|x|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
-T58|.|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
+T58|x|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
 T59|.|add field/pixel differential comparison + source-map diagnostics|V100,I.file
 T60|.|run defined slice corpus every frame + resolve parity mismatches|V94-V100
 T61|.|produce P3 vertical-slice acceptance report + P4 handoff|V94-V101,I.file
@@ -339,3 +340,5 @@ B59|2026-09-02|enemy movement test compared negative fixed arithmetic with an in
 B60|2026-09-02|snapshot-owned FrameResult made legacy tests consume non-Copy Results|mechanical test ownership fix
 B61|2026-09-02|snapshot module imported its own FullState type|mechanical import fix
 B62|2026-09-02|snapshot validation and truncation test used unchecked indexing syntax|V8
+B63|2026-09-02|runner duration conversion manually reimplemented integer ceiling division|mechanical Clippy fix
+B64|2026-09-02|native snapshots exposed pre-finalization input history unlike the post-draw oracle boundary|V105

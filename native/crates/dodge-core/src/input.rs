@@ -74,6 +74,10 @@ impl InputState {
         Ok(())
     }
 
+    pub(crate) fn finalize_frame(&mut self) {
+        self.previous_mask = self.current_mask;
+    }
+
     pub const fn btn(self, button: Button) -> bool {
         self.current_mask & button.mask() != 0
     }
@@ -86,5 +90,23 @@ impl InputState {
 impl Default for InputState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Button, InputState};
+
+    #[test]
+    fn frame_finalization_preserves_post_boundary_masks() {
+        let mut input = InputState::new();
+        assert!(input.advance(Button::X.mask()).is_ok());
+        assert!(input.btnp(Button::X));
+
+        input.finalize_frame();
+
+        assert_eq!(input.current_mask(), Button::X.mask());
+        assert_eq!(input.previous_mask(), Button::X.mask());
+        assert!(!input.btnp(Button::X));
     }
 }
