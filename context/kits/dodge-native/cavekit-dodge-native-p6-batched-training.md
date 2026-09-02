@@ -59,6 +59,11 @@ reward zero, done false, seed, and lane metadata.
 batch step → ordered Action array → one result per lane containing exact frames
 advanced, FullState or view, pixels, reward, done, event flags, and hashes.
 
+Rust batch observations own optional `FullState`/`RenderState`, indexed pixel
+`[u8;128*128]`, canonical binary snapshot, and `Board19x16`; the Python
+binding copies these into NumPy arrays with shapes `(N,128,128)` and
+`(N,19,16,16)`.
+
 Python environment → reset(seed), step(action), reset_batch(seeds),
 step_batch(actions), observe_full_state(), observe_pixels(), and
 observe_board_19x16().
@@ -116,7 +121,7 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 |----|--------|------|-------|
 | P6-T1 | x | Select and research Python binding boundary; record PyO3/NumPy/maturin decision before coding | R1-R7 |
 | P6-T2 | . | Add native batch crate/API over accepted P4 core with serial lane mode | V1,V3 |
-| P6-T3 | . | Add typed full-state, pixel, and derived-board buffer views with shape/dtype tests | V5,V9 |
+| P6-T3 | x | Add typed full-state, pixel, and derived-board buffer views with shape/dtype tests | V5,V9 |
 | P6-T4 | . | Add Python binding and native DodgeEnv compatibility adapter | V4,V6,V8 |
 | P6-T5 | . | Add reset_batch/step_batch and compare serial vs parallel lanes | V1,V2,V3 |
 | P6-T6 | . | Add PPO native backend, preserve fallback path, and record backend/observation config | V6,V12 |

@@ -14,6 +14,10 @@ pub use board::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_VALUES, BOARD_WI
 
 const START_HOLD_FRAMES: usize = 13;
 
+pub const PIXEL_WIDTH: usize = dodge_core::FRAMEBUFFER_WIDTH;
+pub const PIXEL_HEIGHT: usize = dodge_core::FRAMEBUFFER_HEIGHT;
+pub const PIXEL_VALUES: usize = FRAMEBUFFER_SIZE;
+
 /// Selects whether independent environment lanes execute serially or with Rayon.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ExecutionMode {
@@ -556,5 +560,54 @@ mod tests {
             .unwrap_or_else(|| unreachable!("board requested"));
         assert_eq!(board.as_slice().len(), BOARD_VALUES);
         assert!(board.as_slice().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn observation_flags_expose_owned_typed_buffers_without_implicit_views() {
+        let mut environment = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        let observations = environment
+            .reset(&[42])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        let observation = observations
+            .first()
+            .unwrap_or_else(|| unreachable!("one lane should be present"));
+        let state = observation
+            .full_state
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("full state requested"));
+        assert_eq!(state.lifecycle.frame, observation.frame);
+        assert_eq!(
+            observation
+                .render_state
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("render state accompanies full state"))
+                .clip_width,
+            128
+        );
+        assert_eq!(
+            observation
+                .pixels
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("pixels requested"))
+                .len(),
+            super::PIXEL_VALUES
+        );
+        assert_eq!(
+            observation
+                .board
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("board requested"))
+                .shape(),
+            (19, 16, 16)
+        );
+        let bytes = observation
+            .canonical_snapshot
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("canonical snapshot requested"));
+        let restored = dodge_core::Snapshot::from_canonical_bytes(bytes)
+            .unwrap_or_else(|_| unreachable!("owned snapshot should decode"));
+        assert_eq!(restored.state_hash(), observation.state_hash);
+        assert_eq!(restored.pixel_hash(), observation.pixel_hash);
     }
 }
