@@ -1,0 +1,163 @@
+{
+  "phase": "P4",
+  "schema_version": 1,
+  "status": "accepted_automated_owner_visual_review_pending",
+  "handoff": "p5_viewer_and_p6_batch_ready",
+  "source": {
+    "path": "src/dodge/game/dodge.p8",
+    "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "pemsa": {
+    "path": "src/dodge/runtime/pemsa",
+    "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+  },
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.0 (c980f4866 2026-06-30)",
+    "cargo_lock_sha256": "2c3794e25512263d8ceb11c0b4075b7eb61556f61c9d2a99209622c87fe25ef0",
+    "source_map_sha256": "f5efb4d1b841e6cb71d4dac7d5185bc773c3cef69725919b07a2038ca627a811"
+  },
+  "capture": {
+    "mode": "canonical_full_draw",
+    "boundary": "post_update_post_draw",
+    "pixels": {
+      "encoding": "palette_index_u8_row_major",
+      "width": 128,
+      "height": 128
+    },
+    "comparison": "every frame, full decoded state, reward, done, events, and indexed pixels"
+  },
+  "corpus": [
+    {
+      "fixture": "seed-42-movement",
+      "seed": 42,
+      "frames": 501,
+      "result": {"score": 3, "survival_frames": 487, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-current-oracle-20260902.json",
+      "source_trace_sha256": "34cfbc74e508dc775853c42e9e2774307e01d745226d503f4088b2e9344cddc9",
+      "native_trace": "src/dodge/runtime/.native-p4-full-native-f64-20260902.json",
+      "native_trace_sha256": "a433de4999a3f79dad63e2325a6c5f57eb7da25934f81de762a5fe2c2bd68a3c",
+      "diff_report": "src/dodge/runtime/.native-p4-full-diff-f64-20260902.json",
+      "diff_report_sha256": "65adb8b504fbe8c2079002193e64596a27faa10fb18f98f146ecae16a0411648",
+      "status": "match"
+    },
+    {
+      "fixture": "seed-42-settings",
+      "seed": 42,
+      "frames": 233,
+      "result": {"score": 0, "survival_frames": 174, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-settings-oracle3-20260902.json",
+      "source_trace_sha256": "9ae8834664d3c4d4fb599eabce3d49ddb3203a5beb55cf820aeb62d6b0a9a584",
+      "native_trace": "src/dodge/runtime/.native-p4-settings-native-f64-20260902.json",
+      "native_trace_sha256": "322ebc2d85ccb29e18e6516e20f63f81b00c7220905d0e406de092fc3be12eee",
+      "diff_report": "src/dodge/runtime/.native-p4-settings-diff-f64-20260902.json",
+      "diff_report_sha256": "9b8f22b7aaf3c688eed2542205ced15051a78b40e68e1d69fac590512688f7f0",
+      "status": "match"
+    },
+    {
+      "fixture": "seed-7-neutral",
+      "seed": 7,
+      "frames": 204,
+      "result": {"score": 1, "survival_frames": 190, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-seed7-oracle-20260902.json",
+      "source_trace_sha256": "36494fda8294cd0bef62b51ac62b2ab5c560da80a287d642a38db035bb2ce92a",
+      "native_trace": "src/dodge/runtime/.native-p4-seed7-native-f64-20260902.json",
+      "native_trace_sha256": "7a364f04ff4c8f4bb2652a79413da6999a93815794de27fad7531359e80b7121",
+      "diff_report": "src/dodge/runtime/.native-p4-seed7-diff-f64-20260902.json",
+      "diff_report_sha256": "0060a76ea4ff2c56b13f9262262fa0fa3a00fa4efe4696c923b6993fa8cfe38c",
+      "status": "match"
+    },
+    {
+      "fixture": "seed-99-diagonal",
+      "seed": 99,
+      "frames": 217,
+      "result": {"score": 0, "survival_frames": 203, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-seed99-oracle-20260902.json",
+      "source_trace_sha256": "8f1a3168dea713123c212b7ed35b1a1103d2cd4e40b3ad4f79b454e088a85690",
+      "native_trace": "src/dodge/runtime/.native-p4-seed99-native-f64-20260902.json",
+      "native_trace_sha256": "3d56c81e0c63c23dd9ee1bb8f4a07cae9e2ad587e6b5d53a5a416e93d2a095eb",
+      "diff_report": "src/dodge/runtime/.native-p4-seed99-diff-f64-20260902.json",
+      "diff_report_sha256": "c9c32040c6c8f755004033ac6187276eda9c7f17ef8b6ea688bf572bb51f1d4d",
+      "status": "match"
+    },
+    {
+      "fixture": "heldout-seed-13",
+      "seed": 13,
+      "frames": 267,
+      "result": {"score": 0, "survival_frames": 253, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-heldout-13-oracle.json",
+      "source_trace_sha256": "8cf2830c1ad4e713edf6160579024a681ed9639131ba68ab4292a207c7b190f4",
+      "native_trace": "src/dodge/runtime/.native-p4-heldout-13-native.json",
+      "native_trace_sha256": "6d4966a97c5c86c52084724943c08e0587e5d7b0282c85d845839ed4b5a9d8ea",
+      "diff_report": "src/dodge/runtime/.native-p4-heldout-13-diff.json",
+      "diff_report_sha256": "d19c22f94524476e81b3cf3d600edfc75c21656dcd4dd90d15bf76319f024a18",
+      "status": "match"
+    },
+    {
+      "fixture": "heldout-seed-27",
+      "seed": 27,
+      "frames": 263,
+      "result": {"score": 0, "survival_frames": 249, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-heldout-27-oracle.json",
+      "source_trace_sha256": "4f199b80bdbcf4a9ab50b59df725b15ab9221d7ad03a4f074deba6306b2a3a7c",
+      "native_trace": "src/dodge/runtime/.native-p4-heldout-27-native.json",
+      "native_trace_sha256": "443869d5a7cc41147e1f46ea3aac0f603be6f84dc7db68a9be80d3125523671a",
+      "diff_report": "src/dodge/runtime/.native-p4-heldout-27-diff.json",
+      "diff_report_sha256": "8649bbe1573b8b689aaa6b7733b930040943d5ac2358eabd0a6ff7997974e652",
+      "status": "match"
+    },
+    {
+      "fixture": "heldout-seed-58",
+      "seed": 58,
+      "frames": 213,
+      "result": {"score": 0, "survival_frames": 199, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-heldout-58-oracle.json",
+      "source_trace_sha256": "db3055741e36ef2b8530fe48f8d51ac9a4e1fe98be52ae5c79e3b19a36d26521",
+      "native_trace": "src/dodge/runtime/.native-p4-heldout-58-native.json",
+      "native_trace_sha256": "ff10c58fb2da8b87bb849c2bdb535ddf506bf4e1b49702dfa8c0781ab9a44ab2",
+      "diff_report": "src/dodge/runtime/.native-p4-heldout-58-diff.json",
+      "diff_report_sha256": "902a950262058ba5089801f9ff18835c76dbdc19e7ae610de5273e9587dff03c",
+      "status": "match"
+    },
+    {
+      "fixture": "heldout-seed-101",
+      "seed": 101,
+      "frames": 261,
+      "result": {"score": 0, "survival_frames": 247, "died": true},
+      "source_trace": "src/dodge/runtime/.native-p4-heldout-101-oracle.json",
+      "source_trace_sha256": "24a05c6a755aabedd0a50dca54720c2d02c99a39f469568f205e0909edce53ac",
+      "native_trace": "src/dodge/runtime/.native-p4-heldout-101-native.json",
+      "native_trace_sha256": "2bbd8847f053ae276356e3bda5e9e265ebbd8a488719313e1709d9993e656e30",
+      "diff_report": "src/dodge/runtime/.native-p4-heldout-101-diff.json",
+      "diff_report_sha256": "8ee0c0776a6278f9d8b85b06af7bd4382e2560cee29178508775d85c49ff5837",
+      "status": "match"
+    }
+  ],
+  "targeted_fixtures": {
+    "path": "context/kits/dodge-native/p4-targeted-fixtures.json",
+    "status": "resolved",
+    "count": 1
+  },
+  "restore": {
+    "status": "passed",
+    "test": "dodge_core::game::tests::v122_restore_replays_the_same_next_frame"
+  },
+  "automated_checks": {
+    "cargo_test_workspace": "40 core tests, 4 runner tests, 0 failed",
+    "cargo_clippy_warnings_as_errors": "passed",
+    "cargo_fmt_check": "passed",
+    "python_legacy_regression": "196 passed",
+    "python_regression_boundary": "devenv shell with SDL2 and libXext runtime paths"
+  },
+  "owner_review": {
+    "status": "pending",
+    "required_scope": "native 128x128 captures against original menu, settings, gameplay, pattern, particle, death, and transition frames",
+    "note": "Automated indexed-pixel equality passed; human visual approval is intentionally not represented as completed without an owner review."
+  },
+  "deferred": [
+    "audio waveform playback parity",
+    "Macroquad presentation and capture",
+    "Python native batch binding and throughput benchmark",
+    "Kani local proofs and differential fuzzing"
+  ]
+}

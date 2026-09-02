@@ -389,7 +389,7 @@ P4-T5|x|port complete indexed draw path, palette/camera/fill state, sprite/text 
 P4-T6|x|expand FullState inventory, restore, canonical serializer, and source-map coverage|V119,V122,V123
 P4-T7|x|run full corpus frame-by-frame; add targeted fixtures for every first mismatch|V120,V124,V129,V159
 P4-T8|x|run held-out randomized traces and legacy regression suite|V120,V127,V130
-P4-T9|.|produce P4 acceptance report and stable core handoff to P5/P6|V119-V130
+P4-T9|x|produce P4 acceptance report and stable core handoff to P5/P6|V119-V130
 
 §B
 

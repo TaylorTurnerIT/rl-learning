@@ -109,7 +109,7 @@ RNG delta, and trace artifacts.
 | P4-T6 | x | Expand FullState inventory, restore, canonical serializer, and source-map coverage | V1,V4,V5 |
 | P4-T7 | x | Differential-run full corpus frame-by-frame; add targeted fixtures for every first mismatch | V2,V6,V11,V159 |
 | P4-T8 | x | Run held-out randomized seed/action traces and legacy regression suite | V2,V12 |
-| P4-T9 | . | Produce full-port acceptance report and stable core handoff to P5/P6 | V1-V12 |
+| P4-T9 | x | Produce full-port acceptance report and stable core handoff to P5/P6 | V1-V12 |
 
 ### §B BUGS
 
