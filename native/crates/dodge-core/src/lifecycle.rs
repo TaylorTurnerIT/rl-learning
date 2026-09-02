@@ -50,6 +50,10 @@ impl LifecycleState {
         self.frame += 1;
     }
 
+    pub fn mark_dead(&mut self) {
+        self.dead = true;
+    }
+
     fn advance_transition(&mut self) {
         self.transition_y += 10;
         if self.transition_y >= 0 {
@@ -62,5 +66,22 @@ impl LifecycleState {
 impl Default for LifecycleState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LifecycleState, Mode};
+
+    #[test]
+    fn death_sets_flag_without_changing_update_mode() {
+        let mut lifecycle = LifecycleState::new();
+        lifecycle.mode = Mode::Game;
+        lifecycle.game_ready = true;
+
+        lifecycle.mark_dead();
+
+        assert!(lifecycle.dead);
+        assert_eq!(lifecycle.mode, Mode::Game);
     }
 }

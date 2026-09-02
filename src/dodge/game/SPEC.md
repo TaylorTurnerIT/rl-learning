@@ -206,6 +206,8 @@ V99: serial native runner consumes P1 scenarios without emulator IPC; invalid ac
 V100: native/Pemsa mismatch → first frame + field path or pixel coordinate + expected/actual + source-map span; aggregate hashes alone insufficient.
 V101: P3 corpus acceptance report names exact slice boundary, corpus, parity result, deferred systems, and P4 handoff; no full-port claim.
 V102: menu start `btnp` → transition advances on same frame; default game-ready frame = 13.
+V103: collision/death sets the terminal flag while preserving the update-game mode; terminal reward/survival accounting stops on that frame.
+V104: the native transition render cursor includes the same-frame transition tick; the source draw-side game update begins on the accepted frame-seven boundary and yields the seed-42 friendly spawn at frame 57.
 
 §T
 
@@ -265,7 +267,7 @@ T52|x|add stale-output + unresolved-symbol validation|V84,V87,V88,V91,V92
 T53|x|produce P2 conversion map + accepted compatibility report|V84-V92,I.file
 T54|x|scaffold pinned Rust workspace + engine-free `dodge-core`|C39,V93
 T55|x|port lifecycle, menu transition, actions, numeric helpers, and RNG state|C40,V94,V95
-T56|.|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96
+T56|x|port player movement, bounds, normal enemy, collision, reward, terminal behavior|C40,V95,V96,V103,V104
 T57|.|implement typed Snapshot, canonical serialization, and indexed framebuffer ownership|C41,C42,V96-V98,I.api
 T58|.|add serial native runner for P1 scenarios without emulator IPC|C39,V95,V99,I.cli
 T59|.|add field/pixel differential comparison + source-map diagnostics|V100,I.file
@@ -329,3 +331,8 @@ B51|2026-09-01|T52 asset validation test import order and declaration exceeded c
 B52|2026-09-01|T53 manifest installer verification found line-width violations|mechanical format
 B53|2026-09-02|native lifecycle advanced transition one frame after menu start|V102
 B54|2026-09-02|PicoFixed helpers shadowed standard arithmetic trait names|mechanical Clippy fix
+B55|2026-09-02|T56 collision path called an unimplemented lifecycle death transition|V103
+B56|2026-09-02|movement test compared a fixed result with an inexact decimal f32 conversion|mechanical test expectation
+B57|2026-09-02|collision fixture placed a size-one normal enemy outside the source strict boundary|mechanical test fixture
+B58|2026-09-02|native transition render cursor omitted the same-frame ten-pixel tick|V104
+B59|2026-09-02|enemy movement test compared negative fixed arithmetic with an inexact decimal f32 conversion|mechanical test expectation

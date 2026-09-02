@@ -69,6 +69,12 @@ impl PicoRng {
         PicoFixed::from_f32(random_float * limit.to_f32())
     }
 
+    pub(crate) fn consume(&mut self, count: usize, limit: PicoFixed) {
+        for _ in 0..count {
+            let _ = self.rnd(limit);
+        }
+    }
+
     pub const fn checkpoint(&self) -> RngCheckpoint {
         self.checkpoint
     }
