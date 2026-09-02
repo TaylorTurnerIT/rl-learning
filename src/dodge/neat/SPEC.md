@@ -22,6 +22,11 @@ C13: generation network visual ! self-contained HTML/SVG; ⊥ browser dependency
 C14: retain ≤5 NEAT checkpoints per run; episode history ∉ checkpoint retention.
 C15: v3 defaults: population 50, compatibility target 6 species, fixed 12-seed champion benchmark every 5 generations.
 C16: direct PPO trains board CNN actor-critic; validation `29991..30000` + evaluation `30001..30010` ∉ training seed stream.
+C17: native batch backend is additive; Python/Pemsa remains an oracle and
+fallback until native parity and throughput are accepted.
+C18: native batch observations use NumPy-owned arrays; full state is exposed as
+canonical binary snapshots, pixels as `uint8`, and the compatibility board as
+`float32` channel-major `(19,16,16)`.
 
 §I
 
@@ -44,6 +49,14 @@ cli: `dodge-ppo-train [options]` → resumable direct PPO run + held-out surviva
 file: `history/dodge/ppo/<run>/checkpoint-latest.pt` → atomic PPO model/optimizer/RNG checkpoint.
 py: `DodgeEnv(..., temporary_root: Path|None)` → env with explicit Pemsa scratch root.
 cli: `dodge-ppo-train` → run-scoped durable scratch + free-space preflight.
+py: `NativeBatchEnvironment` → ordered `reset_batch(seeds)` and
+`step_batch(action_indexes)` with optional full-state, pixel, and board arrays;
+the native path opens no display or emulator process.
+py: `NativeDodgeEnv` → single-lane `DodgeEnv`-compatible reset/step adapter for
+PPO/NEAT migration and differential tests.
+py: native batch result → contiguous `frames`, `rewards`, `done`, seed/hash,
+event-flag arrays plus optional `(N,128,128)` `uint8`, `(N,19,16,16)` `float32`,
+and canonical snapshot-byte views.
 
 §R
 
@@ -95,6 +108,18 @@ V39: ∀ PPO run → Pemsa scratch ∈ run-scoped durable runtime directory; def
 V40: PPO runtime root → writable + free-space floor before Pemsa launch; stale bridge scratch → clean only inside owned root.
 V41: runtime allocation/write OSError → include operation + target path; checkpoint remains resumable after failure.
 V42: PPO devenv/just launch → SDL/X11 runtime library path set before Pemsa/xdotool.
+V43: native batch reset starts every lane at frame 13 game-ready boundary;
+native step advances exactly configured `step_frames` and reward is the
+survival-frame delta.
+V44: native serial and parallel batch lanes preserve action/seed order and
+produce identical state/pixel hashes and buffers.
+V45: native Python results have documented NumPy shape/dtype/ownership; absent
+optional flags return `None` and never a stale prior buffer.
+V46: `NativeDodgeEnv` preserves the nine action order, observation projection,
+terminal transition, and close-then-reset compatibility behavior.
+V47: native batch import or boundary errors are explicit Python exceptions;
+missing native installation never silently falls back inside a requested
+native backend.
 
 §T
 
@@ -120,6 +145,7 @@ T18|x|add v3 speciation diagnostics, benchmark, reproducible evolution, timeout 
 T19|x|retune v3 population for viable species at v2-scale evaluation cost|C15,V28
 T20|x|add direct board-CNN PPO trainer, checkpoints, seed-held evaluation, + production CLI|C16,V33,V34,V35,V36,V37,V38,I.py,I.cli
 T21|~|route PPO/Pemsa scratch to durable run root + guard ENOSPC + repair launch runtime|V39,V40,V41,V42,I.py,I.cli
+T22|x|add PyO3/NumPy native batch binding and single-lane compatibility adapter|C17,C18,V43,V45,V46,V47,I.py
 
 §B
 

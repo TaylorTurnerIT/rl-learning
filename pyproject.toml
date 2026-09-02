@@ -12,6 +12,9 @@ dependencies = [
     "torch>=2.7",
 ]
 
+[project.optional-dependencies]
+native = ["dodge-native==0.1.0"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
@@ -44,6 +47,9 @@ build-backend = "hatchling.build"
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+
+[tool.uv.sources]
+dodge-native = { path = "native/crates/dodge-python" }
 
 [tool.ruff.lint]
 select = [

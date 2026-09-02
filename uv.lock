@@ -328,6 +328,18 @@ wheels = [
 ]
 
 [[package]]
+name = "dodge-native"
+version = "0.1.0"
+source = { directory = "native/crates/dodge-python" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.4.6" }]
+
+[[package]]
 name = "filelock"
 version = "3.32.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1685,6 +1697,11 @@ dependencies = [
     { name = "torch" },
 ]
 
+[package.optional-dependencies]
+native = [
+    { name = "dodge-native" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -1696,12 +1713,14 @@ gpu = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dodge-native", marker = "extra == 'native'", directory = "native/crates/dodge-python" },
     { name = "matplotlib", specifier = ">=3.10" },
     { name = "neat-python", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "torch", specifier = ">=2.7" },
 ]
+provides-extras = ["native"]
 
 [package.metadata.requires-dev]
 dev = [

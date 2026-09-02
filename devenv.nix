@@ -29,6 +29,7 @@ in
     pkgs.clippy
     pkgs.rust-analyzer
     pkgs.cargo-nextest
+    pkgs.maturin
     pkgs.bacon
     pkgs.ruff
     pkgs.SDL2

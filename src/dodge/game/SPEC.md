@@ -319,6 +319,9 @@ code never substitutes `f32`-only trig evaluation.
 V160: native board rasterization scales world coordinates before applying the
 source floor boundary; serial and parallel batch outputs preserve lane order
 and the documented `(19,16,16)` channel-major layout.
+V161: the Python batch boundary accepts only action indexes `0..8`, converts
+native boundary errors into Python exceptions, and returns owned arrays whose
+shape matches the selected observation flags.
 
 §T
 
@@ -530,3 +533,5 @@ B130|2026-09-02|pattern inventory regression test used one-based pattern IDs as 
 B131|2026-09-02|native particle trig evaluated `f32` sin/cos while Pemsa uses `f32` input plus C double math before `f32` fixed conversion|V159
 B132|2026-09-02|initial native batch scaffold retained an invalid import, borrowed lane storage while formatting an error, and floored board coordinates before scaling|V160; batch focused build catches the defects; safe access and scale-before-floor implementation
 B133|2026-09-02|batch reset bookkeeping used direct vector indexing under the workspace no-panic lint profile|V160; replace writes with checked mutable access
+B134|2026-09-02|PyO3 action tests compared `PyErr`, which intentionally has no equality implementation, and retained an unused tuple import|V161; assert successful action values through `Option`/error predicates and remove the import
+B135|2026-09-02|PyO3 `extension-module` linkage omitted `libpython` when Cargo attempted to link a Rust test binary|V161; make extension linkage an explicit feature and reserve it for Maturin builds
