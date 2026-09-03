@@ -26,6 +26,22 @@ def test_baseline_config_routes_only_manifest_training_seeds(tmp_path: Path) -> 
     assert config.to_json()["manifest_path"] == str(config.manifest_path)
 
 
+def test_baseline_config_routes_pixel_observation_contract() -> None:
+    manifest = SeedManifest.fresh_default()
+    config = BaselineConfig(
+        observation_mode="pixels",
+        pixel_stack=4,
+        native_lanes=8,
+        rollout_steps=32,
+    )
+
+    ppo_config = config.ppo_config(manifest)
+
+    assert ppo_config.observation_mode == "pixels"
+    assert ppo_config.pixel_stack == 4
+    assert ppo_config.backend == "native"
+
+
 def test_run_baseline_passes_locked_split_to_ppo(monkeypatch, tmp_path: Path) -> None:
     manifest = SeedManifest.fresh_default()
     manifest_path = tmp_path / "manifest.json"
@@ -108,9 +124,7 @@ def test_run_baseline_routes_actor_only_bc_warm_start(
 
     kwargs = calls["kwargs"]
     assert isinstance(kwargs, dict)
-    assert kwargs["initial_actor_state"] == {
-        "features.projection.0.weight": marker
-    }
+    assert kwargs["initial_actor_state"] == {"features.projection.0.weight": marker}
     assert kwargs["initialization"]["kind"] == "board_behavior_cloning_actor"  # type: ignore[index]
     stored = json.loads((run_directory / "ng-run.json").read_text())
     assert stored["kind"] == "dodge_ng_bc_to_ppo_run"

@@ -1,12 +1,13 @@
-# Dodge NG Phase 0/1/2 control spec
+# Dodge NG Phase 0/1/2/3 control spec
 
 §G
-G1|Build a fresh, reproducible NG experiment boundary and run a native board-observation PPO baseline.
+G1|Build a fresh, reproducible NG experiment boundary and run native board- and pixel-observation PPO references.
 G2|Measure learning on the 70% training partition and expose the untouched 30% partition only as a final generalization check.
 G3|Produce machine-readable provenance, metrics, plots, and a human-readable baseline report.
 G4|Close the board-PPO gate by separating action-credit/evaluator limits from learner-seed variance before Phase 2.
 G5|Use a fresh native counterfactual planner to provide board-action supervision, then test whether BC and BC-to-PPO improve closed-loop learning on unseen NG seeds.
 G6|Give each later learner the same frozen manifest, native interaction budget, and training-side selection boundary so improvements and failures transfer across methods.
+G7|Train an exact-raster pixel CNN with temporal context and measure visual learning cost against the board reference.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -14,12 +15,14 @@ C2|Split is exact 70/30 over the complete NG sample space; train and holdout set
 C3|Legacy GA/NEAT/BC/PPO data, checkpoints, databases, manifests, and scores are archival context only and cannot be NG inputs.
 C4|Holdout seeds stay locked: training, checkpoint selection, and future HPO may use training-side seeds only.
 C5|Use the existing native batch environment and board encoder for the hot path; preserve legacy PPO defaults and behavior when NG fields are unset.
-C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and the board PPO baseline; pixels, replay, DAgger, gradient actions, and HPO remain later phases.
+C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and the board PPO baseline; later phases add pixels, replay, DAgger, gradient actions, and HPO.
 C7|Do not alter the native game contract or nested game/NEAT specs as part of this slice.
 C8|Neutral bonus is a controlled ablation, not the assumed cause of policy collapse; diagnosis must also test action advantage and learner-seed variance.
 C9|P2 teacher states, labels, BC validation, DAgger aggregation, and warm-start selection use only manifest training seeds; holdout remains final-report-only.
 C10|Teacher scores simulate every action from the same canonical snapshot with one fixed native config/lookahead and must not mutate the live batch environment.
 C11|A teacher dataset is fresh NG data with manifest/config/provenance metadata; legacy databases, checkpoints, and prior experiment artifacts are never inputs.
+C12|The first pixel control receives only native indexed pixels with shape `(N,4,128,128)`, normalizes palette indexes by `15`, and uses no augmentation or derived board channels.
+C13|Pixel PPO uses the same frozen NG manifest, nine-action contract, native frame schedule, and training-side selection boundary as board PPO; holdout remains report-only.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -35,6 +38,7 @@ I10|`src/dodge/ng/bc.py` owns board BC training, training-seed inner selection, 
 I11|`src/dodge/rl/ppo.py` accepts an actor-only warm start while reinitializing value/optimizer state; `src/dodge/ng/bc.py` owns the compatible bridge.
 I12|`src/dodge/ng/compare.py` owns matched PPO selected-checkpoint evaluation, sample-efficiency deltas, and comparison plots without holdout selection.
 I13|`src/dodge/ng/dagger.py` owns learner-visited training-state collection, fresh counterfactual labels, dataset aggregation, and round BC retraining.
+I14|`src/dodge/rl/ppo.py` owns native pixel PPO, exact pixel frame stacking, reset-safe stack lifecycle, pixel checkpoints, and pixel evaluation.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -67,6 +71,9 @@ V21|PPO warm start copies only compatible actor feature/policy weights from BC, 
 V22|DAgger rounds append only learner-visited training-seed states with fresh teacher labels, record round/version provenance, and compare rounds only under the frozen BC/PPO evaluation protocol.
 V23|Manifest-bound teacher loading identifies a held-out seed as a holdout violation before the broader non-training-seed violation, preserving an actionable provenance diagnosis.
 V24|Saved teacher metadata counters and action histograms equal their serialized arrays; stale aggregate counters fail teacher loading.
+V25|Pixel PPO accepts only native indexed-pixel batches with finite palette values in `0..15`, the configured stack/channel shape, and deterministic normalization.
+V26|Pixel frame stacks repeat the first reset frame and replace all channels on lane reset; no frame from a prior episode is present in the first post-reset observation.
+V27|Pixel checkpoints and run records identify the pixel model, observation mode, stack size, raster shape, and action contract; matching pixel resumes reproduce configuration validation.
 
 §T
 id|status|task|cites
@@ -85,7 +92,10 @@ T12|x|Collect fresh native planner demonstrations on training seeds, persist boa
 T13|x|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
 T14|x|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11,I12
 T15|x|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9,I13
-T16|~|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
+T16|x|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
+T17|~|Extend native PPO with indexed-pixel four-frame stacks, reset-safe lifecycle, pixel model/checkpoint metadata, CLI configuration, and regression tests.|V25,V26,V27,I14,C12,C13
+T18|.|Run a matched native pixel-PPO control on the frozen training split, select only on inner training seeds, and report locked holdout performance and throughput.|V7,V18,V25,V27,G7
+T19|.|Compare board and pixel controls by sample efficiency, wall-clock throughput, split gap, lower tail, and representative visual failures.|V7,V18,V25,V27,G6,G7
 
 §B
 id|date|cause|fix
@@ -99,3 +109,5 @@ B7|2026-09-03|Comparison report called an omitted JSON writer and exceeded line 
 B8|2026-09-03|Comparison fixture expected holdout delta with incorrect hardcoded arithmetic.|Derive expected delta from fixture values and keep comparison arithmetic covered.
 B9|2026-09-03|DAgger collector imported unused tensor alias after switching to module-qualified torch calls.|Remove unused import before next verification gate.
 B10|2026-09-03|DAgger aggregation inherited base metadata counters after concatenating arrays, so aggregate metadata underreported examples.|Recompute examples, decisive count, and action histogram on every teacher save and validate V24.
+B11|2026-09-03|The first full-suite run recorded the live NEAT checkpoint test as failed while an isolated devenv rerun passed in 248.93s; concurrent/stale Pemsa activity made the result transient rather than a P3 regression.|Keep P3 source scoped away from NEAT, rerun live Pemsa tests in isolation when the suite records this failure, and do not add a source workaround without deterministic reproduction.
+B12|2026-09-03|Repository-wide `app-check` still reports five unrelated pre-existing lint violations in native fuzz tooling and the legacy `rl_learning` package; none overlap T17 files.|Use targeted clean lint for the T17 gate and defer unrelated lint cleanup to its owning legacy modules.

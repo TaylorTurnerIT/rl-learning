@@ -16,7 +16,12 @@ from dodge.control import PROJECT_ROOT, ControlInputError, ControlRuntimeError
 from dodge.ng.bc import load_bc_actor_state
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import build_report
-from dodge.rl.ppo import NativeExecution, PPOConfig, train_ppo
+from dodge.rl.ppo import (
+    NativeExecution,
+    NativeObservationMode,
+    PPOConfig,
+    train_ppo,
+)
 
 DEFAULT_RUN_DIRECTORY = PROJECT_ROOT / "history" / "dodge" / "ng" / "baseline-p1"
 DEFAULT_BASELINE_SEED = 2_026_0903
@@ -50,6 +55,8 @@ class BaselineConfig:
     device: str = "auto"
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
+    observation_mode: NativeObservationMode = "board"
+    pixel_stack: int = 4
     initial_bc_checkpoint: Path | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -85,7 +92,8 @@ class BaselineConfig:
             backend="native",
             native_lanes=self.native_lanes,
             native_execution=self.native_execution,
-            observation_mode="board",
+            observation_mode=self.observation_mode,
+            pixel_stack=self.pixel_stack,
             training_seeds=manifest.training_seeds,
             training_seed_manifest=manifest.sha256,
         )
@@ -100,6 +108,10 @@ def run_baseline(config: BaselineConfig) -> dict[str, object]:
     initialization: dict[str, object] | None = None
     run_kind = "dodge_ng_baseline_run"
     if config.initial_bc_checkpoint is not None:
+        if config.observation_mode != "board":
+            raise ControlInputError(
+                "board BC warm starts require observation_mode='board'"
+            )
         initial_actor_state = load_bc_actor_state(
             config.initial_bc_checkpoint,
             manifest,
@@ -202,6 +214,10 @@ def _parser() -> argparse.ArgumentParser:
         "--native-execution", choices=("serial", "parallel"), default="parallel"
     )
     parser.add_argument(
+        "--observation-mode", choices=("board", "pixels"), default="board"
+    )
+    parser.add_argument("--pixel-stack", type=_positive_int, default=4)
+    parser.add_argument(
         "--initial-bc-checkpoint",
         type=Path,
         default=None,
@@ -238,6 +254,8 @@ def main(argv: list[str] | None = None) -> int:
         device=arguments.device,
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
+        observation_mode=arguments.observation_mode,
+        pixel_stack=arguments.pixel_stack,
         initial_bc_checkpoint=arguments.initial_bc_checkpoint,
     )
     try:

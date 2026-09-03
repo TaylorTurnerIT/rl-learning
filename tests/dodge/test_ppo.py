@@ -19,14 +19,19 @@ from dodge.neat.state import (
 )
 from dodge.rl.ppo import (
     BOARD_SHAPE,
+    FRAME_HEIGHT,
+    FRAME_WIDTH,
     TRAINING_SEEDS,
     DodgeActorCriticCNN,
     NativePPOTrainer,
+    PixelActorCriticCNN,
     PPOConfig,
     PPOTrainer,
     StabilityReward,
     TrainingSeedStream,
+    _advance_pixel_stack,
     _atomic_torch_save,
+    _initial_pixel_stack,
     _prepare_runtime_directory,
     compute_gae,
     evaluate_policy,
@@ -96,6 +101,46 @@ def test_actor_critic_returns_nine_logits_and_one_value() -> None:
     assert logits.shape == (2, 9)
     assert values.shape == (2,)
     assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_pixel_actor_critic_returns_nine_logits_and_one_value() -> None:
+    model = PixelActorCriticCNN(stack_size=4, hidden_size=16)
+
+    logits, values = model(
+        torch.zeros((2, 4, FRAME_HEIGHT, FRAME_WIDTH), dtype=torch.uint8)
+    )
+
+    assert logits.shape == (2, 9)
+    assert values.shape == (2,)
+    assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_pixel_stack_preserves_temporal_order_and_repeats_reset_frame() -> None:
+    first = np.arange(FRAME_HEIGHT * FRAME_WIDTH, dtype=np.uint8).reshape(
+        1, FRAME_HEIGHT, FRAME_WIDTH
+    )
+    second = np.full_like(first, 7)
+
+    initial = _initial_pixel_stack(first, 4)
+    advanced = _advance_pixel_stack(initial, second)
+
+    np.testing.assert_array_equal(initial[:, 0], first)
+    np.testing.assert_array_equal(initial[:, 1], first)
+    np.testing.assert_array_equal(advanced[:, :-1], initial[:, 1:])
+    np.testing.assert_array_equal(advanced[:, -1], second)
+
+
+def test_pixel_config_requires_native_backend() -> None:
+    with pytest.raises(ValueError, match="native backend"):
+        _config(observation_mode="pixels").validate()
+
+    config = _config(
+        backend="native",
+        observation_mode="pixels",
+        native_lanes=2,
+        pixel_stack=4,
+    )
+    config.validate()
 
 
 def test_v21_actor_warm_start_copies_policy_but_not_value_weights() -> None:
@@ -255,6 +300,83 @@ def test_native_ppo_trainer_collects_batched_board_rollout() -> None:
     assert all(math.isfinite(value) for value in metrics.values())
 
 
+def test_v25_native_pixel_ppo_collects_indexed_stacks() -> None:
+    pytest.importorskip("dodge_native")
+    trainer = NativePPOTrainer(
+        _config(
+            backend="native",
+            native_lanes=2,
+            native_execution="serial",
+            rollout_steps=6,
+            observation_mode="pixels",
+            pixel_stack=4,
+        )
+    )
+    try:
+        batch, episodes = trainer.collect_rollout()
+    finally:
+        trainer.close()
+
+    assert batch.observations.shape == (6, 4, FRAME_HEIGHT, FRAME_WIDTH)
+    assert batch.observations.dtype == torch.uint8
+    assert int(batch.observations.min()) >= 0
+    assert int(batch.observations.max()) <= 15
+    assert not episodes
+    assert trainer.global_step == 6
+
+
+def test_v26_native_pixel_reset_repeats_new_frame_without_old_history() -> None:
+    pytest.importorskip("dodge_native")
+    trainer = NativePPOTrainer(
+        _config(
+            backend="native",
+            native_lanes=2,
+            native_execution="serial",
+            observation_mode="pixels",
+            pixel_stack=4,
+        )
+    )
+    try:
+        trainer._ensure_lanes()
+        assert trainer._pixels is not None
+        trainer._pixels[0, 0] = 0
+        trainer._pixels[0, 1] = 1
+        trainer._pixels[0, 2] = 2
+        trainer._pixels[0, 3] = 3
+
+        trainer._reset_lanes([0])
+
+        reset_stack = trainer._pixels[0]
+        for channel in range(1, 4):
+            np.testing.assert_array_equal(reset_stack[channel], reset_stack[0])
+    finally:
+        trainer.close()
+
+
+def test_v27_pixel_checkpoint_identifies_observation_contract(tmp_path: Path) -> None:
+    pytest.importorskip("dodge_native")
+    config = _config(
+        backend="native",
+        native_lanes=2,
+        observation_mode="pixels",
+        pixel_stack=4,
+    )
+    checkpoint = tmp_path / "pixel-checkpoint.pt"
+    trainer = NativePPOTrainer(config)
+    try:
+        trainer.save_checkpoint(checkpoint)
+    finally:
+        trainer.close()
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    assert payload["model_type"] == "DodgePixelActorCriticCNN"
+    assert payload["observation_mode"] == "pixels"
+    assert payload["pixel_shape"] == [4, FRAME_HEIGHT, FRAME_WIDTH]
+
+    resumed = NativePPOTrainer(config, checkpoint=checkpoint)
+    resumed.close()
+
+
 def test_v14_native_evaluation_resets_inactive_completed_lanes(monkeypatch) -> None:
     class FakeBatchEnvironment:
         thresholds = (1, 2, 3)
@@ -409,9 +531,7 @@ def test_ppo_run_records_training_side_evaluation(tmp_path: Path) -> None:
         evaluation_seeds=(30_102,),
     )
 
-    metrics = json.loads(
-        (run_directory / "metrics.jsonl").read_text().splitlines()[0]
-    )
+    metrics = json.loads((run_directory / "metrics.jsonl").read_text().splitlines()[0])
     record = json.loads((run_directory / "run.json").read_text())
     assert metrics["training_evaluation"]["seeds"] == [30_100, 30_101]
     assert record["final_training_evaluation"]["seeds"] == [30_100, 30_101]

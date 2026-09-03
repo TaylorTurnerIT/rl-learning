@@ -28,6 +28,7 @@ from dodge.dataset import (
 )
 from dodge.imitation.board import BOARD_CHANNELS, BOARD_SHAPE, encode_board
 from dodge.native.batch import NativeBatchEnvironment, NativeBatchResult
+from dodge.native.differential import FRAME_HEIGHT, FRAME_WIDTH
 from dodge.neat.bridge import Direction
 from dodge.neat.environment import DodgeEnv, Observation, Transition
 from dodge.neat.state import RawState
@@ -35,6 +36,8 @@ from dodge.neat.state import RawState
 PPO_CHECKPOINT_VERSION = 1
 PPO_RUN_VERSION = 1
 PPO_MODEL_TYPE = "DodgeActorCriticCNN"
+PIXEL_PPO_MODEL_TYPE = "DodgePixelActorCriticCNN"
+PIXEL_PALETTE_MAX = 15.0
 DEFAULT_RUN_ROOT = PROJECT_ROOT / "history" / "dodge" / "ppo"
 PPO_RUNTIME_DIRECTORY_NAME = ".runtime"
 MIN_RUNTIME_FREE_BYTES = 512 * 1024 * 1024
@@ -46,7 +49,7 @@ TRAINING_SEEDS = tuple(
 
 PPOBackend = Literal["python", "native"]
 NativeExecution = Literal["serial", "parallel"]
-NativeObservationMode = Literal["board"]
+NativeObservationMode = Literal["board", "pixels"]
 
 
 class Environment(Protocol):
@@ -88,6 +91,7 @@ class PPOConfig:
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
+    pixel_stack: int = 4
     training_seeds: tuple[int, ...] = ()
     training_seed_manifest: str | None = None
 
@@ -132,8 +136,12 @@ class PPOConfig:
             raise ValueError("native lane count must be positive")
         if self.native_execution not in {"serial", "parallel"}:
             raise ValueError("native execution must be 'serial' or 'parallel'")
-        if self.observation_mode != "board":
-            raise ValueError("only the 'board' PPO observation is supported")
+        if self.observation_mode not in {"board", "pixels"}:
+            raise ValueError("observation mode must be 'board' or 'pixels'")
+        if not 1 <= self.pixel_stack <= 8:
+            raise ValueError("pixel stack must be between 1 and 8")
+        if self.observation_mode == "pixels" and self.backend != "native":
+            raise ValueError("pixel PPO requires the native backend")
         if self.training_seed_manifest is not None and not isinstance(
             self.training_seed_manifest, str
         ):
@@ -239,8 +247,111 @@ class DodgeActorCriticCNN(nn.Module):
         missing = actor_keys - supplied.keys()
         if missing:
             raise ValueError(
-                "actor warm start is missing compatible weights: "
-                f"{sorted(missing)[:3]}"
+                f"actor warm start is missing compatible weights: {sorted(missing)[:3]}"
+            )
+        try:
+            self.load_state_dict(supplied, strict=False)
+        except (RuntimeError, TypeError) as error:
+            raise ValueError(
+                f"actor warm start has incompatible weights: {error}"
+            ) from error
+        nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+        if self.value_head.bias is not None:
+            nn.init.zeros_(self.value_head.bias)
+
+    def _initialize_weights(self) -> None:
+        for module in self.modules():
+            if isinstance(module, (nn.Conv2d, nn.Linear)):
+                nn.init.orthogonal_(module.weight, gain=math.sqrt(2))
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        nn.init.orthogonal_(self.policy_head.weight, gain=0.01)
+        nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+
+
+class PixelFeatureEncoder(nn.Module):
+    """Extract temporal-spatial features from native indexed pixels."""
+
+    def __init__(self, stack_size: int = 4, hidden_size: int = 256) -> None:
+        super().__init__()
+        if not 1 <= stack_size <= 8:
+            raise ValueError("pixel stack must be between 1 and 8")
+        if hidden_size < 1:
+            raise ValueError("hidden size must be positive")
+        self.stack_size = stack_size
+        self.convolution = nn.Sequential(
+            nn.Conv2d(stack_size, 32, kernel_size=5, stride=2, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((2, 2)),
+            nn.Flatten(),
+        )
+        self.projection = nn.Sequential(
+            nn.Linear(128 * 2 * 2, hidden_size),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations: Tensor) -> Tensor:
+        _validate_pixel_batch(observations, self.stack_size)
+        normalized = observations.float() / PIXEL_PALETTE_MAX
+        return self.projection(self.convolution(normalized))
+
+
+class PixelActorCriticCNN(nn.Module):
+    """CNN policy plus value function over an exact indexed-pixel stack."""
+
+    def __init__(self, stack_size: int = 4, hidden_size: int = 256) -> None:
+        super().__init__()
+        self.stack_size = stack_size
+        self.features = PixelFeatureEncoder(stack_size, hidden_size)
+        self.policy_head = nn.Linear(hidden_size, len(ACTION_CHOICES))
+        self.value_head = nn.Linear(hidden_size, 1)
+        self._initialize_weights()
+
+    def forward(self, observations: Tensor) -> tuple[Tensor, Tensor]:
+        features = self.features(observations)
+        return self.policy_head(features), self.value_head(features).squeeze(-1)
+
+    def get_action_and_value(
+        self, observations: Tensor, *, deterministic: bool = False
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        logits, values = self(observations)
+        distribution = Categorical(logits=logits)
+        actions = logits.argmax(dim=1) if deterministic else distribution.sample()
+        return (
+            actions,
+            distribution.log_prob(actions),
+            distribution.entropy(),
+            values,
+        )
+
+    def evaluate_actions(
+        self, observations: Tensor, actions: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        logits, values = self(observations)
+        distribution = Categorical(logits=logits)
+        return distribution.log_prob(actions), distribution.entropy(), values
+
+    def load_actor_state_dict(self, state_dict: Mapping[str, Tensor]) -> None:
+        """Load compatible actor weights while resetting the value head."""
+        current = self.state_dict()
+        actor_keys = {
+            name
+            for name in current
+            if name.startswith("features.") or name.startswith("policy_head.")
+        }
+        supplied = {
+            name: value for name, value in state_dict.items() if name in actor_keys
+        }
+        missing = actor_keys - supplied.keys()
+        if missing:
+            raise ValueError(
+                f"actor warm start is missing compatible weights: {sorted(missing)[:3]}"
             )
         try:
             self.load_state_dict(supplied, strict=False)
@@ -268,6 +379,33 @@ def _validate_board_batch(observations: Tensor) -> None:
             "observations must have shape "
             f"(N, {BOARD_SHAPE[0]}, {BOARD_SHAPE[1]}, {BOARD_SHAPE[2]})"
         )
+
+
+def _validate_pixel_batch(observations: Tensor, stack_size: int) -> None:
+    expected_shape = (stack_size, FRAME_HEIGHT, FRAME_WIDTH)
+    if observations.ndim != 4 or tuple(observations.shape[1:]) != expected_shape:
+        raise ValueError(
+            "pixel observations must have shape "
+            f"(N, {expected_shape[0]}, {expected_shape[1]}, {expected_shape[2]})"
+        )
+
+
+def _model_for_config(config: PPOConfig) -> nn.Module:
+    if config.observation_mode == "pixels":
+        return PixelActorCriticCNN(stack_size=config.pixel_stack)
+    return DodgeActorCriticCNN()
+
+
+def _model_type_for_config(config: PPOConfig) -> str:
+    return (
+        PIXEL_PPO_MODEL_TYPE if config.observation_mode == "pixels" else PPO_MODEL_TYPE
+    )
+
+
+def _observation_shape_for_config(config: PPOConfig) -> tuple[int, int, int]:
+    if config.observation_mode == "pixels":
+        return (config.pixel_stack, FRAME_HEIGHT, FRAME_WIDTH)
+    return BOARD_SHAPE
 
 
 def board_tensor(state: RawState, device: torch.device | None = None) -> Tensor:
@@ -385,9 +523,7 @@ class EvaluationResult:
 
 
 class TrainingSeedStream:
-    def __init__(
-        self, seed: int, candidates: Sequence[int] = TRAINING_SEEDS
-    ) -> None:
+    def __init__(self, seed: int, candidates: Sequence[int] = TRAINING_SEEDS) -> None:
         self._random = random.Random(seed)
         self._candidates = tuple(candidates)
         if not self._candidates:
@@ -422,7 +558,7 @@ class PPOTrainer:
         self.config = config
         self.device = _resolve_device(config.device)
         _seed_torch(config.seed)
-        self.model = DodgeActorCriticCNN().to(self.device)
+        self.model = _model_for_config(config).to(self.device)
         self.initialization = (
             dict(initialization) if initialization is not None else None
         )
@@ -687,10 +823,15 @@ class PPOTrainer:
         return self._episode_seed
 
     def _checkpoint_payload(self) -> dict[str, object]:
+        observation_shape = _observation_shape_for_config(self.config)
+        pixels_mode = self.config.observation_mode == "pixels"
         return {
             "version": PPO_CHECKPOINT_VERSION,
-            "model_type": PPO_MODEL_TYPE,
-            "board_shape": list(BOARD_SHAPE),
+            "model_type": _model_type_for_config(self.config),
+            "observation_mode": self.config.observation_mode,
+            "observation_shape": list(observation_shape),
+            "board_shape": list(BOARD_SHAPE) if not pixels_mode else None,
+            "pixel_shape": list(observation_shape) if pixels_mode else None,
             "actions": list(ACTION_CHOICES),
             "config": self.config.to_json(),
             "updates_completed": self.updates_completed,
@@ -720,10 +861,29 @@ class PPOTrainer:
             ) from error
         if not isinstance(payload, dict):
             raise ControlRuntimeError("PPO checkpoint must be an object")
+        expected_shape = _observation_shape_for_config(self.config)
+        expected_pixels = self.config.observation_mode == "pixels"
+        stored_mode = payload.get("observation_mode", "board")
+        stored_shape = payload.get("observation_shape")
+        mode_metadata_matches = stored_mode == self.config.observation_mode
+        shape_metadata_matches = stored_shape is None or tuple(stored_shape) == (
+            expected_shape
+        )
+        if expected_pixels:
+            shape_metadata_matches = (
+                tuple(payload.get("pixel_shape", ())) == (expected_shape)
+                and shape_metadata_matches
+            )
+        else:
+            shape_metadata_matches = (
+                tuple(payload.get("board_shape", ())) == (BOARD_SHAPE)
+                and shape_metadata_matches
+            )
         if (
             payload.get("version") != PPO_CHECKPOINT_VERSION
-            or payload.get("model_type") != PPO_MODEL_TYPE
-            or tuple(payload.get("board_shape", ())) != BOARD_SHAPE
+            or payload.get("model_type") != _model_type_for_config(self.config)
+            or not mode_metadata_matches
+            or not shape_metadata_matches
             or tuple(payload.get("actions", ())) != ACTION_CHOICES
         ):
             raise ControlRuntimeError("PPO checkpoint has incompatible model metadata")
@@ -776,7 +936,7 @@ class NativePPOTrainer(PPOTrainer):
         self.config = config
         self.device = _resolve_device(config.device)
         _seed_torch(config.seed)
-        self.model = DodgeActorCriticCNN().to(self.device)
+        self.model = _model_for_config(config).to(self.device)
         self.initialization = (
             dict(initialization) if initialization is not None else None
         )
@@ -791,6 +951,7 @@ class NativePPOTrainer(PPOTrainer):
             config.seed, config.training_seeds or TRAINING_SEEDS
         )
         self._boards: np.ndarray | None = None
+        self._pixels: np.ndarray | None = None
         self._lane_seeds: list[int] = []
         self._episode_steps: list[int] = []
         self._episode_survival: list[float] = []
@@ -818,16 +979,16 @@ class NativePPOTrainer(PPOTrainer):
         self.model.eval()
         while len(rewards) < self.config.rollout_steps:
             self._ensure_lanes()
-            current_boards = self._boards
-            if current_boards is None:
+            current_observations = self._current_observations()
+            if current_observations is None:
                 raise ControlRuntimeError("native PPO lanes were not initialized")
-            current_tensor = torch.from_numpy(current_boards)
+            current_tensor = torch.from_numpy(current_observations)
             with torch.inference_mode():
                 action_tensor, log_prob_tensor, _, value_tensor = (
                     self.model.get_action_and_value(current_tensor.to(self.device))
                 )
-            action_indices = action_tensor.detach().cpu().numpy().astype(
-                np.uint8, copy=True
+            action_indices = (
+                action_tensor.detach().cpu().numpy().astype(np.uint8, copy=True)
             )
             try:
                 result = self._environment.step_batch(action_indices)
@@ -840,8 +1001,8 @@ class NativePPOTrainer(PPOTrainer):
                 continue
 
             restarts = 0
-            next_boards = _native_board(result)
-            next_tensor = torch.from_numpy(next_boards)
+            next_observations = self._next_observations(result)
+            next_tensor = torch.from_numpy(next_observations)
             with torch.inference_mode():
                 _, next_value_tensor = self.model(next_tensor.to(self.device))
             ended_lanes: list[int] = []
@@ -877,9 +1038,7 @@ class NativePPOTrainer(PPOTrainer):
                     episodes.append(
                         EpisodeSummary(
                             seed=self._lane_seeds[lane],
-                            survival_frames=int(
-                                round(self._episode_survival[lane])
-                            ),
+                            survival_frames=int(round(self._episode_survival[lane])),
                             steps=self._episode_steps[lane],
                             neutral_actions=self._episode_neutral_actions[lane],
                             terminated=actual_terminal,
@@ -889,7 +1048,7 @@ class NativePPOTrainer(PPOTrainer):
                     ended_lanes.append(lane)
 
             self.global_step += len(self._lane_seeds)
-            self._boards = np.array(next_boards, dtype=np.float32, copy=True)
+            self._set_current_observations(next_observations)
             if ended_lanes:
                 self._reset_lanes(ended_lanes)
 
@@ -927,6 +1086,7 @@ class NativePPOTrainer(PPOTrainer):
     def pause_environment(self) -> None:
         self._environment.close()
         self._boards = None
+        self._pixels = None
 
     def close(self) -> None:
         self._environment.close()
@@ -936,21 +1096,27 @@ class NativePPOTrainer(PPOTrainer):
             step_frames=self.config.step_frames,
             execution=self.config.native_execution,
             full_state=False,
-            pixels=False,
-            board=True,
+            pixels=self.config.observation_mode == "pixels",
+            board=self.config.observation_mode == "board",
         )
 
     def _ensure_lanes(self) -> None:
-        if self._boards is not None:
+        if self._current_observations() is not None:
             return
         if self._environment.closed:
             self._environment = self._new_environment()
         seeds = [self._seed_stream.next() for _ in range(self.config.native_lanes)]
         result = self._environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
-        boards = _native_board(result)
         if result.lane_ids.tolist() != list(range(len(seeds))):
             raise ControlRuntimeError("native reset returned unexpected lane order")
-        self._boards = np.array(boards, dtype=np.float32, copy=True)
+        if self.config.observation_mode == "pixels":
+            self._pixels = _initial_pixel_stack(
+                _native_pixels(result), self.config.pixel_stack
+            )
+            self._boards = None
+        else:
+            self._boards = np.array(_native_board(result), dtype=np.float32, copy=True)
+            self._pixels = None
         self._lane_seeds = seeds
         self._episode_steps = [0] * len(seeds)
         self._episode_survival = [0.0] * len(seeds)
@@ -966,12 +1132,26 @@ class NativePPOTrainer(PPOTrainer):
             np.asarray(lanes, dtype=np.uint32),
             np.asarray(seeds, dtype=np.uint32),
         )
-        boards = _native_board(result)
-        if self._boards is None:
-            raise ControlRuntimeError("native reset lost the active board batch")
+        if self._current_observations() is None:
+            raise ControlRuntimeError("native reset lost the active observations")
+        reset_pixels = (
+            _native_pixels(result) if self.config.observation_mode == "pixels" else None
+        )
+        reset_boards = (
+            _native_board(result) if self.config.observation_mode == "board" else None
+        )
         for position, lane_value in enumerate(result.lane_ids.tolist()):
             lane = int(lane_value)
-            self._boards[lane] = boards[position]
+            if self.config.observation_mode == "pixels":
+                if self._pixels is None:
+                    raise ControlRuntimeError("native reset lost the pixel batch")
+                assert reset_pixels is not None
+                self._pixels[lane] = reset_pixels[position]
+            else:
+                if self._boards is None:
+                    raise ControlRuntimeError("native reset lost the board batch")
+                assert reset_boards is not None
+                self._boards[lane] = reset_boards[position]
             self._lane_seeds[lane] = seeds[position]
             self._episode_steps[lane] = 0
             self._episode_survival[lane] = 0.0
@@ -982,12 +1162,61 @@ class NativePPOTrainer(PPOTrainer):
         self._environment.close()
         self._environment = self._new_environment()
         self._boards = None
+        self._pixels = None
+
+    def _current_observations(self) -> np.ndarray | None:
+        return (
+            self._pixels if self.config.observation_mode == "pixels" else self._boards
+        )
+
+    def _next_observations(self, result: NativeBatchResult) -> np.ndarray:
+        if self.config.observation_mode == "pixels":
+            if self._pixels is None:
+                raise ControlRuntimeError("native PPO lost the current pixel stack")
+            return _advance_pixel_stack(self._pixels, _native_pixels(result))
+        return np.array(_native_board(result), dtype=np.float32, copy=True)
+
+    def _set_current_observations(self, observations: np.ndarray) -> None:
+        if self.config.observation_mode == "pixels":
+            self._pixels = np.array(observations, dtype=np.uint8, copy=True)
+            self._boards = None
+        else:
+            self._boards = np.array(observations, dtype=np.float32, copy=True)
+            self._pixels = None
 
 
 def _native_board(result: NativeBatchResult) -> np.ndarray:
     if result.board is None:
         raise ControlRuntimeError("native PPO requires board observations")
     return result.board
+
+
+def _native_pixels(result: NativeBatchResult) -> np.ndarray:
+    if result.pixels is None:
+        raise ControlRuntimeError("native PPO requires pixel observations")
+    pixels = result.pixels
+    expected_shape = (pixels.shape[0], FRAME_HEIGHT, FRAME_WIDTH)
+    if pixels.shape != expected_shape or pixels.dtype != np.uint8:
+        raise ControlRuntimeError(
+            "native PPO pixel observations have unexpected shape or dtype: "
+            f"expected {expected_shape} and uint8, got {pixels.shape} and "
+            f"{pixels.dtype}"
+        )
+    if pixels.size and (int(pixels.min()) < 0 or int(pixels.max()) > 15):
+        raise ControlRuntimeError("native PPO pixels contain an invalid palette index")
+    return pixels
+
+
+def _initial_pixel_stack(pixels: np.ndarray, stack_size: int) -> np.ndarray:
+    return np.repeat(pixels[:, None, :, :], stack_size, axis=1)
+
+
+def _advance_pixel_stack(
+    current_stack: np.ndarray, next_pixels: np.ndarray
+) -> np.ndarray:
+    return np.concatenate(
+        (current_stack[:, 1:, :, :], next_pixels[:, None, :, :]), axis=1
+    )
 
 
 def _to_cpu(value: object) -> object:
@@ -1018,6 +1247,7 @@ def _validate_resume_config(stored: Mapping[str, object], current: PPOConfig) ->
         "native_lanes": 32,
         "native_execution": "parallel",
         "observation_mode": "board",
+        "pixel_stack": 4,
         "training_seeds": [],
         "training_seed_manifest": None,
     }
@@ -1066,7 +1296,7 @@ def _seed_torch(seed: int) -> None:
 
 
 def evaluate_policy(
-    model: DodgeActorCriticCNN,
+    model: nn.Module,
     config: PPOConfig,
     seeds: Sequence[int],
     *,
@@ -1115,7 +1345,7 @@ def evaluate_policy(
 
 
 def _evaluate_native_policy(
-    model: DodgeActorCriticCNN,
+    model: nn.Module,
     config: PPOConfig,
     seeds: Sequence[int],
 ) -> EvaluationResult:
@@ -1124,12 +1354,15 @@ def _evaluate_native_policy(
         step_frames=config.step_frames,
         execution=config.native_execution,
         full_state=False,
-        pixels=False,
-        board=True,
+        pixels=config.observation_mode == "pixels",
+        board=config.observation_mode == "board",
     )
     try:
         result = environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
-        boards = np.array(_native_board(result), dtype=np.float32, copy=True)
+        if config.observation_mode == "pixels":
+            pixels = _initial_pixel_stack(_native_pixels(result), config.pixel_stack)
+        else:
+            boards = np.array(_native_board(result), dtype=np.float32, copy=True)
         active = [True] * len(seeds)
         survival_frames = [0.0] * len(seeds)
         terminated = [False] * len(seeds)
@@ -1137,20 +1370,27 @@ def _evaluate_native_policy(
         for _ in range(config.max_episode_steps):
             if not any(active):
                 break
-            board_tensor_value = torch.from_numpy(boards).to(device)
+            if config.observation_mode == "pixels":
+                observation_array = pixels
+            else:
+                observation_array = boards
+            observation_tensor = torch.from_numpy(observation_array).to(device)
             with torch.inference_mode():
-                logits, _ = model(board_tensor_value)
-            action_indices = logits.argmax(dim=1).detach().cpu().numpy().astype(
-                np.uint8, copy=True
+                logits, _ = model(observation_tensor)
+            action_indices = (
+                logits.argmax(dim=1).detach().cpu().numpy().astype(np.uint8, copy=True)
             )
             for lane, is_active in enumerate(active):
                 if not is_active:
                     action_indices[lane] = 0
             result = environment.step_batch(action_indices)
-            next_boards = _native_board(result)
-            done_lanes = [
-                lane for lane, done in enumerate(result.done) if bool(done)
-            ]
+            if config.observation_mode == "pixels":
+                next_observations = _advance_pixel_stack(pixels, _native_pixels(result))
+            else:
+                next_observations = np.array(
+                    _native_board(result), dtype=np.float32, copy=True
+                )
+            done_lanes = [lane for lane, done in enumerate(result.done) if bool(done)]
             completed: list[int] = []
             for lane, is_active in enumerate(active):
                 if not is_active:
@@ -1160,7 +1400,10 @@ def _evaluate_native_policy(
                     active[lane] = False
                     terminated[lane] = True
                     completed.append(lane)
-            boards = np.array(next_boards, dtype=np.float32, copy=True)
+            if config.observation_mode == "pixels":
+                pixels = next_observations
+            else:
+                boards = next_observations
             # The batch API requires every lane to be live on the next call.
             # A lane that has already finished the measured episode still
             # receives masked actions until the other lanes finish, so reset
@@ -1170,9 +1413,14 @@ def _evaluate_native_policy(
                     np.asarray(done_lanes, dtype=np.uint32),
                     np.zeros(len(done_lanes), dtype=np.uint32),
                 )
-                reset_boards = _native_board(reset)
-                for position, lane_value in enumerate(reset.lane_ids.tolist()):
-                    boards[int(lane_value)] = reset_boards[position]
+                if config.observation_mode == "pixels":
+                    reset_pixels = _native_pixels(reset)
+                    for position, lane_value in enumerate(reset.lane_ids.tolist()):
+                        pixels[int(lane_value)] = reset_pixels[position]
+                else:
+                    reset_boards = _native_board(reset)
+                    for position, lane_value in enumerate(reset.lane_ids.tolist()):
+                        boards[int(lane_value)] = reset_boards[position]
         return EvaluationResult(
             tuple(seeds),
             tuple(int(round(value)) for value in survival_frames),
@@ -1327,11 +1575,16 @@ def _write_run_record(
     final_training_evaluation: EvaluationResult | None = None,
     final_evaluation: EvaluationResult | None = None,
 ) -> dict[str, object]:
+    observation_shape = _observation_shape_for_config(config)
+    pixels_mode = config.observation_mode == "pixels"
     record: dict[str, object] = {
         "version": PPO_RUN_VERSION,
         "kind": "dodge_ppo_run",
-        "model_type": PPO_MODEL_TYPE,
-        "board_shape": list(BOARD_SHAPE),
+        "model_type": _model_type_for_config(config),
+        "observation_mode": config.observation_mode,
+        "observation_shape": list(observation_shape),
+        "board_shape": list(BOARD_SHAPE) if not pixels_mode else None,
+        "pixel_shape": list(observation_shape) if pixels_mode else None,
         "actions": list(ACTION_CHOICES),
         "config": config.to_json(),
         "updates_completed": trainer.updates_completed,
@@ -1516,7 +1769,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--native-execution", choices=("serial", "parallel"), default="parallel"
     )
-    parser.add_argument("--observation-mode", choices=("board",), default="board")
+    parser.add_argument(
+        "--observation-mode", choices=("board", "pixels"), default="board"
+    )
+    parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     arguments = parser.parse_args(argv)
     run_directory = arguments.run_dir or _new_run_directory(DEFAULT_RUN_ROOT)
     config = PPOConfig(
@@ -1544,6 +1800,7 @@ def main(argv: list[str] | None = None) -> int:
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
         observation_mode=arguments.observation_mode,
+        pixel_stack=arguments.pixel_stack,
     )
     try:
         record = train_ppo(config, run_directory, resume=arguments.resume)
