@@ -1222,7 +1222,7 @@ def train_ppo(
                     > float(trainer.best_validation["mean_survival_frames"])
                 ):
                     trainer.best_validation = validation.to_json()
-                    trainer.save_checkpoint(run_directory / "checkpoint-latest.pt")
+                    trainer.save_checkpoint(run_directory / "checkpoint-best.pt")
             _append_jsonl(metrics_path, metrics)
             _write_run_record(run_directory, config, trainer)
             _print_update(metrics, trainer.device.type)
@@ -1288,6 +1288,11 @@ def _write_run_record(
         "runtime_directory": PPO_RUNTIME_DIRECTORY_NAME,
         "best_validation": trainer.best_validation,
     }
+    if (
+        trainer.best_validation is not None
+        and (run_directory / "checkpoint-best.pt").is_file()
+    ):
+        record["best_checkpoint"] = "checkpoint-best.pt"
     if final_validation is not None:
         record["final_validation"] = final_validation.to_json()
     if final_training_evaluation is not None:

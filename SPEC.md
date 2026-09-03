@@ -46,6 +46,7 @@ V11|Fixed-action controls evaluate all nine action choices on both manifest part
 V12|P1 comparison runs use the same manifest, interaction budget, evaluation protocol, and architecture; only declared learner/configuration variables differ.
 V13|The locked holdout is absent from all P1 diagnosis and selection decisions; it is reported only after training-side comparison is frozen.
 V14|Native policy evaluation resets every lane reported done, including lanes already excluded from the measured episode, before the next batch step.
+V15|When inner validation selects a best PPO checkpoint, `checkpoint-best.pt` preserves that model while `checkpoint-latest.pt` remains the final resumable state.
 
 §T
 id|status|task|cites
@@ -64,3 +65,4 @@ T10|.|Freeze the P1 diagnosis and select the next intervention without using hol
 id|date|cause|fix
 B1|2026-09-03|NG provenance serialized `Path` fields from a dataclass directly to JSON.|Add an explicit JSON serializer for baseline configuration and enforce V10 with the runner test.
 B2|2026-09-03|Native policy evaluation reset only newly completed lanes, so an already excluded lane could die again and remain done before the next batch step.|Reset every done lane and enforce V14 with a multi-lane evaluator regression test.
+B3|2026-09-03|PPO saved the final model over `checkpoint-latest.pt` after recording a stronger inner-validation checkpoint, so the selected model was not preserved.|Write `checkpoint-best.pt`, keep latest as final, and enforce V15 with a two-update checkpoint test.

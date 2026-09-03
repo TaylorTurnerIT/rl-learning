@@ -323,6 +323,29 @@ def test_ppo_run_checkpoints_and_resumes(tmp_path: Path) -> None:
     assert len((run_directory / "metrics.jsonl").read_text().splitlines()) == 2
 
 
+def test_v15_best_checkpoint_is_not_overwritten_by_final(tmp_path: Path) -> None:
+    run_directory = tmp_path / "ppo-best-checkpoint"
+    train_ppo(
+        _config(updates=2, eval_every=1, checkpoint_every=1),
+        run_directory,
+        environment_factory=FakePPOEnvironment,
+        validation_seeds=(1,),
+        evaluation_seeds=(2,),
+    )
+
+    latest = torch.load(
+        run_directory / "checkpoint-latest.pt", map_location="cpu", weights_only=False
+    )
+    best = torch.load(
+        run_directory / "checkpoint-best.pt", map_location="cpu", weights_only=False
+    )
+    stored = json.loads((run_directory / "run.json").read_text())
+
+    assert latest["updates_completed"] == 2
+    assert best["updates_completed"] == 1
+    assert stored["best_checkpoint"] == "checkpoint-best.pt"
+
+
 def test_ppo_run_records_training_side_evaluation(tmp_path: Path) -> None:
     run_directory = tmp_path / "ppo-run"
     train_ppo(
