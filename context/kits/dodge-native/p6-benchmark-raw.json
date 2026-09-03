@@ -1,0 +1,92 @@
+{
+  "cases": {
+    "native_full_state_pixels": {
+      "digest_per_repetition": [
+        15060826238599898208,
+        8807524489051515608,
+        279880676931742872,
+        2097848209100260031,
+        8947767068553823901
+      ],
+      "durations_seconds": [
+        0.6307040319952648,
+        0.6287918350135442,
+        0.5919747879961506,
+        0.6524385210068431,
+        0.6167208550032228
+      ],
+      "median_seconds": 0.6287918350135442,
+      "observation_payload": {
+        "board": false,
+        "full_state": true,
+        "pixels": true
+      },
+      "speedup_vs_python_pemsa": 315.851215403769,
+      "throughput_lane_steps_per_second": 1628.5198741137328
+    },
+    "native_pixels_off_board": {
+      "digest_per_repetition": [
+        15060826238604773979,
+        8807524489046962526,
+        279880676936366232,
+        2097848209104095682,
+        8947767068558377478
+      ],
+      "durations_seconds": [
+        0.5137834879860748,
+        0.5374152970034629,
+        0.5088246820087079,
+        0.5005346380057745,
+        0.48657909300527535
+      ],
+      "median_seconds": 0.5088246820087079,
+      "observation_payload": {
+        "board": true,
+        "full_state": false,
+        "pixels": false
+      },
+      "speedup_vs_python_pemsa": 390.3204234137275,
+      "throughput_lane_steps_per_second": 2012.4809904219142
+    },
+    "python_pemsa_interactive": {
+      "digest_per_repetition": [
+        152,
+        83,
+        212,
+        57,
+        66
+      ],
+      "durations_seconds": [
+        197.52674713599845,
+        199.14810185600072,
+        197.91294690500945,
+        198.60466532499413,
+        200.25825269002235
+      ],
+      "median_seconds": 198.60466532499413,
+      "observation_payload": {
+        "board": false,
+        "full_state": false,
+        "legacy_raw_state": true,
+        "pixels": false
+      },
+      "throughput_lane_steps_per_second": 5.155971529290812
+    }
+  },
+  "host": {
+    "machine": "x86_64",
+    "platform": "Linux-6.18.46-x86_64-with-glibc2.42",
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [GCC 15.3.0]"
+  },
+  "phase": "P6",
+  "repetitions": 5,
+  "schema_version": 1,
+  "status": "measured",
+  "workload": {
+    "action_schedule": "global_decision_index modulo nine",
+    "batch_steps": 32,
+    "lane_count": 32,
+    "lane_steps": 1024,
+    "step_frames": 4
+  }
+}

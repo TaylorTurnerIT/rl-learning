@@ -130,6 +130,11 @@ in
       export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri:"$LIBGL_DRIVERS_PATH"
       exec cargo run --manifest-path native/Cargo.toml -p dodge-viewer -- "$@"
     '';
+    dodge-native-benchmark.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/benchmark_dodge_native_batch.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

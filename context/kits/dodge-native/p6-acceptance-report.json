@@ -1,0 +1,95 @@
+{
+  "phase": "P6",
+  "schema_version": 1,
+  "status": "accepted_automated_owner_review_pending",
+  "source": {
+    "path": "src/dodge/game/dodge.p8",
+    "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "pemsa": {
+    "path": "src/dodge/runtime/pemsa",
+    "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+  },
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.0 (c980f4866 2026-06-30)",
+    "python": "3.14.7",
+    "uv": "0.12.3",
+    "native_cargo_lock_sha256": "32aa213f1b158b50f242b111f82c55725c02f18afb22ef4bc8e0770e8c38ec2b",
+    "uv_lock_sha256": "dc78c23f89bd2c284a146f3fc14da12071ae26f8504645d8c8b036f6137aba02"
+  },
+  "workload": {
+    "lane_count": 32,
+    "lane_steps": 1024,
+    "batch_steps": 32,
+    "step_frames": 4,
+    "action_schedule": "global_decision_index modulo nine",
+    "repetitions": 5,
+    "host": "Linux-6.18.46-x86_64-with-glibc2.42"
+  },
+  "benchmark_raw": {
+    "path": "p6-benchmark-raw.json",
+    "sha256": "5548d6a91ab161ea8b74fe3429706049cf349880c30f6a2b141c3dd27a8174f2"
+  },
+  "benchmark": {
+    "native_full_state_pixels": {
+      "median_seconds": 0.6287918350135442,
+      "population_stddev_seconds": 0.01977460984599619,
+      "throughput_lane_steps_per_second": 1628.5198741137328,
+      "speedup_vs_python_pemsa": 315.851215403769,
+      "observation_payload": {
+        "full_state": true,
+        "pixels": true,
+        "board": false
+      }
+    },
+    "native_pixels_off_board": {
+      "median_seconds": 0.5088246820087079,
+      "population_stddev_seconds": 0.016755819876085945,
+      "throughput_lane_steps_per_second": 2012.4809904219142,
+      "speedup_vs_python_pemsa": 390.3204234137275,
+      "observation_payload": {
+        "full_state": false,
+        "pixels": false,
+        "board": true
+      }
+    },
+    "python_pemsa_interactive": {
+      "median_seconds": 198.60466532499413,
+      "population_stddev_seconds": 0.9626551254836924,
+      "throughput_lane_steps_per_second": 5.155971529290812,
+      "observation_payload": {
+        "full_state": false,
+        "pixels": false,
+        "board": false,
+        "legacy_raw_state": true
+      }
+    },
+    "target_10x_full_information": "met"
+  },
+  "automated_checks": {
+    "native_rust_workspace": "cargo test, strict clippy, and rustfmt passed",
+    "native_batch_python": "5 passed",
+    "ppo_regression": "13 passed",
+    "forbidden_boundary": "no subprocess/X11/JSON in native batch module; native PPO process-spawn guard passed",
+    "live_backend_comparison": "relative short trajectory passed through app-test X11 runtime; fallback ready counter is native frame + 13",
+    "macroquad_viewer": "P5 Xvfb smoke and lossless 128x128 capture passed"
+  },
+  "implementation": {
+    "binding": "PyO3 0.29.2 + NumPy 0.29.0 + maturin 1.14.1",
+    "backend": "native PPO is opt-in; Python/Pemsa remains default fallback",
+    "observation": "owned uint8 pixels, owned float32 board, canonical full-state bytes",
+    "parallelism": "Rayon independent lanes with serial parity tests",
+    "commits": ["9a58db0", "a76fff4", "259a361"]
+  },
+  "owner_review": {
+    "status": "pending",
+    "required_scope": "inspect native frame/full-state artifact and confirm the requested information exposure",
+    "release_gate": "not represented as complete without owner approval"
+  },
+  "deferred": [
+    "audio waveform playback parity",
+    "Kani local proofs",
+    "differential fuzzing and final P7 release gate"
+  ]
+}

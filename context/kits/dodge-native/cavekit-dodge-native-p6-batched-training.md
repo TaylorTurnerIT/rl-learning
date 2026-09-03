@@ -126,8 +126,8 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 | P6-T5 | x | Add reset_batch/step_batch/selective reset and compare serial vs parallel lanes | V1,V2,V3 |
 | P6-T6 | x | Add PPO native backend, preserve fallback path, and record backend/observation config | V6,V12 |
 | P6-T7 | x | Add forbidden-IPC tests and short deterministic backend comparison | V4,V7,V8,V12 |
-| P6-T8 | . | Run fixed throughput benchmark with full-state and pixels, then pixels-off control | V10,V11 |
-| P6-T9 | . | Produce training acceptance report and hand benchmark/provenance data to P7 | V1-V12 |
+| P6-T8 | x | Run fixed throughput benchmark with full-state and pixels, then pixels-off control | V10,V11 |
+| P6-T9 | x | Produce training acceptance report and hand benchmark/provenance data to P7 | V1-V12 |
 
 ### §B BUGS
 
