@@ -108,7 +108,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T1 | x | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
 | P7-T2 | x | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
 | P7-T3 | x | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
-| P7-T4 | . | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
+| P7-T4 | ~ | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | . | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | . | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | . | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
@@ -128,6 +128,8 @@ benchmark statistics, known limitations, and owner signoff.
 | B8 | 2026-09-02 | The first focused pattern-selection regression test referenced the private delay constant without importing it into the test module | Import the constant through the module boundary and rerun the focused test before the composed gate |
 | B9 | 2026-09-02 | The corrected selection path and regression import were not yet normalized by rustfmt, so the strict check stopped at its format gate | Run the pinned workspace formatter, then rerun the complete strict check |
 | B10 | 2026-09-02 | The strict Clippy profile applies to test targets and rejected the new regression test's `expect()` call under `clippy::expect_used` | Assert the result is successful and unwrap it through checked control flow with no panic-capable test helper |
+| B11 | 2026-09-02 | The first P7-T4 Python lint pass found provenance line-width violations and a missing `NativeBatchEnvironment` test import | Wrap the provenance strings, use checked candidate selection, and import/type the native batch result in the reproducibility test |
+| B12 | 2026-09-02 | The P7-T4 Ruff format check found one new list-comprehension wrapping issue and three legacy shapes in the touched native-backend test | Run the pinned Ruff formatter on the two touched Python files, then rerun Ruff checks |
 
 ## Gate
 

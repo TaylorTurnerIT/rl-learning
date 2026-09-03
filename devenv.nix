@@ -142,6 +142,10 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native python scripts/native_differential_fuzz.py "$@"
     '';
+    dodge-native-provenance.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/record_native_provenance.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

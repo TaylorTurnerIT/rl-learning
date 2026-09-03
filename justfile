@@ -65,6 +65,10 @@ dodge-native-fuzz *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-fuzz {{ options }}
 
 [group("dodge")]
+dodge-native-provenance *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-provenance {{ options }}
+
+[group("dodge")]
 dodge-native-extract-assets source output *options:
     devenv -q shell -- dodge-native-extract-assets --source {{ source }} --output {{ output }} {{ options }}
 
