@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-3-pixel-in-progress
+  status: phase-3-pixel-teacher-in-progress
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -56,6 +56,9 @@ Phase 0, Phase 1, and the completed P2 data/teacher branch are implemented under
 - [`rl/ppo.py`](../../../src/dodge/rl/ppo.py) now supports an explicit native
   indexed-pixel PPO path with reset-safe four-frame stacks, pixel checkpoints,
   and selectable small/current CNN widths.
+- [`P3_REPORT.md`](P3_REPORT.md) records the matched pixel control, its 6.16x
+  CPU throughput advantage over board PPO, its later training collapse, and
+  representative indexed-pixel failure replays.
 - [`imitation/data.py`](../../../src/dodge/imitation/data.py) still loads the
   existing SQLite trajectories for historical experiments; NG does not use it.
 - [`neat/evaluator.py`](../../../src/dodge/neat/evaluator.py) preserves the older
@@ -405,6 +408,15 @@ before enabling visual augmentation.
 - These smoke horizons are plumbing and speed evidence only. They do not
   constitute a learning or generalization result; T18 is the matched budgeted
   run.
+- The matched fast pixel control completed 51,200 transitions in 31.9 seconds
+  (1,604.3 transitions/second), versus 196.4 seconds (260.6 transitions/second)
+  for board PPO with the same budget. Both selected update-25 controls scored
+  195.9 inner, 196.4 training, and 209.9 holdout mean frames.
+- The pixel run selected update 25; its final update-200 checkpoint scored
+  102.7 inner, 104.2 training, and 108.8 holdout frames. Raw pixel PPO is
+  therefore a speed-ready observation path, not a promoted learner.
+- The detailed decision and worst-seed indexed-pixel replays are in
+  [`P3_REPORT.md`](P3_REPORT.md).
 
 ### §V Gate
 

@@ -93,9 +93,10 @@ T13|x|Train compatible board BC with training-side inner selection, closed-loop 
 T14|x|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11,I12
 T15|x|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9,I13
 T16|x|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
-T17|~|Extend native PPO with indexed-pixel four-frame stacks, reset-safe lifecycle, pixel model/checkpoint metadata, CLI configuration, and regression tests.|V25,V26,V27,I14,C12,C13
-T18|.|Run a matched native pixel-PPO control on the frozen training split, select only on inner training seeds, and report locked holdout performance and throughput.|V7,V18,V25,V27,G7
-T19|.|Compare board and pixel controls by sample efficiency, wall-clock throughput, split gap, lower tail, and representative visual failures.|V7,V18,V25,V27,G6,G7
+T17|x|Extend native PPO with indexed-pixel four-frame stacks, reset-safe lifecycle, pixel model/checkpoint metadata, CLI configuration, and regression tests.|V25,V26,V27,I14,C12,C13
+T18|x|Run a matched native pixel-PPO control on the frozen training split, select only on inner training seeds, and report locked holdout performance and throughput.|V7,V18,V25,V27,G7
+T19|x|Compare board and pixel controls by sample efficiency, wall-clock throughput, split gap, lower tail, and representative visual failures.|V7,V18,V25,V27,G6,G7
+T20|~|Collect fresh training-only indexed-pixel teacher examples and train a pixel CNN behavior-cloning checkpoint suitable for actor-only PPO warm starts.|V18,V20,V25,V27,G6,G7,I9,I14
 
 §B
 id|date|cause|fix
