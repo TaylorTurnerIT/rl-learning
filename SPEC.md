@@ -42,12 +42,12 @@ V10|Every NG provenance/report JSON artifact is JSON-serializable after path and
 
 §T
 id|status|task|cites
-T1|.|Implement `SeedManifest`, deterministic fresh default, validation/hash, committed NG manifest, and unit tests.|V1,V2,I1,I5
-T2|.|Add explicit PPO training-seed routing and training-side checkpoint evaluation while preserving legacy defaults; add regression tests.|V3,V4,V5,I4
-T3|.|Implement split evaluator, trend metrics, plot/report generation, and tests using synthetic run artifacts.|V6,V7,I2
-T4|.|Add NG baseline CLI, package entry points, devenv-backed just recipe, provenance wiring, and CLI tests.|V3,V4,V8,V9,V10,I3,I6
-T5|.|Run Phase 0 native smoke/throughput checks and freeze their evidence without touching legacy artifacts.|V8,V9,C1,C3,C5
-T6|.|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
+T1|x|Implement `SeedManifest`, deterministic fresh default, validation/hash, committed NG manifest, and unit tests.|V1,V2,I1,I5
+T2|x|Add explicit PPO training-seed routing and training-side checkpoint evaluation while preserving legacy defaults; add regression tests.|V3,V4,V5,I4
+T3|x|Implement split evaluator, trend metrics, plot/report generation, and tests using synthetic run artifacts.|V6,V7,I2
+T4|x|Add NG baseline CLI, package entry points, devenv-backed just recipe, provenance wiring, and CLI tests.|V3,V4,V8,V9,V10,I3,I6
+T5|x|Run Phase 0 native smoke/throughput checks and freeze their evidence without touching legacy artifacts.|V8,V9,C1,C3,C5
+T6|~|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
 
 §B
 id|date|cause|fix

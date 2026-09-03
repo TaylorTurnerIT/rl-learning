@@ -1,0 +1,68 @@
+{
+  "cases": {
+    "native_full_state_pixels": {
+      "digest_per_repetition": [
+        10849804756190776565
+      ],
+      "durations_seconds": [
+        0.0719512140203733
+      ],
+      "median_seconds": 0.0719512140203733,
+      "observation_payload": {
+        "board": false,
+        "full_state": true,
+        "pixels": true
+      },
+      "speedup_vs_python_pemsa": 165.00540114091538,
+      "throughput_lane_steps_per_second": 889.4915933159672
+    },
+    "native_pixels_off_board": {
+      "digest_per_repetition": [
+        10849804756189904762
+      ],
+      "durations_seconds": [
+        0.05826995201641694
+      ],
+      "median_seconds": 0.05826995201641694,
+      "observation_payload": {
+        "board": true,
+        "full_state": false,
+        "pixels": false
+      },
+      "speedup_vs_python_pemsa": 203.74718909434912,
+      "throughput_lane_steps_per_second": 1098.3362399538048
+    },
+    "python_pemsa_interactive": {
+      "digest_per_repetition": [
+        282
+      ],
+      "durations_seconds": [
+        11.872338932007551
+      ],
+      "median_seconds": 11.872338932007551,
+      "observation_payload": {
+        "board": false,
+        "full_state": false,
+        "legacy_raw_state": true,
+        "pixels": false
+      },
+      "throughput_lane_steps_per_second": 5.390681681724692
+    }
+  },
+  "host": {
+    "machine": "x86_64",
+    "platform": "Linux-6.18.46-x86_64-with-glibc2.42",
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [GCC 15.3.0]"
+  },
+  "phase": "P0",
+  "repetitions": 1,
+  "schema_version": 1,
+  "status": "measured",
+  "workload": {
+    "action_schedule": "global_decision_index modulo nine",
+    "batch_steps": 8,
+    "lane_count": 8,
+    "lane_steps": 64,
+    "step_frames": 4
+  }
+}
