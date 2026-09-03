@@ -33,6 +33,7 @@ I8|`native/crates/dodge-batch` owns deterministic all-action counterfactual scor
 I9|`src/dodge/ng/teacher.py` owns fresh manifest-scoped planner data, score margins, dataset validation, and learner-state collection hooks.
 I10|`src/dodge/ng/bc.py` owns board BC training, training-seed inner selection, closed-loop evaluation, artifacts, and plots.
 I11|`src/dodge/rl/ppo.py` accepts an actor-only warm start while reinitializing value/optimizer state; `src/dodge/ng/bc.py` owns the compatible bridge.
+I12|`src/dodge/ng/compare.py` owns matched PPO selected-checkpoint evaluation, sample-efficiency deltas, and comparison plots without holdout selection.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -80,7 +81,7 @@ T10|x|Freeze the P1 diagnosis and select the next intervention without using hol
 T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions, Python exposure, validation errors, and serial/parallel/nonmutation/determinism tests.|V16,V19,I8,C10
 T12|x|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
 T13|x|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
-T14|~|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11
+T14|x|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11,I12
 T15|.|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9
 T16|.|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
 
@@ -92,3 +93,5 @@ B3|2026-09-03|PPO saved the final model over `checkpoint-latest.pt` after record
 B4|2026-09-03|Teacher validation checked the generic non-training set before the specifically forbidden holdout set, hiding the actionable provenance cause.|Check holdout membership first and enforce V23 with the manifest-bound loader test.
 B5|2026-09-03|The cache test counted duplicate positions in one request as cache hits even though they are deduplicated before the single computation.|Count repeated-call reuse as hits and verify the one-miss/one-hit accounting in the cache test.
 B6|2026-09-03|New BC/warm-start tests exceeded repository import/line-width lint rules.|Format imports and signatures before next verification gate.
+B7|2026-09-03|Comparison report called an omitted JSON writer and exceeded line width in its Markdown table.|Add atomic comparison JSON write and format table literal before next verification gate.
+B8|2026-09-03|Comparison fixture expected holdout delta with incorrect hardcoded arithmetic.|Derive expected delta from fixture values and keep comparison arithmetic covered.

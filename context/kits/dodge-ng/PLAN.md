@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-1-diagnosis-complete
+  status: phase-2-warm-start-complete
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -41,6 +41,15 @@ Phase 0 and Phase 1 are implemented under the scoped root
   learning curves, diagnostics, and a locked-holdout report.
 - [`ng/diagnostics.py`](../../../src/dodge/ng/diagnostics.py) measures all nine
   fixed-action controls without changing the learner or the game contract.
+- [`native/batch.py`](../../../src/dodge/native/batch.py) now scores all nine
+  actions from cloned canonical snapshots, with restore-once/clone-per-action
+  execution in Rust.
+- [`ng/teacher.py`](../../../src/dodge/ng/teacher.py) collects fresh planner
+  labels from training seeds and memoizes exact snapshot/lookahead scores.
+- [`ng/bc.py`](../../../src/dodge/ng/bc.py) trains board behavior cloning and
+  selects checkpoints on a training-side inner split.
+- [`ng/compare.py`](../../../src/dodge/ng/compare.py) evaluates selected PPO
+  checkpoints and writes matched sample-efficiency comparisons.
 - [`imitation/data.py`](../../../src/dodge/imitation/data.py) still loads the
   existing SQLite trajectories for historical experiments; NG does not use it.
 - [`neat/evaluator.py`](../../../src/dodge/neat/evaluator.py) preserves the older
@@ -299,11 +308,30 @@ diagnose before adding algorithms.
 
 ## NG-P2: data, imitation, and exact-simulator teachers
 
-P2 is the next intervention. The P1 evidence supports improving action credit
-and initialization before adding pixels, recurrence, or continuous gradients.
-The first P2 comparison will be fresh native planner labels, board behavior
-cloning, BC-to-PPO, and a learner-visited DAgger-style relabeling loop. All
-labels and states will come from the NG training partition only.
+P2 is the current intervention. The P1 evidence supports improving action
+credit and initialization before adding pixels, recurrence, or continuous
+gradients. The completed first comparison used fresh native planner labels,
+board behavior cloning, and matched BC-to-PPO. The remaining P2 experiment is
+learner-visited DAgger-style relabeling. All labels and states come from the NG
+training partition only.
+
+### P2 evidence so far
+
+- Lookahead 8 and 16 produced almost no decisive labels because most actions
+  tied over such a short window. Lookahead 64 produced 3,217 decisive examples
+  out of 4,480 (71.8%) across all 70 training seeds.
+- The 40-epoch board BC run selected epoch 40 on the ten-seed inner split at
+  284.1 mean survival frames. Its final training mean was 321.0 and its locked
+  holdout mean was 348.3; the holdout was not used for selection.
+- Matched PPO used the same 51,200 native transitions and learner seed. Scratch
+  PPO selected update 25 at 195.9 inner / 209.9 holdout mean. BC warm-start PPO
+  selected update 75 at 394.0 inner / 360.2 holdout mean, a +150.3 holdout
+  delta. Later updates degraded, so `checkpoint-best.pt` is the candidate
+  artifact and `checkpoint-latest.pt` remains the resumable final state.
+- Native counterfactual scoring restores each source once and clones it for
+  each action. Teacher collection also memoizes exact `(snapshot, lookahead)`
+  requests; this is a correctness-preserving optimization even when gameplay
+  states are mostly unique.
 
 ### §G Goal
 

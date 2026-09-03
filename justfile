@@ -150,6 +150,11 @@ dodge-ng-bc *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-bc {{ options }}
 
 [group("dodge")]
+dodge-ng-compare *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-compare {{ options }}
+
+[group("dodge")]
 dodge-marimo:
     devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 
