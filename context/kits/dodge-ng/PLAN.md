@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-2-dagger-complete
+  status: phase-3-pixel-in-progress
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -26,7 +26,7 @@ evidence around that authority.
 
 ## Current boundary
 
-Phase 0 and Phase 1 are implemented under the scoped root
+Phase 0, Phase 1, and the completed P2 data/teacher branch are implemented under the scoped root
 [`SPEC.md`](../../../SPEC.md). The current NG boundary is:
 
 - [`native/batch.py`](../../../src/dodge/native/batch.py) exposes contiguous native
@@ -53,6 +53,9 @@ Phase 0 and Phase 1 are implemented under the scoped root
 - [`ng/dagger.py`](../../../src/dodge/ng/dagger.py) collects states visited by
   the selected learner, scores them with the native teacher, aggregates them,
   and retrains BC under the same split protocol.
+- [`rl/ppo.py`](../../../src/dodge/rl/ppo.py) now supports an explicit native
+  indexed-pixel PPO path with reset-safe four-frame stacks, pixel checkpoints,
+  and selectable small/current CNN widths.
 - [`imitation/data.py`](../../../src/dodge/imitation/data.py) still loads the
   existing SQLite trajectories for historical experiments; NG does not use it.
 - [`neat/evaluator.py`](../../../src/dodge/neat/evaluator.py) preserves the older
@@ -90,6 +93,10 @@ produces larger transient inner-validation peaks but still collapses or becomes
 unstable by the final checkpoint. This closes P1 as a diagnosis rather than a
 promotion. The measured decision record is
 [`P1_DIAGNOSIS.md`](P1_DIAGNOSIS.md).
+
+P2 is frozen in [`P2_REPORT.md`](P2_REPORT.md). The board DAgger aggregate is
+the current privileged-state teacher reference; the next experiment is visual
+learning from the exact native raster.
 
 ## Target
 
@@ -382,6 +389,19 @@ learning separately from the cost of the game simulation.
 The pixel policy receives no derived board channels unless the run is explicitly
 marked hybrid. Begin with a four-frame stack. Use a no-augmentation control
 before enabling visual augmentation.
+
+### P3 implementation evidence so far
+
+- The indexed-pixel smoke path completed a full train/inner/training/holdout
+  report with the frozen manifest. The first 32/64/128-channel control took
+  27.7 seconds for 128 transitions under an intentionally short eight-step
+  horizon (4.6 reported transitions/s).
+- A matched 16/32/64-channel small control took 17.6 seconds (7.3 reported
+  transitions/s). It is now the default architecture; the larger current
+  control remains selectable for a direct representation-capacity comparison.
+- These smoke horizons are plumbing and speed evidence only. They do not
+  constitute a learning or generalization result; T18 is the matched budgeted
+  run.
 
 ### §V Gate
 

@@ -50,6 +50,7 @@ TRAINING_SEEDS = tuple(
 PPOBackend = Literal["python", "native"]
 NativeExecution = Literal["serial", "parallel"]
 NativeObservationMode = Literal["board", "pixels"]
+PixelArchitecture = Literal["small", "current"]
 
 
 class Environment(Protocol):
@@ -92,6 +93,7 @@ class PPOConfig:
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
     pixel_stack: int = 4
+    pixel_architecture: PixelArchitecture = "small"
     training_seeds: tuple[int, ...] = ()
     training_seed_manifest: str | None = None
 
@@ -140,6 +142,8 @@ class PPOConfig:
             raise ValueError("observation mode must be 'board' or 'pixels'")
         if not 1 <= self.pixel_stack <= 8:
             raise ValueError("pixel stack must be between 1 and 8")
+        if self.pixel_architecture not in {"small", "current"}:
+            raise ValueError("pixel architecture must be 'small' or 'current'")
         if self.observation_mode == "pixels" and self.backend != "native":
             raise ValueError("pixel PPO requires the native backend")
         if self.training_seed_manifest is not None and not isinstance(
@@ -272,27 +276,44 @@ class DodgeActorCriticCNN(nn.Module):
 class PixelFeatureEncoder(nn.Module):
     """Extract temporal-spatial features from native indexed pixels."""
 
-    def __init__(self, stack_size: int = 4, hidden_size: int = 256) -> None:
+    def __init__(
+        self,
+        stack_size: int = 4,
+        hidden_size: int = 128,
+        architecture: PixelArchitecture = "small",
+    ) -> None:
         super().__init__()
         if not 1 <= stack_size <= 8:
             raise ValueError("pixel stack must be between 1 and 8")
         if hidden_size < 1:
             raise ValueError("hidden size must be positive")
+        if architecture not in {"small", "current"}:
+            raise ValueError("pixel architecture must be 'small' or 'current'")
         self.stack_size = stack_size
+        self.architecture = architecture
+        first_channels, second_channels, third_channels = (
+            (16, 32, 64) if architecture == "small" else (32, 64, 128)
+        )
         self.convolution = nn.Sequential(
-            nn.Conv2d(stack_size, 32, kernel_size=5, stride=2, padding=2),
+            nn.Conv2d(
+                stack_size,
+                first_channels,
+                kernel_size=5,
+                stride=2,
+                padding=2,
+            ),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(first_channels, second_channels, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.Conv2d(second_channels, third_channels, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((2, 2)),
             nn.Flatten(),
         )
         self.projection = nn.Sequential(
-            nn.Linear(128 * 2 * 2, hidden_size),
+            nn.Linear(third_channels * 2 * 2, hidden_size),
             nn.ReLU(),
         )
 
@@ -305,10 +326,16 @@ class PixelFeatureEncoder(nn.Module):
 class PixelActorCriticCNN(nn.Module):
     """CNN policy plus value function over an exact indexed-pixel stack."""
 
-    def __init__(self, stack_size: int = 4, hidden_size: int = 256) -> None:
+    def __init__(
+        self,
+        stack_size: int = 4,
+        hidden_size: int = 128,
+        architecture: PixelArchitecture = "small",
+    ) -> None:
         super().__init__()
         self.stack_size = stack_size
-        self.features = PixelFeatureEncoder(stack_size, hidden_size)
+        self.architecture = architecture
+        self.features = PixelFeatureEncoder(stack_size, hidden_size, architecture)
         self.policy_head = nn.Linear(hidden_size, len(ACTION_CHOICES))
         self.value_head = nn.Linear(hidden_size, 1)
         self._initialize_weights()
@@ -392,7 +419,10 @@ def _validate_pixel_batch(observations: Tensor, stack_size: int) -> None:
 
 def _model_for_config(config: PPOConfig) -> nn.Module:
     if config.observation_mode == "pixels":
-        return PixelActorCriticCNN(stack_size=config.pixel_stack)
+        return PixelActorCriticCNN(
+            stack_size=config.pixel_stack,
+            architecture=config.pixel_architecture,
+        )
     return DodgeActorCriticCNN()
 
 
@@ -1248,6 +1278,7 @@ def _validate_resume_config(stored: Mapping[str, object], current: PPOConfig) ->
         "native_execution": "parallel",
         "observation_mode": "board",
         "pixel_stack": 4,
+        "pixel_architecture": "small",
         "training_seeds": [],
         "training_seed_manifest": None,
     }
@@ -1773,6 +1804,9 @@ def main(argv: list[str] | None = None) -> int:
         "--observation-mode", choices=("board", "pixels"), default="board"
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
+    parser.add_argument(
+        "--pixel-architecture", choices=("small", "current"), default="small"
+    )
     arguments = parser.parse_args(argv)
     run_directory = arguments.run_dir or _new_run_directory(DEFAULT_RUN_ROOT)
     config = PPOConfig(
@@ -1801,6 +1835,7 @@ def main(argv: list[str] | None = None) -> int:
         native_execution=arguments.native_execution,
         observation_mode=arguments.observation_mode,
         pixel_stack=arguments.pixel_stack,
+        pixel_architecture=arguments.pixel_architecture,
     )
     try:
         record = train_ppo(config, run_directory, resume=arguments.resume)

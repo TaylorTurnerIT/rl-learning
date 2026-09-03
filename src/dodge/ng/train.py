@@ -19,6 +19,7 @@ from dodge.ng.report import build_report
 from dodge.rl.ppo import (
     NativeExecution,
     NativeObservationMode,
+    PixelArchitecture,
     PPOConfig,
     train_ppo,
 )
@@ -57,6 +58,7 @@ class BaselineConfig:
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
     pixel_stack: int = 4
+    pixel_architecture: PixelArchitecture = "small"
     initial_bc_checkpoint: Path | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -94,6 +96,7 @@ class BaselineConfig:
             native_execution=self.native_execution,
             observation_mode=self.observation_mode,
             pixel_stack=self.pixel_stack,
+            pixel_architecture=self.pixel_architecture,
             training_seeds=manifest.training_seeds,
             training_seed_manifest=manifest.sha256,
         )
@@ -218,6 +221,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(
+        "--pixel-architecture", choices=("small", "current"), default="small"
+    )
+    parser.add_argument(
         "--initial-bc-checkpoint",
         type=Path,
         default=None,
@@ -256,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         native_execution=arguments.native_execution,
         observation_mode=arguments.observation_mode,
         pixel_stack=arguments.pixel_stack,
+        pixel_architecture=arguments.pixel_architecture,
         initial_bc_checkpoint=arguments.initial_bc_checkpoint,
     )
     try:

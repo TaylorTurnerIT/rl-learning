@@ -115,6 +115,14 @@ def test_pixel_actor_critic_returns_nine_logits_and_one_value() -> None:
     assert all(parameter.grad is None for parameter in model.parameters())
 
 
+def test_pixel_architecture_is_explicitly_selectable() -> None:
+    small = PixelActorCriticCNN(stack_size=4, architecture="small")
+    current = PixelActorCriticCNN(stack_size=4, architecture="current")
+
+    assert small.features.convolution[0].out_channels == 16
+    assert current.features.convolution[0].out_channels == 32
+
+
 def test_pixel_stack_preserves_temporal_order_and_repeats_reset_frame() -> None:
     first = np.arange(FRAME_HEIGHT * FRAME_WIDTH, dtype=np.uint8).reshape(
         1, FRAME_HEIGHT, FRAME_WIDTH
