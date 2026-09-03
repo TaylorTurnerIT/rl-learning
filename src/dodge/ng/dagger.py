@@ -46,6 +46,7 @@ DEFAULT_LEARNER_CHECKPOINT = (
     / "checkpoint-best.pt"
 )
 DEFAULT_OUTPUT_DIRECTORY = PROJECT_ROOT / "history" / "dodge" / "ng" / "dagger-p2-r1"
+DEFAULT_COMPARISON_BC_RUN = PROJECT_ROOT / "history" / "dodge" / "ng" / "bc-p2-v1"
 DEFAULT_LEARNER_SEED = 2_026_0913
 DEFAULT_LOOKAHEAD_STEPS = 64
 DEFAULT_STATES_PER_SEED = 32
@@ -59,6 +60,7 @@ class DaggerConfig:
     base_teacher_data_path: Path = DEFAULT_BASE_TEACHER_DATA
     learner_checkpoint: Path = DEFAULT_LEARNER_CHECKPOINT
     output_directory: Path = DEFAULT_OUTPUT_DIRECTORY
+    comparison_bc_run_directory: Path = DEFAULT_COMPARISON_BC_RUN
     round_index: int = 1
     states_per_seed: int = DEFAULT_STATES_PER_SEED
     lookahead_steps: int = DEFAULT_LOOKAHEAD_STEPS
@@ -108,6 +110,7 @@ class DaggerConfig:
             "base_teacher_data_path",
             "learner_checkpoint",
             "output_directory",
+            "comparison_bc_run_directory",
         ):
             value[name] = str(getattr(self, name))
         return value
@@ -131,7 +134,8 @@ def run_dagger(config: DaggerConfig) -> dict[str, object]:
     aggregate_path = aggregate_directory / "teacher-data.npz"
     aggregate = load_teacher_dataset(aggregate_path, manifest)
 
-    bc_result = run_behavior_cloning(_bc_config(config, aggregate_path, manifest))
+    bc_result = run_behavior_cloning(_bc_config(config, aggregate_path))
+    previous_bc = _load_previous_bc(config.comparison_bc_run_directory, manifest)
     record: dict[str, object] = {
         "schema_version": DAGGER_SCHEMA_VERSION,
         "kind": "dodge_ng_dagger_run",
@@ -161,6 +165,7 @@ def run_dagger(config: DaggerConfig) -> dict[str, object]:
         "bc_best_inner_survival_frames": bc_result["best_inner_survival_frames"],
         "bc_final_training_evaluation": bc_result["final_training_evaluation"],
         "bc_final_holdout_evaluation": bc_result["final_evaluation"],
+        "previous_bc": previous_bc,
     }
     _write_json(config.output_directory / "run.json", record)
     report = _write_report(
@@ -318,9 +323,17 @@ def _aggregate(
     config: DaggerConfig,
     learner_metadata: Mapping[str, object],
 ) -> TeacherDataset:
+    actions = np.concatenate((base.actions, round_dataset.actions))
     metadata = dict(base.metadata)
     metadata.update(
         {
+            "examples": base.count + round_dataset.count,
+            "decisive_examples": int(
+                np.count_nonzero(
+                    np.concatenate((base.margins, round_dataset.margins)) > 0
+                )
+            ),
+            "action_counts": np.bincount(actions, minlength=ACTION_COUNT).tolist(),
             "collection_policy": "dagger_aggregate",
             "dagger_round": config.round_index,
             "dagger_round_examples": round_dataset.count,
@@ -333,7 +346,7 @@ def _aggregate(
     )
     return TeacherDataset(
         boards=np.concatenate((base.boards, round_dataset.boards)),
-        actions=np.concatenate((base.actions, round_dataset.actions)),
+        actions=actions,
         scores=np.concatenate((base.scores, round_dataset.scores)),
         margins=np.concatenate((base.margins, round_dataset.margins)),
         seeds=np.concatenate((base.seeds, round_dataset.seeds)),
@@ -344,9 +357,7 @@ def _aggregate(
     )
 
 
-def _bc_config(
-    config: DaggerConfig, aggregate_path: Path, manifest: SeedManifest
-) -> BCConfig:
+def _bc_config(config: DaggerConfig, aggregate_path: Path) -> BCConfig:
     return BCConfig(
         manifest_path=config.manifest_path,
         teacher_data_path=aggregate_path,
@@ -365,6 +376,45 @@ def _bc_config(
         native_lanes=config.native_lanes,
         native_execution=config.native_execution,  # type: ignore[arg-type]
     )
+
+
+def _load_previous_bc(
+    run_directory: Path, manifest: SeedManifest
+) -> dict[str, object] | None:
+    if not run_directory.is_dir():
+        return None
+    try:
+        value = json.loads((run_directory / "run.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ControlInputError(
+            f"could not read comparison BC run {run_directory}: {error}"
+        ) from error
+    if not isinstance(value, Mapping):
+        raise ControlInputError("comparison BC run must contain an object")
+    if value.get("manifest_sha256") != manifest.sha256:
+        raise ControlInputError("comparison BC run has a different NG manifest")
+    holdout = value.get("final_evaluation")
+    training = value.get("final_training_evaluation")
+    if not isinstance(holdout, Mapping) or not isinstance(training, Mapping):
+        raise ControlInputError("comparison BC run is missing final evaluations")
+    if tuple(holdout.get("seeds", ())) != manifest.holdout_seeds:
+        raise ControlInputError("comparison BC run does not use locked holdout")
+    return {
+        "run_directory": str(run_directory),
+        "selected_epoch": value.get("selected_epoch"),
+        "best_inner_survival_frames": value.get("best_inner_survival_frames"),
+        "training_mean_survival_frames": training.get("mean_survival_frames"),
+        "holdout_mean_survival_frames": holdout.get("mean_survival_frames"),
+        "holdout_p10_survival_frames": _p10(holdout),
+    }
+
+
+def _p10(evaluation: Mapping[str, object]) -> int | None:
+    values = evaluation.get("survival_frames")
+    if not isinstance(values, list) or not values:
+        return None
+    numbers = sorted(int(value) for value in values)
+    return numbers[max(0, (len(numbers) + 9) // 10 - 1)]
 
 
 def _load_learner(
@@ -464,6 +514,7 @@ def _write_report(
             "final_training_evaluation": record["bc_final_training_evaluation"],
             "final_holdout_evaluation": record["bc_final_holdout_evaluation"],
         },
+        "comparison": _comparison(record),
         "cache": record["score_cache"],
     }
     _write_json(output_directory / "report.json", report)
@@ -479,6 +530,7 @@ def _markdown_report(report: Mapping[str, object]) -> str:
     bc = _object(report, "bc")
     holdout = _object(bc, "final_holdout_evaluation")
     training = _object(bc, "final_training_evaluation")
+    comparison = report.get("comparison")
     lines = [
         "# Dodge NG DAgger round report",
         "",
@@ -509,7 +561,37 @@ def _markdown_report(report: Mapping[str, object]) -> str:
             "",
         ]
     )
+    if isinstance(comparison, Mapping):
+        lines.extend(
+            [
+                "## Comparison with previous BC",
+                "",
+                f"Previous holdout mean: {comparison['previous_holdout_mean']:.1f}",
+                f"DAgger holdout delta: **{comparison['holdout_delta']:+.1f} frames**",
+                "",
+            ]
+        )
     return "\n".join(lines)
+
+
+def _comparison(record: Mapping[str, object]) -> dict[str, float] | None:
+    previous = record.get("previous_bc")
+    if not isinstance(previous, Mapping):
+        return None
+    current = record.get("bc_final_holdout_evaluation")
+    if not isinstance(current, Mapping):
+        raise ControlRuntimeError("DAgger record is missing current holdout")
+    previous_mean = previous.get("holdout_mean_survival_frames")
+    current_mean = current.get("mean_survival_frames")
+    if not isinstance(previous_mean, (int, float)) or not isinstance(
+        current_mean, (int, float)
+    ):
+        raise ControlRuntimeError("DAgger holdout comparison is not numeric")
+    return {
+        "previous_holdout_mean": float(previous_mean),
+        "current_holdout_mean": float(current_mean),
+        "holdout_delta": float(current_mean) - float(previous_mean),
+    }
 
 
 def _object(value: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -557,6 +639,9 @@ def main(argv: list[str] | None = None) -> int:
         "--learner-checkpoint", type=Path, default=DEFAULT_LEARNER_CHECKPOINT
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
+    parser.add_argument(
+        "--comparison-bc-run-dir", type=Path, default=DEFAULT_COMPARISON_BC_RUN
+    )
     parser.add_argument("--round", type=_positive_int, default=1)
     parser.add_argument("--states-per-seed", type=_positive_int, default=32)
     parser.add_argument("--lookahead-steps", type=_positive_int, default=64)
@@ -584,6 +669,7 @@ def main(argv: list[str] | None = None) -> int:
         base_teacher_data_path=arguments.base_teacher_data,
         learner_checkpoint=arguments.learner_checkpoint,
         output_directory=arguments.output_dir,
+        comparison_bc_run_directory=arguments.comparison_bc_run_dir,
         round_index=arguments.round,
         states_per_seed=arguments.states_per_seed,
         lookahead_steps=arguments.lookahead_steps,

@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-2-dagger-in-progress
+  status: phase-2-dagger-complete
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -335,6 +335,10 @@ training partition only.
   each action. Teacher collection also memoizes exact `(snapshot, lookahead)`
   requests; this is a correctness-preserving optimization even when gameplay
   states are mostly unique.
+- DAgger round 1 added 2,240 states visited by the selected PPO warm-start
+  learner. Aggregate BC selected epoch 40 at 399.6 inner frames and reached
+  397.6 training / 404.7 holdout frames, improving the prior BC holdout by
+  56.4 frames with a 7.1-frame train–holdout gap.
 
 ### §G Goal
 

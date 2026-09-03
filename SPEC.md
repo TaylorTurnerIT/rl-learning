@@ -84,8 +84,8 @@ T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions,
 T12|x|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
 T13|x|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
 T14|x|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11,I12
-T15|~|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9,I13
-T16|.|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
+T15|x|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9,I13
+T16|~|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
 
 §B
 id|date|cause|fix
