@@ -20,7 +20,7 @@
       "board_buffer_slot_is_bounded"
     ],
     "evidence": "context/kits/dodge-native/p7-kani-results.json",
-    "evidence_sha256": "ab51f8ac7041d2f55c0c600476d3e3a6f3bd016e4ce79df2f07119dbd555c42a",
+    "evidence_sha256": "7eeef27cf48995d2d86abb5cb9e8c08b5d546948059241b04a362278ee743e57",
     "does_not_prove": [
       "full-game mathematical equivalence to Pemsa",
       "arbitrary or infinite input-sequence equivalence",

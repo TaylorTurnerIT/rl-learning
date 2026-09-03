@@ -14,6 +14,12 @@
     "core_schema_version": 1,
     "cartridge_source_sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
   },
+  "verification": {
+    "command": "DODGE_HEADLESS=1 just dodge-native-kani",
+    "date": "2026-09-02",
+    "application_git_head": "517fd0dde10312e626b5e6bc03a61e50b5b857db",
+    "result": "6 successfully verified harnesses, 0 failures, 6 total"
+  },
   "harnesses": [
     {
       "name": "framebuffer_coordinates_are_bounded",
