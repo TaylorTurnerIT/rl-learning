@@ -1,0 +1,148 @@
+{
+  "phase": "P7",
+  "schema_version": 1,
+  "status": "accepted_automated_owner_review_pending",
+  "release_status": "owner_visual_review_required",
+  "claim_scope": "The native Dodge implementation has passed the defined local proof, finite conformance, reproducibility, performance, and legacy regression gates. These results do not constitute a mathematical proof of full-game equivalence.",
+  "proof": {
+    "status": "verified_local_properties",
+    "tool": "Kani",
+    "command": "DODGE_HEADLESS=1 just dodge-native-kani",
+    "harnesses_verified": 6,
+    "harnesses_failed": 0,
+    "resource_exhaustion": 0,
+    "properties": [
+      "framebuffer_coordinates_are_bounded",
+      "palette_lookup_returns_a_valid_palette_index",
+      "action_masks_stay_inside_the_pico8_button_domain",
+      "board_coordinate_index_is_bounded",
+      "fixed_highscore_slot_is_bounded",
+      "board_buffer_slot_is_bounded"
+    ],
+    "evidence": "context/kits/dodge-native/p7-kani-results.json",
+    "evidence_sha256": "ab51f8ac7041d2f55c0c600476d3e3a6f3bd016e4ce79df2f07119dbd555c42a",
+    "does_not_prove": [
+      "full-game mathematical equivalence to Pemsa",
+      "arbitrary or infinite input-sequence equivalence",
+      "visual approval"
+    ]
+  },
+  "finite_conformance": {
+    "status": "match",
+    "comparison_boundary": "post-update, post-draw canonical observation",
+    "fields": [
+      "decoded mutable state",
+      "reward",
+      "done",
+      "audio and gameplay events",
+      "128x128 row-major palette-index pixels",
+      "state and pixel hashes"
+    ],
+    "p4_accepted_corpus": {
+      "fixtures": 8,
+      "frames_compared": 2159,
+      "golden_seeds": [42, 7, 99],
+      "heldout_seeds": [13, 27, 58, 101],
+      "all_cases_match": true,
+      "evidence": "context/kits/dodge-native/p4-acceptance-report.json",
+      "evidence_sha256": "ec1efe83cba1441ddb5a44af7bf0718e2ce7a7fb3e1b7dc3b047a945462f0f62"
+    },
+    "p7_fuzz_corpus": {
+      "fixtures": 4,
+      "seeds": [3, 17, 41, 89],
+      "frames_compared": 1042,
+      "all_cases_match": true,
+      "full_draw": true,
+      "evidence": "context/kits/dodge-native/p7-fuzz-report.json",
+      "evidence_sha256": "0335959e94d3938328ea58400f767c8c8af83118ba5ecc41e9ef8bb543ef7238"
+    },
+    "combined_frames_compared": 3201
+  },
+  "reproducibility": {
+    "status": "reproducible",
+    "claim": "same native seeds, actions, configuration, and observation flags produce byte-identical batch results",
+    "runs": 2,
+    "records_per_run": 140,
+    "record_bytes_equal": true,
+    "run_sha256": "b2fe14c327a7dbc4b81eef0a5c3d9ca7c2573db39dec5cb4dd1c0f20a79c12e1",
+    "observation_flags": {
+      "full_state": true,
+      "pixels": true,
+      "board": true
+    },
+    "evidence": "context/kits/dodge-native/p7-provenance.json",
+    "evidence_sha256": "6e1f48a803429a753810f79559df47c6563f963b68456287bd533da006d98672"
+  },
+  "performance": {
+    "status": "within_budget",
+    "workload": {
+      "lane_count": 32,
+      "lane_steps": 1024,
+      "batch_steps": 32,
+      "step_frames": 4,
+      "full_state": true,
+      "pixels": true,
+      "board": false
+    },
+    "p6_baseline_median_seconds": 0.6287918350135442,
+    "p7_median_seconds": 0.6164871350047179,
+    "p7_median_limit_seconds": 0.7859897937669302,
+    "p7_population_stddev_seconds": 0.006569736570288671,
+    "p7_population_stddev_limit_seconds": 0.05,
+    "p7_throughput_lane_steps_per_second": 1661.0241185197863,
+    "criterion_median_point_estimate_nanoseconds": 570675244.0,
+    "criterion_stddev_point_estimate_nanoseconds": 18976310.07385584,
+    "evidence": "context/kits/dodge-native/p7-benchmark-report.json",
+    "evidence_sha256": "486bfadc019effb6e153a0e4b63c30642486e7bda1e9cc5cfb4ddf60b2382b7e"
+  },
+  "legacy_regression": {
+    "status": "passed",
+    "legacy_full_suite": "207 passed",
+    "native_focused_suite": "18 passed",
+    "native_ppo_smoke": "2 passed, 11 deselected",
+    "strict_native_suite": "59 passed",
+    "evidence": "context/kits/dodge-native/p7-legacy-regression.json",
+    "evidence_sha256": "1a6f42ea71cef1cef23b303dc80c6fe880648e66fa73e9cd2e3824266498226e"
+  },
+  "visual_review": {
+    "status": "pending_owner",
+    "automated_evidence": {
+      "p5_lossless_macroquad_capture": true,
+      "capture_payload_bytes": 16384,
+      "capture_matches_native_pixels": true,
+      "evidence": "context/kits/dodge-native/p5-acceptance-report.json",
+      "evidence_sha256": "71864a7628041f8aeea036c6db68ac8525053d5de966e614d8e45d3967636385"
+    },
+    "required_owner_scope": [
+      "menu",
+      "settings",
+      "gameplay",
+      "patterns",
+      "particles",
+      "death",
+      "transitions"
+    ],
+    "interpretation": "Automated indexed-pixel equality and lossless Macroquad capture are not a substitute for human visual approval."
+  },
+  "provenance": {
+    "source": "src/dodge/game/dodge.p8",
+    "source_sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3",
+    "pemsa_sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4",
+    "native_cargo_lock_sha256": "5ef04e8ecf565e5e595bd8a5d94d3caedd0a1f8e40534f225de99c0e171f455a",
+    "uv_lock_sha256": "dc78c23f89bd2c284a146f3fc14da12071ae26f8504645d8c8b036f6137aba02",
+    "native_provenance_evidence": "context/kits/dodge-native/p7-provenance.json"
+  },
+  "deferred": [
+    "owner visual signoff",
+    "audio waveform parity",
+    "cross-platform floating-point identity",
+    "full-game mathematical equivalence",
+    "infinite-input proof"
+  ],
+  "claims_not_made": [
+    "Kani proves the complete game",
+    "finite differential coverage proves all possible games",
+    "the Macroquad presentation has owner approval",
+    "the benchmark generalizes unchanged to every host or workload"
+  ]
+}

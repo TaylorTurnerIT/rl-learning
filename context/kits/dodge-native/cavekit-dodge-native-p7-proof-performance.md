@@ -115,7 +115,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T4 | x | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | x | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | x | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
-| P7-T7 | . | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
+| P7-T7 | x | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
 | P7-T8 | . | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
 
 ### §B BUGS
