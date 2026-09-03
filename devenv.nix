@@ -28,9 +28,11 @@ in
     pkgs.rustfmt
     pkgs.clippy
     pkgs.rust-analyzer
+    pkgs.rustup
     pkgs.cargo-nextest
     pkgs.maturin
     pkgs.bacon
+    pkgs.curl
     pkgs.ruff
     pkgs.SDL2
     pkgs.xdotool
@@ -139,6 +141,7 @@ in
 
   # Shell hook executed when entering devenv shell
   enterShell = ''
+    export PATH=${pkgs.curl}/bin:"$PATH"
     if [ "''${DODGE_HEADLESS:-0}" != "1" ]; then
       echo "=========================================="
       echo "🚀 Python + uv devenv environment active!"

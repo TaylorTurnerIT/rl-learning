@@ -252,6 +252,14 @@ name = "dodge-core"
 version = "0.1.0"
 
 [[package]]
+name = "dodge-kani"
+version = "0.1.0"
+dependencies = [
+ "dodge-batch",
+ "dodge-core",
+]
+
+[[package]]
 name = "dodge-native-runner"
 version = "0.1.0"
 dependencies = [

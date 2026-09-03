@@ -147,6 +147,12 @@ impl RenderState {
         self.palette_is_valid(&self.draw_palette) && self.palette_is_valid(&self.screen_palette)
     }
 
+    /// Map a source palette index through the draw and screen palettes.
+    pub fn palette_index(&self, color: u8) -> Option<u8> {
+        let drawn = self.draw_palette.get(usize::from(color)).copied()?;
+        self.screen_palette.get(usize::from(drawn)).copied()
+    }
+
     fn palette_is_valid(&self, palette: &[u8; PALETTE_SIZE]) -> bool {
         palette.iter().all(|color| *color < PALETTE_SIZE as u8)
     }
@@ -901,8 +907,7 @@ fn glyph(character: char) -> Glyph {
 }
 
 fn map_color(color: u8, state: &RenderState) -> Option<u8> {
-    let drawn = state.draw_palette.get(usize::from(color)).copied()?;
-    state.screen_palette.get(usize::from(drawn)).copied()
+    state.palette_index(color)
 }
 
 fn render_game(state: &FullState, render: &RenderState, framebuffer: &mut IndexedFramebuffer) {
@@ -2035,6 +2040,8 @@ mod tests {
         assert_eq!(snapshot.pixels().len(), FRAMEBUFFER_SIZE);
         assert_eq!(snapshot.framebuffer().pixel(0, 0), Some(12));
         assert_eq!(snapshot.render_state().draw_palette[12], 12);
+        assert_eq!(snapshot.render_state().palette_index(12), Some(12));
+        assert_eq!(snapshot.render_state().palette_index(16), None);
     }
 
     #[test]

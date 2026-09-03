@@ -23,7 +23,7 @@ pub use patterns::{PatternRect, PatternState, PatternTarget, SpawnPoint, Warning
 pub use rng::{PicoRng, RngCheckpoint};
 pub use snapshot::{
     CARTRIDGE_SOURCE_SHA256, FRAMEBUFFER_HEIGHT, FRAMEBUFFER_SIZE, FRAMEBUFFER_WIDTH, FullState,
-    IndexedFramebuffer, RenderState, Snapshot, SnapshotProvenance,
+    IndexedFramebuffer, PALETTE_SIZE, RenderState, Snapshot, SnapshotProvenance,
 };
 pub use state::{EnemyState, ParticleState, PlayerState, SettingsState};
 

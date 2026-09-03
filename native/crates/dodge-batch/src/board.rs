@@ -135,6 +135,19 @@ impl Board19x16 {
         &self.values
     }
 
+    /// Return the C-order flat index for a channel-major board coordinate.
+    pub const fn flat_index(channel: usize, row: usize, column: usize) -> Option<usize> {
+        if channel >= BOARD_CHANNELS || row >= BOARD_HEIGHT || column >= BOARD_WIDTH {
+            return None;
+        }
+        Some(channel * CELL_VALUES + row * BOARD_WIDTH + column)
+    }
+
+    /// Read one semantic board cell without exposing unchecked indexing.
+    pub fn value(&self, channel: usize, row: usize, column: usize) -> Option<f32> {
+        Self::flat_index(channel, row, column).and_then(|index| self.values.get(index).copied())
+    }
+
     pub fn shape(&self) -> (usize, usize, usize) {
         (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH)
     }
@@ -325,5 +338,8 @@ mod tests {
             BOARD_SIZE * BOARD_SIZE * BOARD_CHANNELS
         );
         assert!(board.as_slice().iter().all(|value| value.is_finite()));
+        assert_eq!(Board19x16::flat_index(18, 15, 15), Some(4_863));
+        assert_eq!(Board19x16::flat_index(19, 0, 0), None);
+        assert!(board.value(0, 0, 0).is_some());
     }
 }

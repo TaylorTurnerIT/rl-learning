@@ -106,7 +106,7 @@ benchmark statistics, known limitations, and owner signoff.
 | id | status | task | cites |
 |----|--------|------|-------|
 | P7-T1 | x | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
-| P7-T2 | . | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
+| P7-T2 | x | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
 | P7-T3 | . | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
 | P7-T4 | . | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | . | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
@@ -119,6 +119,10 @@ benchmark statistics, known limitations, and owner signoff.
 | id | date | cause | fix |
 |----|------|-------|-----|
 | B1 | 2026-09-02 | The first P7 format gate used `use_small_heuristics = "Max"`, which changed the existing native formatting rather than only checking the new benchmark target | Removed that override, formatted the benchmark with the pinned Rust toolchain, and reran format, locked check, Clippy, nextest, and benchmark compilation successfully |
+| B2 | 2026-09-02 | Kani setup selected `/usr/bin/curl`, whose runtime libcurl did not provide the ABI expected by the Nix nix-ld library | Added `pkgs.curl` to the project devenv so the verifier download uses a directly provisioned Nix curl; rerun setup before accepting Kani results |
+| B3 | 2026-09-02 | Kani downloaded its bundle but could not invoke the required `nightly-2025-11-21` toolchain because the project devenv had no `rustup` executable | Added `pkgs.rustup` to the project devenv; rerun Kani setup and keep the application channel pinned independently at Rust 1.97.1 |
+| B4 | 2026-09-02 | The Kani proof crate needed the public palette-size contract, but `PALETTE_SIZE` was only re-exported inside the snapshot module | Re-exported `PALETTE_SIZE` from `dodge-core` and reran the native compile gates before proof execution |
+| B5 | 2026-09-02 | The first composed `dodge-native-check` recipe passed `--locked` to `cargo fmt`, which has no Cargo lockfile option | Removed `--locked` from the format invocation and reran the composed format, Clippy, and nextest gate |
 
 ## Gate
 

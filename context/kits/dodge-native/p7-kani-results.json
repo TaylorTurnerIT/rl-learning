@@ -1,0 +1,60 @@
+{
+  "phase": "P7",
+  "schema_version": 1,
+  "status": "verified_local_properties",
+  "kani": {
+    "version": "0.67.0",
+    "cbmc_version": "6.8.0",
+    "toolchain": "nightly-2025-11-21-x86_64-unknown-linux-gnu",
+    "rustc": "1.93.0-nightly (53732d5e0 2025-11-20)",
+    "setup": "cargo kani setup"
+  },
+  "application": {
+    "rust_toolchain": "1.97.1",
+    "core_schema_version": 1,
+    "cartridge_source_sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "harnesses": [
+    {
+      "name": "framebuffer_coordinates_are_bounded",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked IndexedFramebuffer pixel lookup for all in-range coordinates"
+    },
+    {
+      "name": "palette_lookup_returns_a_valid_palette_index",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked RenderState palette mapping for every source palette index"
+    },
+    {
+      "name": "action_masks_stay_inside_the_pico8_button_domain",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked every member of the nine-action training space"
+    },
+    {
+      "name": "board_coordinate_index_is_bounded",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked every bounded channel, row, and column coordinate"
+    },
+    {
+      "name": "fixed_highscore_slot_is_bounded",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked the twelve-slot fixed high-score buffer contract"
+    },
+    {
+      "name": "board_buffer_slot_is_bounded",
+      "status": "success",
+      "checks_failed": 0,
+      "scope": "checked every slot in the 19x16x16 board buffer"
+    }
+  ],
+  "claims_not_made": [
+    "full-game mathematical equivalence to Pemsa",
+    "visual approval",
+    "audio waveform equivalence"
+  ]
+}

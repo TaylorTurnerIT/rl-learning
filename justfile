@@ -48,9 +48,13 @@ dodge-native-test:
 
 [group("dodge")]
 dodge-native-check:
-    @DODGE_HEADLESS=1 devenv -q shell -- cargo fmt --locked --manifest-path native/Cargo.toml --all -- --check
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo fmt --manifest-path native/Cargo.toml --all -- --check
     @DODGE_HEADLESS=1 devenv -q shell -- cargo clippy --locked --manifest-path native/Cargo.toml --workspace --all-targets --all-features -- -D warnings
     @DODGE_HEADLESS=1 devenv -q shell -- cargo nextest run --locked --manifest-path native/Cargo.toml --workspace
+
+[group("dodge")]
+dodge-native-kani:
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo kani --manifest-path native/Cargo.toml -p dodge-kani
 
 [group("dodge")]
 dodge-native-bench *options:
