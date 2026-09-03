@@ -399,6 +399,9 @@ before enabling visual augmentation.
 - A matched 16/32/64-channel small control took 17.6 seconds (7.3 reported
   transitions/s). It is now the default architecture; the larger current
   control remains selectable for a direct representation-capacity comparison.
+- The optional fast encoder took 13.2 seconds (9.7 reported transitions/s) on
+  the same smoke workload. T18 will use it as the speed-oriented control and
+  retain small/current as reproducible comparison variants.
 - These smoke horizons are plumbing and speed evidence only. They do not
   constitute a learning or generalization result; T18 is the matched budgeted
   run.

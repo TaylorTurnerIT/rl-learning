@@ -221,7 +221,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(
-        "--pixel-architecture", choices=("small", "current"), default="small"
+        "--pixel-architecture",
+        choices=("fast", "small", "current"),
+        default="small",
     )
     parser.add_argument(
         "--initial-bc-checkpoint",

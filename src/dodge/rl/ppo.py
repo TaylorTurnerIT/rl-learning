@@ -50,7 +50,7 @@ TRAINING_SEEDS = tuple(
 PPOBackend = Literal["python", "native"]
 NativeExecution = Literal["serial", "parallel"]
 NativeObservationMode = Literal["board", "pixels"]
-PixelArchitecture = Literal["small", "current"]
+PixelArchitecture = Literal["fast", "small", "current"]
 
 
 class Environment(Protocol):
@@ -142,8 +142,8 @@ class PPOConfig:
             raise ValueError("observation mode must be 'board' or 'pixels'")
         if not 1 <= self.pixel_stack <= 8:
             raise ValueError("pixel stack must be between 1 and 8")
-        if self.pixel_architecture not in {"small", "current"}:
-            raise ValueError("pixel architecture must be 'small' or 'current'")
+        if self.pixel_architecture not in {"fast", "small", "current"}:
+            raise ValueError("pixel architecture must be 'fast', 'small', or 'current'")
         if self.observation_mode == "pixels" and self.backend != "native":
             raise ValueError("pixel PPO requires the native backend")
         if self.training_seed_manifest is not None and not isinstance(
@@ -287,31 +287,44 @@ class PixelFeatureEncoder(nn.Module):
             raise ValueError("pixel stack must be between 1 and 8")
         if hidden_size < 1:
             raise ValueError("hidden size must be positive")
-        if architecture not in {"small", "current"}:
-            raise ValueError("pixel architecture must be 'small' or 'current'")
+        if architecture not in {"fast", "small", "current"}:
+            raise ValueError("pixel architecture must be 'fast', 'small', or 'current'")
         self.stack_size = stack_size
         self.architecture = architecture
-        first_channels, second_channels, third_channels = (
-            (16, 32, 64) if architecture == "small" else (32, 64, 128)
-        )
-        self.convolution = nn.Sequential(
-            nn.Conv2d(
-                stack_size,
-                first_channels,
-                kernel_size=5,
-                stride=2,
-                padding=2,
-            ),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(first_channels, second_channels, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(second_channels, third_channels, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((2, 2)),
-            nn.Flatten(),
-        )
+        if architecture == "fast":
+            first_channels, second_channels, third_channels = (16, 32, 64)
+            self.convolution = nn.Sequential(
+                nn.Conv2d(stack_size, first_channels, kernel_size=8, stride=4),
+                nn.ReLU(),
+                nn.Conv2d(first_channels, second_channels, kernel_size=4, stride=2),
+                nn.ReLU(),
+                nn.Conv2d(second_channels, third_channels, kernel_size=3),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((2, 2)),
+                nn.Flatten(),
+            )
+        else:
+            first_channels, second_channels, third_channels = (
+                (16, 32, 64) if architecture == "small" else (32, 64, 128)
+            )
+            self.convolution = nn.Sequential(
+                nn.Conv2d(
+                    stack_size,
+                    first_channels,
+                    kernel_size=5,
+                    stride=2,
+                    padding=2,
+                ),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2),
+                nn.Conv2d(first_channels, second_channels, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2),
+                nn.Conv2d(second_channels, third_channels, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((2, 2)),
+                nn.Flatten(),
+            )
         self.projection = nn.Sequential(
             nn.Linear(third_channels * 2 * 2, hidden_size),
             nn.ReLU(),
@@ -1805,7 +1818,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(
-        "--pixel-architecture", choices=("small", "current"), default="small"
+        "--pixel-architecture", choices=("fast", "small", "current"), default="small"
     )
     arguments = parser.parse_args(argv)
     run_directory = arguments.run_dir or _new_run_directory(DEFAULT_RUN_ROOT)

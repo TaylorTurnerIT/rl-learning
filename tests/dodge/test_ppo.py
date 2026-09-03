@@ -116,9 +116,11 @@ def test_pixel_actor_critic_returns_nine_logits_and_one_value() -> None:
 
 
 def test_pixel_architecture_is_explicitly_selectable() -> None:
+    fast = PixelActorCriticCNN(stack_size=4, architecture="fast")
     small = PixelActorCriticCNN(stack_size=4, architecture="small")
     current = PixelActorCriticCNN(stack_size=4, architecture="current")
 
+    assert fast.features.convolution[0].kernel_size == (8, 8)
     assert small.features.convolution[0].out_channels == 16
     assert current.features.convolution[0].out_channels == 32
 
