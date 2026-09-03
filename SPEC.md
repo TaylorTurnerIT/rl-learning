@@ -66,6 +66,7 @@ V20|BC artifacts preserve model/action/board metadata, manifest hash, teacher-da
 V21|PPO warm start copies only compatible actor feature/policy weights from BC, resets value and optimizer state, records initialization provenance, and remains resumable under the matched PPO config.
 V22|DAgger rounds append only learner-visited training-seed states with fresh teacher labels, record round/version provenance, and compare rounds only under the frozen BC/PPO evaluation protocol.
 V23|Manifest-bound teacher loading identifies a held-out seed as a holdout violation before the broader non-training-seed violation, preserving an actionable provenance diagnosis.
+V24|Saved teacher metadata counters and action histograms equal their serialized arrays; stale aggregate counters fail teacher loading.
 
 §T
 id|status|task|cites
@@ -97,3 +98,4 @@ B6|2026-09-03|New BC/warm-start tests exceeded repository import/line-width lint
 B7|2026-09-03|Comparison report called an omitted JSON writer and exceeded line width in its Markdown table.|Add atomic comparison JSON write and format table literal before next verification gate.
 B8|2026-09-03|Comparison fixture expected holdout delta with incorrect hardcoded arithmetic.|Derive expected delta from fixture values and keep comparison arithmetic covered.
 B9|2026-09-03|DAgger collector imported unused tensor alias after switching to module-qualified torch calls.|Remove unused import before next verification gate.
+B10|2026-09-03|DAgger aggregation inherited base metadata counters after concatenating arrays, so aggregate metadata underreported examples.|Recompute examples, decisive count, and action histogram on every teacher save and validate V24.

@@ -137,9 +137,7 @@ class CounterfactualCache:
 
         if missing:
             self.misses += len(missing)
-            computed = _score_snapshots_uncached(
-                environment, missing, lookahead_steps
-            )
+            computed = _score_snapshots_uncached(environment, missing, lookahead_steps)
             for snapshot, score in zip(missing, computed, strict=True):
                 self._values[(snapshot, lookahead_steps)] = np.array(
                     score, dtype=np.float32, copy=True
@@ -272,9 +270,7 @@ def collect_teacher_dataset(config: TeacherConfig) -> TeacherDataset:
             result = next_result
         else:
             incomplete = [
-                seed
-                for seed, count in counts.items()
-                if count < config.states_per_seed
+                seed for seed, count in counts.items() if count < config.states_per_seed
             ]
             raise ControlRuntimeError(
                 "teacher collection reached its step limit; incomplete seeds: "
@@ -358,6 +354,11 @@ def save_teacher_dataset(dataset: TeacherDataset, output_directory: Path) -> Non
         temporary_data.unlink(missing_ok=True)
     metadata = dict(dataset.metadata)
     metadata["data_path"] = data_path.name
+    metadata["examples"] = dataset.count
+    metadata["decisive_examples"] = dataset.decisive_count
+    metadata["action_counts"] = np.bincount(
+        dataset.actions, minlength=ACTION_COUNT
+    ).tolist()
     metadata["data_sha256"] = _sha256(data_path)
     _write_json(metadata_path, metadata)
 
@@ -384,6 +385,15 @@ def load_teacher_dataset(
         raise ValueError(f"invalid teacher dataset: {error}") from error
     if not isinstance(metadata_value, dict):
         raise ValueError("teacher metadata must be a JSON object")
+    if metadata_value.get("examples") != dataset.count:
+        raise ValueError("teacher metadata example count does not match arrays")
+    if metadata_value.get("decisive_examples") != dataset.decisive_count:
+        raise ValueError("teacher metadata decisive count does not match arrays")
+    expected_action_counts = np.bincount(
+        dataset.actions, minlength=ACTION_COUNT
+    ).tolist()
+    if metadata_value.get("action_counts") != expected_action_counts:
+        raise ValueError("teacher metadata action counts do not match arrays")
     expected_hash = metadata_value.get("data_sha256")
     if expected_hash != _sha256(data_path):
         raise ValueError("teacher dataset hash is missing or invalid")
@@ -412,9 +422,7 @@ def _score_snapshots_uncached(
     scores: list[np.ndarray] = []
     for start in range(0, len(snapshots), 256):
         scores.append(
-            environment.score_actions(
-                snapshots[start : start + 256], lookahead_steps
-            )
+            environment.score_actions(snapshots[start : start + 256], lookahead_steps)
         )
     if not scores:
         raise ControlRuntimeError("teacher collection produced no snapshots")

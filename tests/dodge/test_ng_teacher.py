@@ -86,6 +86,21 @@ def test_teacher_dataset_round_trips_with_hash_and_manifest_validation(
     assert loaded.decisive_count == 4
 
 
+def test_v24_teacher_save_recomputes_metadata_counters(tmp_path: Path) -> None:
+    manifest = _manifest()
+    dataset = _dataset(manifest)
+    dataset.metadata.update(
+        {"examples": 0, "decisive_examples": 0, "action_counts": [0] * ACTION_COUNT}
+    )
+
+    save_teacher_dataset(dataset, tmp_path)
+    metadata = json.loads((tmp_path / "metadata.json").read_text())
+
+    assert metadata["examples"] == dataset.count
+    assert metadata["decisive_examples"] == dataset.decisive_count
+    assert metadata["action_counts"] == [0, 1, 1, 1, 1, 0, 0, 0, 0]
+
+
 def test_v23_teacher_dataset_rejects_holdout_seed(tmp_path: Path) -> None:
     output = tmp_path
     manifest = _manifest()
