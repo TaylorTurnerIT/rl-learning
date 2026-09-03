@@ -108,7 +108,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T1 | x | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
 | P7-T2 | x | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
 | P7-T3 | x | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
-| P7-T4 | ~ | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
+| P7-T4 | x | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | . | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | . | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | . | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
