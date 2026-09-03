@@ -1,0 +1,83 @@
+{
+  "phase": "P7",
+  "schema_version": 1,
+  "status": "accepted",
+  "claim": "the legacy Python/Pemsa control path and native training smoke paths remain runnable after the native implementation",
+  "revision": {
+    "git_head": "289bdf37ea3f30e86fd3fc0c6c71392a6d28c466",
+    "source_sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3",
+    "pemsa_sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4",
+    "native_cargo_lock_sha256": "5ef04e8ecf565e5e595bd8a5d94d3caedd0a1f8e40534f225de99c0e171f455a",
+    "uv_lock_sha256": "dc78c23f89bd2c284a146f3fc14da12071ae26f8504645d8c8b036f6137aba02"
+  },
+  "environment": {
+    "headless": true,
+    "runtime_wrapper": "app-test",
+    "required_runtime_path": "project app-test LD_LIBRARY_PATH",
+    "python": "3.14.7",
+    "rustc": "1.97.1",
+    "host": "x86_64 Linux 6.18.46 glibc 2.42"
+  },
+  "checks": [
+    {
+      "name": "legacy_full_suite",
+      "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q",
+      "status": "passed",
+      "passed": 207,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 157.25,
+      "scope": "legacy control, headless, NEAT, PPO, native backend, batch, and differential tests"
+    },
+    {
+      "name": "native_focused_suite",
+      "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q tests/dodge/test_native_backend.py tests/dodge/test_native_batch.py tests/dodge/test_native_differential.py",
+      "status": "passed",
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 9.22
+    },
+    {
+      "name": "native_ppo_smoke",
+      "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q tests/dodge/test_ppo.py -k native",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "deselected": 11,
+      "duration_seconds": 7.02,
+      "scope": "native backend selection and native PPO rollout smoke"
+    },
+    {
+      "name": "native_strict_gate",
+      "command": "DODGE_HEADLESS=1 just dodge-native-check",
+      "status": "passed",
+      "nextest_passed": 59,
+      "nextest_failed": 0,
+      "nextest_skipped": 0,
+      "scope": "pinned rustfmt, locked Clippy, and nextest"
+    },
+    {
+      "name": "kani_gate",
+      "command": "DODGE_HEADLESS=1 just dodge-native-kani",
+      "status": "passed",
+      "harnesses_verified": 6,
+      "harnesses_failed": 0,
+      "resource_exhaustion": 0
+    }
+  ],
+  "harness_incidents": [
+    {
+      "id": "B16",
+      "status": "resolved",
+      "summary": "A focused run invoked pytest directly and omitted the X11 library path owned by app-test, causing a false hidden-window timeout.",
+      "resolution": "The accepted focused and full-suite results use app-test."
+    }
+  ],
+  "claims_not_made": [
+    "mathematical proof of full-game equivalence",
+    "owner visual approval",
+    "audio waveform equivalence",
+    "cross-platform floating-point identity"
+  ]
+}

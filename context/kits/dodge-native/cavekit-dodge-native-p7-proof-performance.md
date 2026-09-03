@@ -114,7 +114,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T3 | x | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
 | P7-T4 | x | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | x | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
-| P7-T6 | . | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
+| P7-T6 | x | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | . | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
 | P7-T8 | . | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
 
@@ -137,6 +137,7 @@ benchmark statistics, known limitations, and owner signoff.
 | B13 | 2026-09-02 | The first P7-T5 benchmark checker lint pass found an unused hash import and two line-width violations | Remove the unused import and apply the pinned Ruff wrapping before executing the benchmark |
 | B14 | 2026-09-02 | Removing the temporary local subprocess import from the benchmark checker left its command-version helper without a module import | Add the module-level subprocess import and rerun Ruff |
 | B15 | 2026-09-02 | Adding retained Criterion estimate identity introduced a hash helper before restoring its module import | Import hashlib and rerun the benchmark-checker lint gate |
+| B16 | 2026-09-02 | The first focused native/Pemsa smoke invocation bypassed the `app-test` wrapper and omitted its required X11 library path, causing a false hidden-window timeout | Rerun the focused suite through `app-test`, which owns the project X11 runtime environment |
 
 ## Gate
 
