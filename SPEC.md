@@ -39,6 +39,7 @@ I11|`src/dodge/rl/ppo.py` accepts an actor-only warm start while reinitializing 
 I12|`src/dodge/ng/compare.py` owns matched PPO selected-checkpoint evaluation, sample-efficiency deltas, and comparison plots without holdout selection.
 I13|`src/dodge/ng/dagger.py` owns learner-visited training-state collection, fresh counterfactual labels, dataset aggregation, and round BC retraining.
 I14|`src/dodge/rl/ppo.py` owns native pixel PPO, exact pixel frame stacking, reset-safe stack lifecycle, pixel checkpoints, and pixel evaluation.
+I15|`src/dodge/ng/relevance.py` owns multi-horizon decision-relevance audits, policy regret/action dynamics, gate output, and visual checkpoint references.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -74,6 +75,10 @@ V24|Saved teacher metadata counters and action histograms equal their serialized
 V25|Pixel PPO accepts only native indexed-pixel batches with finite palette values in `0..15`, the configured stack/channel shape, and deterministic normalization.
 V26|Pixel frame stacks repeat the first reset frame and replace all channels on lane reset; no frame from a prior episode is present in the first post-reset observation.
 V27|Pixel checkpoints and run records identify the pixel model, observation mode, stack size, raster shape, and action contract; matching pixel resumes reproduce configuration validation.
+V28|Decision-relevance audit replays canonical snapshots with common-random-number state, scores all nine actions at configured horizons, remains finite/deterministic, and leaves live batch state unchanged.
+V29|Audit reports first enemy/active-pattern/near-collision/decisive frames, per-horizon action margins, policy regret, action-change rate, and maximum action run.
+V30|Gate marks rollout uninformative when no decisive state exists or all-action margin ≤ configured threshold; uninformative scores cannot advance learner selection.
+V31|Audit selection inputs use training seeds only; holdout audit optional report-only and cannot set pass/selection fields.
 
 §T
 id|status|task|cites
@@ -97,6 +102,7 @@ T17|x|Extend native PPO with indexed-pixel four-frame stacks, reset-safe lifecyc
 T18|x|Run a matched native pixel-PPO control on the frozen training split, select only on inner training seeds, and report locked holdout performance and throughput.|V7,V18,V25,V27,G7
 T19|x|Compare board and pixel controls by sample efficiency, wall-clock throughput, split gap, lower tail, and representative visual failures.|V7,V18,V25,V27,G6,G7
 T20|~|Collect fresh training-only indexed-pixel teacher examples and train a pixel CNN behavior-cloning checkpoint suitable for actor-only PPO warm starts.|V18,V20,V25,V27,G6,G7,I9,I14
+T21|x|Implement frozen-manifest decision-relevance gate: canonical multi-horizon all-action audit, policy regret/action dynamics, hazard timeline, training-only gate, JSON/Markdown/plot artifacts, CLI/tests.|V16,V28,V29,V30,V31,I7,I15
 
 §B
 id|date|cause|fix
@@ -112,3 +118,7 @@ B9|2026-09-03|DAgger collector imported unused tensor alias after switching to m
 B10|2026-09-03|DAgger aggregation inherited base metadata counters after concatenating arrays, so aggregate metadata underreported examples.|Recompute examples, decisive count, and action histogram on every teacher save and validate V24.
 B11|2026-09-03|The first full-suite run recorded the live NEAT checkpoint test as failed while an isolated devenv rerun passed in 248.93s; concurrent/stale Pemsa activity made the result transient rather than a P3 regression.|Keep P3 source scoped away from NEAT, rerun live Pemsa tests in isolation when the suite records this failure, and do not add a source workaround without deterministic reproduction.
 B12|2026-09-03|Repository-wide `app-check` still reports five unrelated pre-existing lint violations in native fuzz tooling and the legacy `rl_learning` package; none overlap T17 files.|Use targeted clean lint for the T17 gate and defer unrelated lint cleanup to its owning legacy modules.
+B13|2026-09-03|T21 first lint gate found type-erased result access, unused import, and Markdown line-width drift.|Mechanical format and typed result boundary; no new invariant.
+B14|2026-09-03|Matplotlib boxplot API in current environment rejects legacy `labels=` keyword.|Use current `tick_labels=` plotting API and retain plot-generation coverage.
+B15|2026-09-03|T21 custom-horizon fixtures omitted newly required near-term gate horizon.|Set gate horizon explicitly in custom-horizon tests; no new invariant.
+B16|2026-09-03|Full-suite rerun reproduced B11's concurrent Pemsa/Xvfb hidden-window timeout in three legacy NEAT tests.|Rerun live Pemsa tests in isolation; no T21 source workaround.

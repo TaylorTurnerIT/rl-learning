@@ -135,6 +135,11 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run dodge-ng-diagnose-actions "$@"
     '';
+    dodge-ng-diagnose-relevance.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-diagnose-relevance "$@"
+    '';
     dodge-ng-teacher.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

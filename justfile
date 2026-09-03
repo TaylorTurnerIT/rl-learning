@@ -140,6 +140,11 @@ dodge-ng-diagnose-actions *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-diagnose-actions {{ options }}
 
 [group("dodge")]
+dodge-ng-diagnose-relevance *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-diagnose-relevance {{ options }}
+
+[group("dodge")]
 dodge-ng-teacher *options:
     @mkdir -p history/dodge/ng/.launch-tmp
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-teacher {{ options }}
