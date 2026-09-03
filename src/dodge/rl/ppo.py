@@ -1102,6 +1102,9 @@ def _evaluate_native_policy(
                     action_indices[lane] = 0
             result = environment.step_batch(action_indices)
             next_boards = _native_board(result)
+            done_lanes = [
+                lane for lane, done in enumerate(result.done) if bool(done)
+            ]
             completed: list[int] = []
             for lane, is_active in enumerate(active):
                 if not is_active:
@@ -1112,10 +1115,14 @@ def _evaluate_native_policy(
                     terminated[lane] = True
                     completed.append(lane)
             boards = np.array(next_boards, dtype=np.float32, copy=True)
-            if completed:
+            # The batch API requires every lane to be live on the next call.
+            # A lane that has already finished the measured episode still
+            # receives masked actions until the other lanes finish, so reset
+            # every completed native lane, not only newly measured lanes.
+            if done_lanes:
                 reset = environment.reset_lanes(
-                    np.asarray(completed, dtype=np.uint32),
-                    np.zeros(len(completed), dtype=np.uint32),
+                    np.asarray(done_lanes, dtype=np.uint32),
+                    np.zeros(len(done_lanes), dtype=np.uint32),
                 )
                 reset_boards = _native_board(reset)
                 for position, lane_value in enumerate(reset.lane_ids.tolist()):

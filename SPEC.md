@@ -45,6 +45,7 @@ V10|Every NG provenance/report JSON artifact is JSON-serializable after path and
 V11|Fixed-action controls evaluate all nine action choices on both manifest partitions and report finite per-action survival distributions.
 V12|P1 comparison runs use the same manifest, interaction budget, evaluation protocol, and architecture; only declared learner/configuration variables differ.
 V13|The locked holdout is absent from all P1 diagnosis and selection decisions; it is reported only after training-side comparison is frozen.
+V14|Native policy evaluation resets every lane reported done, including lanes already excluded from the measured episode, before the next batch step.
 
 §T
 id|status|task|cites
@@ -55,10 +56,11 @@ T4|x|Add NG baseline CLI, package entry points, devenv-backed just recipe, prove
 T5|x|Run Phase 0 native smoke/throughput checks and freeze their evidence without touching legacy artifacts.|V8,V9,C1,C3,C5
 T6|x|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
 T7|x|Implement fixed-action controls and action-advantage reporting across the frozen manifest.|V6,V11,I7
-T8|~|Run two additional current-control learner seeds with the matched P1 budget and compare training-side curves.|V7,V12,V13
-T9|.|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
+T8|x|Run two additional current-control learner seeds with the matched P1 budget and compare training-side curves.|V7,V12,V13
+T9|~|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
 T10|.|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
 
 §B
 id|date|cause|fix
 B1|2026-09-03|NG provenance serialized `Path` fields from a dataclass directly to JSON.|Add an explicit JSON serializer for baseline configuration and enforce V10 with the runner test.
+B2|2026-09-03|Native policy evaluation reset only newly completed lanes, so an already excluded lane could die again and remain done before the next batch step.|Reset every done lane and enforce V14 with a multi-lane evaluator regression test.

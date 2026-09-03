@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -28,6 +29,7 @@ from dodge.rl.ppo import (
     _atomic_torch_save,
     _prepare_runtime_directory,
     compute_gae,
+    evaluate_policy,
     train_ppo,
 )
 
@@ -203,6 +205,70 @@ def test_native_ppo_trainer_collects_batched_board_rollout() -> None:
     assert not episodes
     assert trainer.global_step == 6
     assert all(math.isfinite(value) for value in metrics.values())
+
+
+def test_v14_native_evaluation_resets_inactive_completed_lanes(monkeypatch) -> None:
+    class FakeBatchEnvironment:
+        thresholds = (1, 2, 3)
+
+        def __init__(self, **_: object) -> None:
+            self.steps = [0, 0, 0]
+            self.done = [False, False, False]
+
+        @staticmethod
+        def _result(lanes: list[int], done: list[bool]):
+            return SimpleNamespace(
+                board=np.zeros((len(lanes), *BOARD_SHAPE), dtype=np.float32),
+                done=np.asarray(done, dtype=bool),
+                lane_ids=np.asarray(lanes, dtype=np.uint32),
+                rewards=np.ones(len(lanes), dtype=np.float32),
+            )
+
+        def reset_batch(self, seeds: object):
+            lanes = list(range(3))
+            self.steps = [0, 0, 0]
+            self.done = [False, False, False]
+            return self._result(lanes, self.done)
+
+        def step_batch(self, actions: object):
+            assert not any(self.done)
+            done = []
+            for lane in range(3):
+                self.steps[lane] += 1
+                done.append(self.steps[lane] >= self.thresholds[lane])
+            self.done = done
+            return self._result(list(range(3)), done)
+
+        def reset_lanes(self, lanes: object, seeds: object):
+            values = [int(lane) for lane in lanes]
+            for lane in values:
+                self.steps[lane] = 0
+                self.done[lane] = False
+            return self._result(values, [False] * len(values))
+
+        def close(self) -> None:
+            pass
+
+    class FixedModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+        def forward(self, boards: torch.Tensor):
+            return (
+                torch.zeros((boards.shape[0], 9), device=boards.device),
+                torch.zeros(boards.shape[0], device=boards.device),
+            )
+
+    monkeypatch.setattr("dodge.rl.ppo.NativeBatchEnvironment", FakeBatchEnvironment)
+    result = evaluate_policy(
+        FixedModel(),
+        _config(backend="native", max_episode_steps=10),
+        seeds=(1, 2, 3),
+    )
+
+    assert result.survival_frames == (1, 2, 3)
+    assert result.terminated == (True, True, True)
 
 
 def test_native_ppo_run_records_backend_and_observation_mode(tmp_path: Path) -> None:
