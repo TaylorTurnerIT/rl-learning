@@ -100,12 +100,21 @@
     "legacy_full_suite": "207 passed",
     "native_focused_suite": "18 passed",
     "native_ppo_smoke": "2 passed, 11 deselected",
-    "strict_native_suite": "59 passed",
+    "strict_native_suite": "60 passed",
     "evidence": "context/kits/dodge-native/p7-legacy-regression.json",
-    "evidence_sha256": "1a6f42ea71cef1cef23b303dc80c6fe880648e66fa73e9cd2e3824266498226e"
+    "evidence_sha256": "ab36f0621e81d7c31d34ad774e0a146a158d2cb1a2d0e7904a0b8086d9ade6d6"
   },
   "visual_review": {
     "status": "pending_owner",
+    "comparison_packet": {
+      "status": "pixel_match",
+      "evidence": "context/kits/dodge-native/p7-visual-review.json",
+      "manifest": "src/dodge/runtime/.native-visual-review-20260902/visual-review-manifest.json",
+      "manifest_sha256": "9019bfb4a220fda810920cbca60805094dc269d592d98eeb328d12ba7f34f23a",
+      "frames": 21,
+      "exact_pixel_matches": 21,
+      "different_pixel_count": 0
+    },
     "automated_evidence": {
       "p5_lossless_macroquad_capture": true,
       "capture_payload_bytes": 16384,

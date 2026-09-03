@@ -122,6 +122,25 @@ def test_instrumented_cartridge_full_draw_capture_reads_indexed_pixels() -> None
     assert "if __dodge_done then __dodge_emit_result() end" in result
     assert "__dodge_capture_started=true" in result
 
+    bounded = instrument_cartridge(
+        source,
+        COMMANDS,
+        seed=42,
+        render=True,
+        capture_pixels=True,
+        capture_frame_limit=1,
+    )
+    assert "__dodge_capture_frame_limit=1" in bounded
+    with pytest.raises(ControlInputError, match="capture frame limit must be positive"):
+        instrument_cartridge(
+            source,
+            COMMANDS,
+            seed=42,
+            render=True,
+            capture_pixels=True,
+            capture_frame_limit=0,
+        )
+
     with pytest.raises(ControlInputError, match="pixel capture requires render"):
         instrument_cartridge(source, COMMANDS, seed=42, capture_pixels=True)
 

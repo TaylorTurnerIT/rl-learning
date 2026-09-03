@@ -26,6 +26,15 @@
     "original_command": "devenv shell -- dodge-run",
     "reference_report": "context/kits/dodge-native/p5-acceptance-report.json"
   },
+  "comparison_packet": {
+    "status": "pixel_match",
+    "report": "context/kits/dodge-native/p7-visual-review.json",
+    "manifest": "src/dodge/runtime/.native-visual-review-20260902/visual-review-manifest.json",
+    "manifest_sha256": "9019bfb4a220fda810920cbca60805094dc269d592d98eeb328d12ba7f34f23a",
+    "frames": 21,
+    "exact_pixel_matches": 21,
+    "different_pixel_count": 0
+  },
   "required_owner_action": "Compare representative original and native frames at native resolution, confirm the seven review categories, then record approval or a concrete parity defect in the P7 kit.",
   "next_action": "Project owner performs the side-by-side review; if approved, change P7-T8 to x and update this gate to released. If a difference is found, retain the frame and trace as a new differential reproducer and route it through backprop.",
   "automated_evidence": {

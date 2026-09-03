@@ -150,6 +150,10 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native python scripts/check_native_benchmark.py "$@"
     '';
+    dodge-native-visual-compare.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/visual_compare_native.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

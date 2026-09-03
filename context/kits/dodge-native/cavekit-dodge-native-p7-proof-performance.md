@@ -138,6 +138,7 @@ benchmark statistics, known limitations, and owner signoff.
 | B14 | 2026-09-02 | Removing the temporary local subprocess import from the benchmark checker left its command-version helper without a module import | Add the module-level subprocess import and rerun Ruff |
 | B15 | 2026-09-02 | Adding retained Criterion estimate identity introduced a hash helper before restoring its module import | Import hashlib and rerun the benchmark-checker lint gate |
 | B16 | 2026-09-02 | The first focused native/Pemsa smoke invocation bypassed the `app-test` wrapper and omitted its required X11 library path, causing a false hidden-window timeout | Rerun the focused suite through `app-test`, which owns the project X11 runtime environment |
+| B17 | 2026-09-02 | The first visual comparison wrapper used bare Python, so importing the native differential decoder could not find the project NumPy dependency | Run `dodge-native-visual-compare` through `uv run --extra native` and rerun the exact-pixel packet |
 
 ## Gate
 
@@ -158,8 +159,9 @@ finite Pemsa conformance, visual approval, and performance results are clearly
 separated. Approve release only with no unresolved blocking reproducer.
 
 Current owner gate: `context/kits/dodge-native/p7-owner-gate.json`. Automated
-checks pass, but visual approval is not recorded; release remains blocked until
-the project owner completes the listed side-by-side review.
+checks pass, and `p7-visual-review.json` records an exact-pixel comparison
+packet for the listed categories. Visual approval is not recorded; release
+remains blocked until the project owner completes the side-by-side review.
 
 ### Handoff
 

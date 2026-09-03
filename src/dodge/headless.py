@@ -65,12 +65,18 @@ def instrument_cartridge(
     legacy_mouse_input: bool = False,
     capture_states: bool = False,
     capture_pixels: bool = False,
+    capture_frame_limit: int | None = None,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
     if capture_pixels and not render:
         raise ControlInputError("pixel capture requires render mode")
+    if capture_frame_limit is not None and capture_frame_limit < 1:
+        raise ControlInputError("capture frame limit must be positive")
     capture_frames = capture_states or capture_pixels
+    capture_frame_limit_value = (
+        capture_frame_limit if capture_frame_limit is not None else -1
+    )
 
     init_marker = "function _init()\n"
     gfx_marker = "__gfx__\n"
@@ -301,6 +307,7 @@ __dodge_mouse_y={64 if legacy_mouse_input else 0}
 __dodge_fast_forward={str(not render).lower()}
 __dodge_capture_started=false
 __dodge_last_draw_frame=-1
+__dodge_capture_frame_limit={capture_frame_limit_value}
 __dodge_events=""
 __dodge_done=false
 __dodge_result_emitted=false
@@ -346,6 +353,9 @@ function __dodge_step()
 {transition_tick}
  __dodge_frames+=1
  __dodge_previous_mask=__dodge_mask
+ if __dodge_capture_frame_limit>0 and __dodge_frames>=__dodge_capture_frame_limit then
+  __dodge_finish()
+ end
  if isdead then
   __dodge_finish()
   return

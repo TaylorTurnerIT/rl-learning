@@ -52,7 +52,7 @@
       "name": "native_strict_gate",
       "command": "DODGE_HEADLESS=1 just dodge-native-check",
       "status": "passed",
-      "nextest_passed": 59,
+      "nextest_passed": 60,
       "nextest_failed": 0,
       "nextest_skipped": 0,
       "scope": "pinned rustfmt, locked Clippy, and nextest"
@@ -72,6 +72,12 @@
       "status": "resolved",
       "summary": "A focused run invoked pytest directly and omitted the X11 library path owned by app-test, causing a false hidden-window timeout.",
       "resolution": "The accepted focused and full-suite results use app-test."
+    },
+    {
+      "id": "B17",
+      "status": "resolved",
+      "summary": "The first visual comparison wrapper invoked bare Python and could not import the native NumPy dependency.",
+      "resolution": "The visual comparison wrapper now invokes uv with the native extra, and the packet completes with zero pixel mismatches."
     }
   ],
   "claims_not_made": [

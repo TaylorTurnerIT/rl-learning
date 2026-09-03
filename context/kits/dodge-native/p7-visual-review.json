@@ -1,0 +1,97 @@
+{
+  "phase": "P7",
+  "schema_version": 1,
+  "status": "automated_pixel_match_owner_review_pending",
+  "claim": "The selected original and native framebuffer pixels are identical at the canonical 128x128 indexed-render boundary.",
+  "comparison": {
+    "command": "DODGE_HEADLESS=1 just dodge-native-visual-compare",
+    "manifest": "src/dodge/runtime/.native-visual-review-20260902/visual-review-manifest.json",
+    "manifest_sha256": "9019bfb4a220fda810920cbca60805094dc269d592d98eeb328d12ba7f34f23a",
+    "frame_size": [
+      128,
+      128
+    ],
+    "scale": 4,
+    "columns": [
+      "original_oracle",
+      "native",
+      "diff_match_blue_mismatch_red"
+    ],
+    "frames": 21,
+    "exact_pixel_matches": 21,
+    "different_pixel_count": 0,
+    "selections": [
+      {
+        "name": "menu",
+        "frames": 1,
+        "oracle_trace": "src/dodge/runtime/.native-p7-menu-oracle-20260902.json",
+        "oracle_trace_sha256": "6f9f04c1fc9d6eeda74e5a53da46786d1be0760330b711eb4de19e00913264cc",
+        "native_trace": "src/dodge/runtime/.native-p7-menu-native-20260902.json",
+        "native_trace_sha256": "8d90ca770fb16532c55b4fcf8ebc5090ec4121a31a7e8598a6dc7835525e81e8"
+      },
+      {
+        "name": "gameplay",
+        "frames": 10,
+        "oracle_trace": "src/dodge/runtime/.native-p4-current-oracle-20260902.json",
+        "oracle_trace_sha256": "34cfbc74e508dc775853c42e9e2774307e01d745226d503f4088b2e9344cddc9",
+        "native_trace": "src/dodge/runtime/.native-p4-full-native-f64-20260902.json",
+        "native_trace_sha256": "a433de4999a3f79dad63e2325a6c5f57eb7da25934f81de762a5fe2c2bd68a3c"
+      },
+      {
+        "name": "settings",
+        "frames": 10,
+        "oracle_trace": "src/dodge/runtime/.native-p4-settings-oracle3-20260902.json",
+        "oracle_trace_sha256": "9ae8834664d3c4d4fb599eabce3d49ddb3203a5beb55cf820aeb62d6b0a9a584",
+        "native_trace": "src/dodge/runtime/.native-p4-settings-native-f64-20260902.json",
+        "native_trace_sha256": "322ebc2d85ccb29e18e6516e20f63f81b00c7220905d0e406de092fc3be12eee"
+      }
+    ]
+  },
+  "visual_inspection": {
+    "status": "agent_inspected",
+    "images": [
+      "src/dodge/runtime/.native-visual-review-20260902/menu-frame-0001.png",
+      "src/dodge/runtime/.native-visual-review-20260902/gameplay-frame-0128.png",
+      "src/dodge/runtime/.native-visual-review-20260902/gameplay-frame-0249.png",
+      "src/dodge/runtime/.native-visual-review-20260902/gameplay-frame-0426.png",
+      "src/dodge/runtime/.native-visual-review-20260902/gameplay-frame-0448.png",
+      "src/dodge/runtime/.native-visual-review-20260902/gameplay-frame-0501.png",
+      "src/dodge/runtime/.native-visual-review-20260902/settings-frame-0044.png",
+      "src/dodge/runtime/.native-visual-review-20260902/settings-frame-0056.png",
+      "src/dodge/runtime/.native-visual-review-20260902/settings-frame-0077.png"
+    ],
+    "observations": [
+      "The original and native columns are visually aligned in the inspected menu, transition, settings, gameplay, particle, pattern, and game-over strips.",
+      "Every inspected diff column is the uniform match color; the manifest reports zero mismatching pixels for every selected frame.",
+      "The strips preserve the source's indexed palette and nearest-neighbor pixel edges rather than comparing an interpolated screenshot."
+    ]
+  },
+  "macroquad_capture": {
+    "status": "automated_lossless_capture_match",
+    "capture": "src/dodge/runtime/.native-viewer-smoke-20260902.pgm",
+    "sha256": "c4d7ec304e8be2b388ffab0f7e9255258e1345b4842360242f39b9b994cc0395",
+    "payload_bytes": 16384,
+    "matches_native_pixels": true,
+    "viewer_title": "Dodge Native Viewer",
+    "escape_exit_code": 0
+  },
+  "owner_review": {
+    "status": "pending",
+    "scope": [
+      "menu",
+      "settings",
+      "gameplay",
+      "patterns",
+      "particles",
+      "death",
+      "transitions"
+    ],
+    "note": "The packet provides automated exact-pixel evidence and representative visual inspection. Project-owner approval remains a separate release gate."
+  },
+  "claims_not_made": [
+    "owner visual approval",
+    "full-game mathematical equivalence",
+    "audio waveform parity",
+    "cross-platform floating-point identity"
+  ]
+}

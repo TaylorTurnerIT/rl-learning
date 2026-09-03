@@ -50,14 +50,17 @@ standard-deviation point estimate. Raw results and the accepted budget are in
 ## Regression and visual boundary
 
 The legacy suite passed 207 tests. The focused native/differential suite passed
-18 tests, native PPO smoke passed 2 tests, the strict native suite passed 59
+18 tests, native PPO smoke passed 2 tests, the strict native suite passed 60
 tests, and all 6 Kani harnesses passed. These results are retained in
 `p7-legacy-regression.json`.
 
 Macroquad’s lossless 128 × 128 capture also matched the native indexed pixels.
-Owner review is still required for menu, settings, gameplay, patterns,
-particles, death, and transition presentation. Automated pixel equality is
-evidence for the renderer boundary, not owner approval.
+The retained visual packet `p7-visual-review.json` compares 21 representative
+menu, settings, transition, gameplay, pattern, particle, and death frames;
+all 21 have zero differing indexed pixels. Owner review is still required for
+menu, settings, gameplay, patterns, particles, death, and transition
+presentation. Automated pixel equality is evidence for the renderer boundary,
+not owner approval.
 
 Deferred claims remain audio waveform parity, cross-platform floating-point
 identity, infinite-input proof, and full-game mathematical equivalence.

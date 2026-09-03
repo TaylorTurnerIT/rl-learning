@@ -55,6 +55,7 @@ def run_oracle_trace(
     runner: Runner = subprocess.run,
     start_xvfb: XvfbStarter | None = None,
     timeout: float | None = DEFAULT_TIMEOUT,
+    capture_frame_limit: int | None = None,
 ) -> OracleTrace:
     try:
         original = source.read_text(encoding="utf-8")
@@ -67,6 +68,7 @@ def run_oracle_trace(
             render=True,
             wait_for_game_start=True,
             capture_pixels=True,
+            capture_frame_limit=capture_frame_limit,
         )
     except OSError as error:
         raise ControlRuntimeError(f"could not read oracle input: {error}") from error
@@ -123,6 +125,8 @@ def run_oracle_trace(
         "render": True,
         "wait_for_game_start": True,
     }
+    if capture_frame_limit is not None:
+        scenario["capture_frame_limit"] = capture_frame_limit
     return OracleTrace(
         provenance=provenance,
         scenario=scenario,

@@ -77,6 +77,7 @@ struct Options {
     seed: u32,
     output: Option<PathBuf>,
     max_frames: u32,
+    include_initial_frame: bool,
 }
 
 fn main() {
@@ -106,6 +107,12 @@ fn run() -> Result<(), String> {
     let schedule = expand_schedule(&commands)?;
     let mut game = NativeGame::new(NativeConfig::new(options.seed));
     let mut frames = Vec::new();
+    if options.include_initial_frame && frames.len() < options.max_frames as usize {
+        let result = game
+            .advance_frame_with_post_mask(0, 0)
+            .map_err(|error| format!("native initial frame failed: {error}"))?;
+        frames.push(output_frame(&result));
+    }
     for (simulation_mask, post_frame_mask) in schedule.into_iter().chain(std::iter::repeat((0, 0)))
     {
         if frames.len() >= options.max_frames as usize {
@@ -147,6 +154,7 @@ where
     let mut seed = DEFAULT_SEED;
     let mut output = None;
     let mut max_frames = DEFAULT_MAX_FRAMES;
+    let mut include_initial_frame = false;
     while let Some(argument) = values.next() {
         match argument.as_str() {
             "--commands" => commands = Some(next_value(&mut values, "--commands")?),
@@ -158,6 +166,7 @@ where
                     return Err("--max-frames must be greater than zero".to_owned());
                 }
             }
+            "--include-initial-frame" => include_initial_frame = true,
             "--help" | "-h" => return Err(usage()),
             value => return Err(format!("unknown argument {value}\n{}", usage())),
         }
@@ -168,6 +177,7 @@ where
         seed,
         output,
         max_frames,
+        include_initial_frame,
     })
 }
 
@@ -187,7 +197,7 @@ fn parse_u32(value: &str, name: &str) -> Result<u32, String> {
 }
 
 fn usage() -> String {
-    "usage: dodge-native-runner --commands PATH [--seed N] [--output PATH] [--max-frames N]"
+    "usage: dodge-native-runner --commands PATH [--seed N] [--output PATH] [--max-frames N] [--include-initial-frame]"
         .to_owned()
 }
 
@@ -333,7 +343,8 @@ fn write_output(path: Option<&Path>, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        InputCommand, duration_to_frames, expand_schedule, load_commands, validate_commands,
+        InputCommand, duration_to_frames, expand_schedule, load_commands, parse_options,
+        validate_commands,
     };
     use dodge_core::{BUTTON_X_MASK, NativeConfig, NativeGame};
 
@@ -387,6 +398,17 @@ mod tests {
             );
         }
         assert_eq!(game.lifecycle().frame, 13);
+    }
+
+    #[test]
+    fn initial_frame_option_exposes_the_rendered_menu_boundary() {
+        let options = parse_options([
+            "--commands".to_owned(),
+            "commands.json".to_owned(),
+            "--include-initial-frame".to_owned(),
+        ]);
+        assert!(options.is_ok());
+        assert!(options.is_ok_and(|value| value.include_initial_frame));
     }
 
     #[test]
