@@ -63,6 +63,7 @@ V19|Repeated teacher scoring of the same snapshot/config is byte-for-byte or num
 V20|BC artifacts preserve model/action/board metadata, manifest hash, teacher-data hash, split seeds, normalization/config, per-epoch metrics, and the selected inner checkpoint.
 V21|PPO warm start copies only compatible actor feature/policy weights from BC, resets value and optimizer state, records initialization provenance, and remains resumable under the matched PPO config.
 V22|DAgger rounds append only learner-visited training-seed states with fresh teacher labels, record round/version provenance, and compare rounds only under the frozen BC/PPO evaluation protocol.
+V23|Manifest-bound teacher loading identifies a held-out seed as a holdout violation before the broader non-training-seed violation, preserving an actionable provenance diagnosis.
 
 §T
 id|status|task|cites
@@ -77,7 +78,7 @@ T8|x|Run two additional current-control learner seeds with the matched P1 budget
 T9|x|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
 T10|x|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
 T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions, Python exposure, validation errors, and serial/parallel/nonmutation/determinism tests.|V16,V19,I8,C10
-T12|.|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
+T12|x|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
 T13|.|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
 T14|.|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11
 T15|.|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9
@@ -88,3 +89,5 @@ id|date|cause|fix
 B1|2026-09-03|NG provenance serialized `Path` fields from a dataclass directly to JSON.|Add an explicit JSON serializer for baseline configuration and enforce V10 with the runner test.
 B2|2026-09-03|Native policy evaluation reset only newly completed lanes, so an already excluded lane could die again and remain done before the next batch step.|Reset every done lane and enforce V14 with a multi-lane evaluator regression test.
 B3|2026-09-03|PPO saved the final model over `checkpoint-latest.pt` after recording a stronger inner-validation checkpoint, so the selected model was not preserved.|Write `checkpoint-best.pt`, keep latest as final, and enforce V15 with a two-update checkpoint test.
+B4|2026-09-03|Teacher validation checked the generic non-training set before the specifically forbidden holdout set, hiding the actionable provenance cause.|Check holdout membership first and enforce V23 with the manifest-bound loader test.
+B5|2026-09-03|The cache test counted duplicate positions in one request as cache hits even though they are deduplicated before the single computation.|Count repeated-call reuse as hits and verify the one-miss/one-hit accounting in the cache test.

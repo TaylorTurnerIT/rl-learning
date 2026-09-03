@@ -378,20 +378,17 @@ impl BatchEnvironment {
         let score_snapshot = |bytes: &Vec<u8>| -> Result<[f32; ACTION_COUNT], BatchError> {
             let snapshot = Snapshot::from_canonical_bytes(bytes)?;
             let initial_survival = snapshot.logical_state().survival_frames;
+            let base_game = NativeGame::restore(&snapshot)?;
             Action::ALL.into_iter().enumerate().try_fold(
                 [0.0; ACTION_COUNT],
                 |mut scores, (index, action)| {
-                    let mut game = NativeGame::restore(&snapshot)?;
-                    let mut result = None;
+                    let mut game = base_game.clone();
                     for _ in 0..lookahead_steps {
                         let frame_result = game.step(action, self.config.step_frames)?;
-                        let done = frame_result.done;
-                        result = Some(frame_result);
-                        if done {
+                        if frame_result.done {
                             break;
                         }
                     }
-                    let _ = result;
                     scores[index] = game.survival_frames().saturating_sub(initial_survival) as f32;
                     Ok(scores)
                 },
