@@ -79,8 +79,8 @@ T9|x|Run matched neutral-bonus-off controls across three learner seeds and compa
 T10|x|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
 T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions, Python exposure, validation errors, and serial/parallel/nonmutation/determinism tests.|V16,V19,I8,C10
 T12|x|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
-T13|.|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
-T14|.|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11
+T13|x|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
+T14|~|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11
 T15|.|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9
 T16|.|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
 
@@ -91,3 +91,4 @@ B2|2026-09-03|Native policy evaluation reset only newly completed lanes, so an a
 B3|2026-09-03|PPO saved the final model over `checkpoint-latest.pt` after recording a stronger inner-validation checkpoint, so the selected model was not preserved.|Write `checkpoint-best.pt`, keep latest as final, and enforce V15 with a two-update checkpoint test.
 B4|2026-09-03|Teacher validation checked the generic non-training set before the specifically forbidden holdout set, hiding the actionable provenance cause.|Check holdout membership first and enforce V23 with the manifest-bound loader test.
 B5|2026-09-03|The cache test counted duplicate positions in one request as cache hits even though they are deduplicated before the single computation.|Count repeated-call reuse as hits and verify the one-miss/one-hit accounting in the cache test.
+B6|2026-09-03|New BC/warm-start tests exceeded repository import/line-width lint rules.|Format imports and signatures before next verification gate.

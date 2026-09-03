@@ -44,6 +44,7 @@ dodge-ng-train = "dodge.ng.train:main"
 dodge-ng-report = "dodge.ng.report:main"
 dodge-ng-diagnose-actions = "dodge.ng.diagnostics:main"
 dodge-ng-teacher = "dodge.ng.teacher:main"
+dodge-ng-bc = "dodge.ng.bc:main"
 
 [build-system]
 requires = ["hatchling"]
