@@ -733,7 +733,7 @@ impl NativeGame {
         self.particles.clear();
         self.apply_initial_difficulty();
         self.size_timer = PicoFixed::ZERO;
-        self.player.size = PicoFixed::from_int(4);
+        self.player = PlayerState::new();
         self.freeze_active = false;
         self.freeze_timer = 0;
         self.freeze_rate = PicoFixed::ONE;
@@ -2948,6 +2948,24 @@ mod tests {
         assert_eq!(game.score(), PicoFixed::ZERO);
         assert_eq!(game.survival_frames(), 1);
         assert!(game.enemies().is_empty());
+    }
+
+    #[test]
+    fn v162_retry_resets_player_to_center_and_clears_velocity() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        start_game(&mut game);
+        game.player.x = PicoFixed::from_int(11);
+        game.player.y = PicoFixed::from_int(117);
+        game.player.vx = PicoFixed::from_f32(2.5);
+        game.player.vy = PicoFixed::from_f32(-1.5);
+        game.lifecycle.dead = true;
+        game.can_click = true;
+
+        let retry = game.advance_frame(BUTTON_X_MASK);
+
+        assert!(retry.is_ok());
+        assert!(!game.lifecycle.dead);
+        assert_eq!(game.player, crate::PlayerState::new());
     }
 
     #[test]

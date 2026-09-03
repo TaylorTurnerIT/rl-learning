@@ -60,7 +60,7 @@ standard-deviation point estimate. Raw results and the accepted budget are in
 
 The legacy suite passed 211 tests. The focused native/differential suite passed
 18 tests, native GA loader tests passed 4 tests, native PPO smoke passed 2
-tests, the strict native suite passed 62 tests, and all 6 Kani harnesses
+tests, the strict native suite passed 64 tests, and all 6 Kani harnesses
 passed. These results are retained in
 `p7-legacy-regression.json`.
 

@@ -137,9 +137,9 @@
     "legacy_full_suite": "211 passed",
     "native_focused_suite": "22 passed",
     "native_ppo_smoke": "2 passed, 11 deselected",
-    "strict_native_suite": "62 passed",
+    "strict_native_suite": "64 passed",
     "evidence": "context/kits/dodge-native/p7-legacy-regression.json",
-    "evidence_sha256": "2342c89d82d2d56fc74537cf57149b104f209a42273b8be0d1c03a72b267adb5"
+    "evidence_sha256": "318bdaa8cee6180171d60ac2e7d4976d305e9baf7c017e942df62cc171127df7"
   },
   "visual_review": {
     "status": "pending_owner",

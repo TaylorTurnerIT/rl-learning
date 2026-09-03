@@ -52,7 +52,7 @@
       "name": "native_strict_gate",
       "command": "DODGE_HEADLESS=1 just dodge-native-check",
       "status": "passed",
-      "nextest_passed": 62,
+      "nextest_passed": 64,
       "nextest_failed": 0,
       "nextest_skipped": 0,
       "scope": "pinned rustfmt, locked Clippy, and nextest"

@@ -111,6 +111,10 @@ benchmark statistics, known limitations, and owner signoff.
 - V13: GA replays that reach static patterns preserve source terminal input and
   death behavior, while odd-sized pattern geometry retains its fractional
   midpoint until rasterization.
+- V14: a keyboard retry edge after game over starts the next gameplay frame with
+  the player at the canonical center `(64,64)` and zero velocity, regardless of
+  the terminal position or velocity; the Macroquad viewer accepts `R` as the
+  retry alias.
 
 ### §T TASKS
 
@@ -152,6 +156,7 @@ benchmark statistics, known limitations, and owner signoff.
 | B20 | 2026-09-02 | After the pixel fix, the native replay stayed alive when the source killed the player inside a fully expanded static pattern; native collision handling only checked moving-pattern rectangles | Apply the source `rect.sh==2 or pattern_type==1` death predicate and retain a static-pattern terminal regression |
 | B21 | 2026-09-02 | The terminal native observation cleared the input mask via the scheduled post-frame boundary even though the cartridge exits before advancing to the next command | Preserve the simulation mask in both terminal input slots and assert the terminal observation contract |
 | B22 | 2026-09-02 | The new midpoint regression lived in the nested snapshot test module but did not import the private helper it exercised | Import `lerp_fixed` through the module boundary and rerun the focused core test target |
+| B23 | 2026-09-03 | `restart_gameplay` reset gameplay counters but left the player's terminal position and velocity intact, and the viewer had no `R` retry binding | Reset the complete player state on the retry edge, accept `R` as the viewer's X-button alias, and retain the V14 regression test |
 
 ## Gate
 

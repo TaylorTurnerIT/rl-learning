@@ -151,13 +151,21 @@ fn keyboard_mask() -> u8 {
     if is_key_down(KeyCode::Down) {
         mask |= Button::Down.mask();
     }
-    if is_key_down(KeyCode::X) || is_key_down(KeyCode::Space) {
+    if retry_button_down(
+        is_key_down(KeyCode::R),
+        is_key_down(KeyCode::X),
+        is_key_down(KeyCode::Space),
+    ) {
         mask |= Button::X.mask();
     }
     if is_key_down(KeyCode::Z) {
         mask |= Button::O.mask();
     }
     mask
+}
+
+const fn retry_button_down(r: bool, x: bool, space: bool) -> bool {
+    r || x || space
 }
 
 fn parse_options<I>(arguments: I) -> Result<Options, ViewerError>
@@ -219,4 +227,17 @@ where
 
 const fn usage() -> &'static str {
     "usage: dodge-viewer [--trace PATH] [--frame N] [--capture PATH] [--debug] [--pause] [--seed N]"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_button_down;
+
+    #[test]
+    fn v162_r_key_aliases_retry_button() {
+        assert!(retry_button_down(true, false, false));
+        assert!(retry_button_down(false, true, false));
+        assert!(retry_button_down(false, false, true));
+        assert!(!retry_button_down(false, false, false));
+    }
 }
