@@ -37,10 +37,11 @@ events, and reset behavior. The shared run digest is
 ## Performance
 
 The P7 full-observation regression workload uses 32 lanes, 1,024 lane steps,
-four-frame decisions, full state, and pixels. Its median was 0.6165 seconds
-(1,661 lane-steps/second), within the 0.7860-second P7 limit. Population
-standard deviation was 0.00657 seconds, within the 0.05-second limit. The
-accepted P6 median was 0.6288 seconds, so this run did not regress.
+four-frame decisions, full state, and pixels. Its median was 0.6306 seconds
+(1,624 lane-steps/second), within the 0.7860-second P7 limit. Population
+standard deviation was 0.02675 seconds, within the 0.05-second limit. The
+accepted P6 median was 0.6288 seconds; this sample is slightly slower but
+remains well inside the accepted regression budget.
 
 Criterion retained a 570.675 ms median point estimate and an 18.976 ms
 standard-deviation point estimate. Raw results and the accepted budget are in

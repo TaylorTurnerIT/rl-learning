@@ -115,19 +115,19 @@
       8947767068553823901
     ],
     "durations_seconds": [
-      0.6219831760099623,
-      0.6164871350047179,
-      0.6073759369901381,
-      0.6143616310146172,
-      0.6265795360086486
+      0.6802024469943717,
+      0.630641961004585,
+      0.6377608019975014,
+      0.6030181979876943,
+      0.6124613419815432
     ]
   },
   "repetitions": 5,
   "schema_version": 1,
   "statistics": {
-    "median_seconds": 0.6164871350047179,
-    "population_stddev_seconds": 0.006569736570288671,
-    "throughput_lane_steps_per_second": 1661.0241185197863
+    "median_seconds": 0.630641961004585,
+    "population_stddev_seconds": 0.0267464912629636,
+    "throughput_lane_steps_per_second": 1623.7422552232536
   },
   "status": "within_budget",
   "workload": {

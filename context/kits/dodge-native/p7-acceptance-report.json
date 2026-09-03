@@ -85,15 +85,15 @@
       "board": false
     },
     "p6_baseline_median_seconds": 0.6287918350135442,
-    "p7_median_seconds": 0.6164871350047179,
+    "p7_median_seconds": 0.630641961004585,
     "p7_median_limit_seconds": 0.7859897937669302,
-    "p7_population_stddev_seconds": 0.006569736570288671,
+    "p7_population_stddev_seconds": 0.0267464912629636,
     "p7_population_stddev_limit_seconds": 0.05,
-    "p7_throughput_lane_steps_per_second": 1661.0241185197863,
+    "p7_throughput_lane_steps_per_second": 1623.7422552232536,
     "criterion_median_point_estimate_nanoseconds": 570675244.0,
     "criterion_stddev_point_estimate_nanoseconds": 18976310.07385584,
     "evidence": "context/kits/dodge-native/p7-benchmark-report.json",
-    "evidence_sha256": "486bfadc019effb6e153a0e4b63c30642486e7bda1e9cc5cfb4ddf60b2382b7e"
+    "evidence_sha256": "a0006fb0ef46592afb7e5f578211ccbd425c9ca1ba4a1ebcefef19c0348555e1"
   },
   "legacy_regression": {
     "status": "passed",
