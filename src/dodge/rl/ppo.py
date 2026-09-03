@@ -12,8 +12,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.distributions import Categorical
@@ -26,6 +27,7 @@ from dodge.dataset import (
     TRAINING_SEED_MAX,
 )
 from dodge.imitation.board import BOARD_CHANNELS, BOARD_SHAPE, encode_board
+from dodge.native.batch import NativeBatchEnvironment, NativeBatchResult
 from dodge.neat.bridge import Direction
 from dodge.neat.environment import DodgeEnv, Observation, Transition
 from dodge.neat.state import RawState
@@ -41,6 +43,10 @@ TRAINING_SEEDS = tuple(
     for seed in range(TRAINING_SEED_MAX + 1)
     if seed not in DEVELOPMENT_VALIDATION_SEEDS
 )
+
+PPOBackend = Literal["python", "native"]
+NativeExecution = Literal["serial", "parallel"]
+NativeObservationMode = Literal["board"]
 
 
 class Environment(Protocol):
@@ -78,6 +84,10 @@ class PPOConfig:
     eval_every: int = 10
     seed: int = 42
     device: str = "auto"
+    backend: PPOBackend = "python"
+    native_lanes: int = 32
+    native_execution: NativeExecution = "parallel"
+    observation_mode: NativeObservationMode = "board"
 
     def validate(self) -> None:
         if any(
@@ -114,6 +124,21 @@ class PPOConfig:
             raise ValueError("step frames must be between 3 and 5")
         if self.eval_every < 0:
             raise ValueError("evaluation interval must not be negative")
+        if self.backend not in {"python", "native"}:
+            raise ValueError("backend must be 'python' or 'native'")
+        if self.native_lanes < 1:
+            raise ValueError("native lane count must be positive")
+        if self.native_execution not in {"serial", "parallel"}:
+            raise ValueError("native execution must be 'serial' or 'parallel'")
+        if self.observation_mode != "board":
+            raise ValueError("only the 'board' PPO observation is supported")
+        if self.backend == "native":
+            if self.native_lanes > self.rollout_steps:
+                raise ValueError("native lane count must not exceed rollout steps")
+            if self.rollout_steps % self.native_lanes:
+                raise ValueError(
+                    "native rollout steps must be divisible by native lane count"
+                )
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -340,6 +365,8 @@ class PPOTrainer:
         runtime_directory: Path | None = None,
     ) -> None:
         config.validate()
+        if config.backend != "python":
+            raise ValueError("native PPO configs require NativePPOTrainer")
         self.config = config
         self.device = _resolve_device(config.device)
         _seed_torch(config.seed)
@@ -667,6 +694,229 @@ class PPOTrainer:
         _optimizer_to_device(self.optimizer, self.device)
 
 
+class NativePPOTrainer(PPOTrainer):
+    """PPO trainer using one Rust batch call for every environment horizon."""
+
+    def __init__(
+        self,
+        config: PPOConfig,
+        *,
+        checkpoint: Path | None = None,
+        runtime_directory: Path | None = None,
+    ) -> None:
+        config.validate()
+        if config.backend != "native":
+            raise ValueError("NativePPOTrainer requires backend='native'")
+        self.config = config
+        self.device = _resolve_device(config.device)
+        _seed_torch(config.seed)
+        self.model = DodgeActorCriticCNN().to(self.device)
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(), lr=config.learning_rate, eps=1e-5
+        )
+        self.runtime_directory = runtime_directory
+        self._environment = self._new_environment()
+        self._seed_stream = TrainingSeedStream(config.seed)
+        self._boards: np.ndarray | None = None
+        self._lane_seeds: list[int] = []
+        self._episode_steps: list[int] = []
+        self._episode_survival: list[float] = []
+        self._episode_neutral_actions: list[int] = []
+        self._stability_rewards: list[StabilityReward] = []
+        self.updates_completed = 0
+        self.global_step = 0
+        self.episodes_completed = 0
+        self.environment_errors = 0
+        self.best_validation: dict[str, object] | None = None
+        if checkpoint is not None:
+            self._load_checkpoint(checkpoint)
+
+    def collect_rollout(self) -> tuple[RolloutBatch, tuple[EpisodeSummary, ...]]:
+        observations: list[Tensor] = []
+        actions: list[int] = []
+        old_log_probs: list[float] = []
+        values: list[float] = []
+        rewards: list[float] = []
+        next_values: list[float] = []
+        terminated: list[bool] = []
+        episode_ends: list[bool] = []
+        episodes: list[EpisodeSummary] = []
+        restarts = 0
+        self.model.eval()
+        while len(rewards) < self.config.rollout_steps:
+            self._ensure_lanes()
+            current_boards = self._boards
+            if current_boards is None:
+                raise ControlRuntimeError("native PPO lanes were not initialized")
+            current_tensor = torch.from_numpy(current_boards)
+            with torch.inference_mode():
+                action_tensor, log_prob_tensor, _, value_tensor = (
+                    self.model.get_action_and_value(current_tensor.to(self.device))
+                )
+            action_indices = action_tensor.detach().cpu().numpy().astype(
+                np.uint8, copy=True
+            )
+            try:
+                result = self._environment.step_batch(action_indices)
+            except ControlRuntimeError:
+                self.environment_errors += 1
+                restarts += 1
+                self._restart_native_environment()
+                if restarts > self.config.environment_restarts_per_rollout:
+                    raise
+                continue
+
+            restarts = 0
+            next_boards = _native_board(result)
+            next_tensor = torch.from_numpy(next_boards)
+            with torch.inference_mode():
+                _, next_value_tensor = self.model(next_tensor.to(self.device))
+            ended_lanes: list[int] = []
+            for lane in range(len(self._lane_seeds)):
+                action_index = int(action_indices[lane])
+                action = action_from_index(action_index)
+                survival_reward = float(result.rewards[lane])
+                self._episode_steps[lane] += 1
+                self._episode_survival[lane] += survival_reward
+                self._episode_neutral_actions[lane] += int(action == "neutral")
+                shaped_reward = self._stability_rewards[lane].apply(
+                    survival_reward, action
+                )
+                actual_terminal = bool(result.done[lane])
+                truncated = (
+                    not actual_terminal
+                    and self._episode_steps[lane] >= self.config.max_episode_steps
+                )
+                episode_end = actual_terminal or truncated
+                bootstrap_value = (
+                    0.0 if actual_terminal else float(next_value_tensor[lane].item())
+                )
+
+                observations.append(current_tensor[lane].clone())
+                actions.append(action_index)
+                old_log_probs.append(float(log_prob_tensor[lane].item()))
+                values.append(float(value_tensor[lane].item()))
+                rewards.append(shaped_reward)
+                next_values.append(bootstrap_value)
+                terminated.append(actual_terminal)
+                episode_ends.append(episode_end)
+                if episode_end:
+                    episodes.append(
+                        EpisodeSummary(
+                            seed=self._lane_seeds[lane],
+                            survival_frames=int(
+                                round(self._episode_survival[lane])
+                            ),
+                            steps=self._episode_steps[lane],
+                            neutral_actions=self._episode_neutral_actions[lane],
+                            terminated=actual_terminal,
+                        )
+                    )
+                    self.episodes_completed += 1
+                    ended_lanes.append(lane)
+
+            self.global_step += len(self._lane_seeds)
+            self._boards = np.array(next_boards, dtype=np.float32, copy=True)
+            if ended_lanes:
+                self._reset_lanes(ended_lanes)
+
+        self.model.train()
+        reward_tensor = torch.tensor(rewards, dtype=torch.float32)
+        value_tensor = torch.tensor(values, dtype=torch.float32)
+        next_value_tensor = torch.tensor(next_values, dtype=torch.float32)
+        terminated_tensor = torch.tensor(terminated, dtype=torch.bool)
+        episode_end_tensor = torch.tensor(episode_ends, dtype=torch.bool)
+        advantages, returns = compute_gae(
+            reward_tensor,
+            value_tensor,
+            next_value_tensor,
+            terminated_tensor,
+            episode_end_tensor,
+            gamma=self.config.gamma,
+            gae_lambda=self.config.gae_lambda,
+        )
+        return (
+            RolloutBatch(
+                observations=torch.stack(observations),
+                actions=torch.tensor(actions, dtype=torch.long),
+                old_log_probs=torch.tensor(old_log_probs, dtype=torch.float32),
+                values=value_tensor,
+                rewards=reward_tensor,
+                next_values=next_value_tensor,
+                terminated=terminated_tensor,
+                episode_ends=episode_end_tensor,
+                advantages=advantages,
+                returns=returns,
+            ),
+            tuple(episodes),
+        )
+
+    def pause_environment(self) -> None:
+        self._environment.close()
+        self._boards = None
+
+    def close(self) -> None:
+        self._environment.close()
+
+    def _new_environment(self) -> NativeBatchEnvironment:
+        return NativeBatchEnvironment(
+            step_frames=self.config.step_frames,
+            execution=self.config.native_execution,
+            full_state=False,
+            pixels=False,
+            board=True,
+        )
+
+    def _ensure_lanes(self) -> None:
+        if self._boards is not None:
+            return
+        if self._environment.closed:
+            self._environment = self._new_environment()
+        seeds = [self._seed_stream.next() for _ in range(self.config.native_lanes)]
+        result = self._environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
+        boards = _native_board(result)
+        if result.lane_ids.tolist() != list(range(len(seeds))):
+            raise ControlRuntimeError("native reset returned unexpected lane order")
+        self._boards = np.array(boards, dtype=np.float32, copy=True)
+        self._lane_seeds = seeds
+        self._episode_steps = [0] * len(seeds)
+        self._episode_survival = [0.0] * len(seeds)
+        self._episode_neutral_actions = [0] * len(seeds)
+        self._stability_rewards = [
+            StabilityReward(self.config.neutral_bonus, self.config.stability_bonus_cap)
+            for _ in seeds
+        ]
+
+    def _reset_lanes(self, lanes: Sequence[int]) -> None:
+        seeds = [self._seed_stream.next() for _ in lanes]
+        result = self._environment.reset_lanes(
+            np.asarray(lanes, dtype=np.uint32),
+            np.asarray(seeds, dtype=np.uint32),
+        )
+        boards = _native_board(result)
+        if self._boards is None:
+            raise ControlRuntimeError("native reset lost the active board batch")
+        for position, lane_value in enumerate(result.lane_ids.tolist()):
+            lane = int(lane_value)
+            self._boards[lane] = boards[position]
+            self._lane_seeds[lane] = seeds[position]
+            self._episode_steps[lane] = 0
+            self._episode_survival[lane] = 0.0
+            self._episode_neutral_actions[lane] = 0
+            self._stability_rewards[lane].reset()
+
+    def _restart_native_environment(self) -> None:
+        self._environment.close()
+        self._environment = self._new_environment()
+        self._boards = None
+
+
+def _native_board(result: NativeBatchResult) -> np.ndarray:
+    if result.board is None:
+        raise ControlRuntimeError("native PPO requires board observations")
+    return result.board
+
+
 def _to_cpu(value: object) -> object:
     if isinstance(value, Tensor):
         return value.detach().cpu()
@@ -690,9 +940,17 @@ def _optimizer_to_device(
 
 def _validate_resume_config(stored: Mapping[str, object], current: PPOConfig) -> None:
     current_values = current.to_json()
+    legacy_defaults = {
+        "backend": "python",
+        "native_lanes": 32,
+        "native_execution": "parallel",
+        "observation_mode": "board",
+    }
     mismatches = []
     for key, value in current_values.items():
         if key in {"updates", "device"}:
+            continue
+        if key not in stored and legacy_defaults.get(key) == value:
             continue
         if stored.get(key) != value:
             mismatches.append(key)
@@ -742,6 +1000,8 @@ def evaluate_policy(
 ) -> EvaluationResult:
     if not seeds:
         raise ValueError("evaluation requires at least one seed")
+    if config.backend == "native":
+        return _evaluate_native_policy(model, config, seeds)
     device = next(model.parameters()).device
     survival_frames: list[int] = []
     terminated: list[bool] = []
@@ -779,6 +1039,67 @@ def evaluate_policy(
     return EvaluationResult(tuple(seeds), tuple(survival_frames), tuple(terminated))
 
 
+def _evaluate_native_policy(
+    model: DodgeActorCriticCNN,
+    config: PPOConfig,
+    seeds: Sequence[int],
+) -> EvaluationResult:
+    device = next(model.parameters()).device
+    environment = NativeBatchEnvironment(
+        step_frames=config.step_frames,
+        execution=config.native_execution,
+        full_state=False,
+        pixels=False,
+        board=True,
+    )
+    try:
+        result = environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
+        boards = np.array(_native_board(result), dtype=np.float32, copy=True)
+        active = [True] * len(seeds)
+        survival_frames = [0.0] * len(seeds)
+        terminated = [False] * len(seeds)
+        model.eval()
+        for _ in range(config.max_episode_steps):
+            if not any(active):
+                break
+            board_tensor_value = torch.from_numpy(boards).to(device)
+            with torch.inference_mode():
+                logits, _ = model(board_tensor_value)
+            action_indices = logits.argmax(dim=1).detach().cpu().numpy().astype(
+                np.uint8, copy=True
+            )
+            for lane, is_active in enumerate(active):
+                if not is_active:
+                    action_indices[lane] = 0
+            result = environment.step_batch(action_indices)
+            next_boards = _native_board(result)
+            completed: list[int] = []
+            for lane, is_active in enumerate(active):
+                if not is_active:
+                    continue
+                survival_frames[lane] += float(result.rewards[lane])
+                if bool(result.done[lane]):
+                    active[lane] = False
+                    terminated[lane] = True
+                    completed.append(lane)
+            boards = np.array(next_boards, dtype=np.float32, copy=True)
+            if completed:
+                reset = environment.reset_lanes(
+                    np.asarray(completed, dtype=np.uint32),
+                    np.zeros(len(completed), dtype=np.uint32),
+                )
+                reset_boards = _native_board(reset)
+                for position, lane_value in enumerate(reset.lane_ids.tolist()):
+                    boards[int(lane_value)] = reset_boards[position]
+        return EvaluationResult(
+            tuple(seeds),
+            tuple(int(round(value)) for value in survival_frames),
+            tuple(terminated),
+        )
+    finally:
+        environment.close()
+
+
 def train_ppo(
     config: PPOConfig,
     run_directory: Path,
@@ -802,12 +1123,19 @@ def train_ppo(
     run_directory.mkdir(parents=True, exist_ok=True)
     runtime_directory = run_directory / PPO_RUNTIME_DIRECTORY_NAME
     _prepare_runtime_directory(runtime_directory)
-    trainer = PPOTrainer(
-        config,
-        environment_factory=environment_factory,
-        checkpoint=checkpoint,
-        runtime_directory=runtime_directory,
-    )
+    if config.backend == "native":
+        trainer = NativePPOTrainer(
+            config,
+            checkpoint=checkpoint,
+            runtime_directory=runtime_directory,
+        )
+    else:
+        trainer = PPOTrainer(
+            config,
+            environment_factory=environment_factory,
+            checkpoint=checkpoint,
+            runtime_directory=runtime_directory,
+        )
     metrics_path = run_directory / "metrics.jsonl"
     try:
         _write_run_record(run_directory, config, trainer)
@@ -1064,6 +1392,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-every", type=_nonnegative_int, default=10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
+    parser.add_argument("--backend", choices=("python", "native"), default="python")
+    parser.add_argument("--native-lanes", type=_positive_int, default=32)
+    parser.add_argument(
+        "--native-execution", choices=("serial", "parallel"), default="parallel"
+    )
+    parser.add_argument("--observation-mode", choices=("board",), default="board")
     arguments = parser.parse_args(argv)
     run_directory = arguments.run_dir or _new_run_directory(DEFAULT_RUN_ROOT)
     config = PPOConfig(
@@ -1087,6 +1421,10 @@ def main(argv: list[str] | None = None) -> int:
         eval_every=arguments.eval_every,
         seed=arguments.seed,
         device=arguments.device,
+        backend=arguments.backend,
+        native_lanes=arguments.native_lanes,
+        native_execution=arguments.native_execution,
+        observation_mode=arguments.observation_mode,
     )
     try:
         record = train_ppo(config, run_directory, resume=arguments.resume)

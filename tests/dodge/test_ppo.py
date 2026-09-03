@@ -20,6 +20,7 @@ from dodge.rl.ppo import (
     BOARD_SHAPE,
     TRAINING_SEEDS,
     DodgeActorCriticCNN,
+    NativePPOTrainer,
     PPOConfig,
     PPOTrainer,
     StabilityReward,
@@ -157,6 +158,51 @@ def test_ppo_single_transition_update_has_finite_metrics() -> None:
         trainer.close()
 
     assert all(math.isfinite(value) for value in metrics.values())
+
+
+def test_native_ppo_trainer_collects_batched_board_rollout() -> None:
+    pytest.importorskip("dodge_native")
+    trainer = NativePPOTrainer(
+        _config(
+            backend="native",
+            native_lanes=2,
+            native_execution="serial",
+            rollout_steps=6,
+        )
+    )
+    try:
+        batch, episodes = trainer.collect_rollout()
+        metrics = trainer.update(batch)
+    finally:
+        trainer.close()
+
+    assert batch.observations.shape == (6, *BOARD_SHAPE)
+    assert batch.rewards.tolist() == [4.0] * 6
+    assert not episodes
+    assert trainer.global_step == 6
+    assert all(math.isfinite(value) for value in metrics.values())
+
+
+def test_native_ppo_run_records_backend_and_observation_mode(tmp_path: Path) -> None:
+    pytest.importorskip("dodge_native")
+    run_directory = tmp_path / "native-ppo-run"
+    record = train_ppo(
+        _config(
+            backend="native",
+            native_lanes=2,
+            native_execution="parallel",
+            rollout_steps=2,
+            max_episode_steps=1,
+        ),
+        run_directory,
+        validation_seeds=(1,),
+        evaluation_seeds=(2,),
+    )
+
+    stored = json.loads((run_directory / "run.json").read_text())
+    assert record["updates_completed"] == 1
+    assert stored["config"]["backend"] == "native"
+    assert stored["config"]["observation_mode"] == "board"
 
 
 def test_ppo_run_checkpoints_and_resumes(tmp_path: Path) -> None:

@@ -99,6 +99,10 @@ class NativeBatchEnvironment:
         self._ensure_open()
         return int(self._native.lane_count)
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     def reset_batch(self, seeds: object) -> NativeBatchResult:
         self._ensure_open()
         values = _integer_array(seeds, "seeds", maximum=32_767)
@@ -205,7 +209,7 @@ class NativeDodgeEnv:
         )
 
     def reset(self, seed: int | None = None) -> Observation:
-        if self._batch._closed:
+        if self._batch.closed:
             self._batch = self._new_batch(self._step_frames, self._execution)
         selected_seed = (
             np.random.default_rng().integers(0, 32_768)

@@ -121,6 +121,9 @@ terminal transition, and close-then-reset compatibility behavior.
 V47: native batch import or boundary errors are explicit Python exceptions;
 missing native installation never silently falls back inside a requested
 native backend.
+V48: native PPO records backend, lane count, execution mode, and board
+observation in its config/checkpoint; its rollout preserves the existing
+survival reward, neutral bonus, GAE, and checkpoint interfaces.
 
 §T
 
@@ -147,6 +150,7 @@ T19|x|retune v3 population for viable species at v2-scale evaluation cost|C15,V2
 T20|x|add direct board-CNN PPO trainer, checkpoints, seed-held evaluation, + production CLI|C16,V33,V34,V35,V36,V37,V38,I.py,I.cli
 T21|~|route PPO/Pemsa scratch to durable run root + guard ENOSPC + repair launch runtime|V39,V40,V41,V42,I.py,I.cli
 T22|x|add PyO3/NumPy native batch binding and single-lane compatibility adapter|C17,C18,V43,V45,V46,V47,I.py
+T23|x|add native batched PPO backend with fallback and config/checkpoint metadata|C17,V33,V34,V35,V36,V48,I.py,I.cli
 
 §B
 
