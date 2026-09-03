@@ -11,6 +11,7 @@ from dodge.native.compatibility import (
     build_compatibility_report,
     run_compatibility_report,
 )
+from dodge.native.ga import DatasetEpisode, load_longest_episode
 from dodge.native.manifest import (
     CartridgeManifest,
     FileIdentity,
@@ -25,6 +26,7 @@ __all__ = [
     "accept_p2_bundle",
     "build_p2_acceptance_report",
     "CartridgeManifest",
+    "DatasetEpisode",
     "FileIdentity",
     "IndexedRaster",
     "NativeBatchEnvironment",
@@ -39,6 +41,7 @@ __all__ = [
     "build_compatibility_report",
     "extract_asset_bundle",
     "manifest_for_path",
+    "load_longest_episode",
     "run_compatibility_report",
     "run_oracle_trace",
     "validate_asset_bundle",

@@ -56,7 +56,44 @@
       "evidence": "context/kits/dodge-native/p7-fuzz-report.json",
       "evidence_sha256": "0335959e94d3938328ea58400f767c8c8af83118ba5ecc41e9ef8bb543ef7238"
     },
-    "combined_frames_compared": 3201
+    "ga_sqlite_replay": {
+      "status": "match",
+      "database": "history/dodge/dataset.sqlite3",
+      "database_sha256": "ba76abbd6c1f092fab8c986fa516dbdd722c3028fbcd86f2a71df3705780b445",
+      "selection": "longest replayable episode by stored headless survival_frames, frames, then lowest id",
+      "episodes": [
+        {
+          "id": 4,
+          "seed": 0,
+          "headless_result": {
+            "frames": 2205,
+            "survival_frames": 2178,
+            "score": 17
+          },
+          "full_draw_frames_compared": 371,
+          "full_draw_native_pixel_match": true,
+          "evidence": "context/kits/dodge-native/p7-ga-full-run-report.json",
+          "evidence_sha256": "3a12d6cc3a55b7218322bbe1444f07c3dfe87f221c7d12ff8ec0b3c2ccb0d6dc"
+        },
+        {
+          "id": 113,
+          "seed": 22,
+          "headless_result": {
+            "frames": 1940,
+            "survival_frames": 1913,
+            "score": 17
+          },
+          "full_draw_frames_compared": 562,
+          "full_draw_native_pixel_match": true,
+          "evidence": "context/kits/dodge-native/p7-ga-rendered-pattern-report.json",
+          "evidence_sha256": "5d4e9d609a37c5c9d979f08193893f2f153182c682993c575cb2ea6bff24336c"
+        }
+      ],
+      "full_draw_frames_compared": 933,
+      "all_cases_match": true,
+      "mode_boundary": "headless fast-forward and full-draw execution lengths differ because drawtransition updates source state"
+    },
+    "combined_frames_compared": 4134
   },
   "reproducibility": {
     "status": "reproducible",
@@ -97,12 +134,12 @@
   },
   "legacy_regression": {
     "status": "passed",
-    "legacy_full_suite": "207 passed",
-    "native_focused_suite": "18 passed",
+    "legacy_full_suite": "211 passed",
+    "native_focused_suite": "22 passed",
     "native_ppo_smoke": "2 passed, 11 deselected",
-    "strict_native_suite": "60 passed",
+    "strict_native_suite": "62 passed",
     "evidence": "context/kits/dodge-native/p7-legacy-regression.json",
-    "evidence_sha256": "ab36f0621e81d7c31d34ad774e0a146a158d2cb1a2d0e7904a0b8086d9ade6d6"
+    "evidence_sha256": "2342c89d82d2d56fc74537cf57149b104f209a42273b8be0d1c03a72b267adb5"
   },
   "visual_review": {
     "status": "pending_owner",

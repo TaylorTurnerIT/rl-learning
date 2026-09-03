@@ -24,8 +24,17 @@ retained fuzz corpus has four full-draw fixtures (seeds 3, 17, 41, and 89) and
 1,042 compared frames. Every compared frame matched decoded state, reward,
 termination, events, hashes, and the 128 × 128 palette-index framebuffer.
 
-The combined finite comparison covers 3,201 frames. The fuzz report is
+The P4 and P7 fuzz corpora cover 3,201 frames. The fuzz report is
 `p7-fuzz-report.json`; the P4 report is `p4-acceptance-report.json`.
+
+The read-only GA SQLite gate selected episode 4 as the longest replayable
+record by stored headless survival. Its 2,205-frame no-draw replay reproduced
+the database result, and its 371-frame full-draw native/Pemsa run matched every
+state field and indexed pixel. An explicit episode 113 replay reached the
+static pattern and terminal path: 562 full-draw frames matched exactly. The
+headless and full-draw runs are intentionally separate because the cartridge's
+draw-transition path performs source-side updates. Evidence is retained in
+`p7-ga-full-run-report.json` and `p7-ga-rendered-pattern-report.json`.
 
 ## Reproducibility
 
@@ -49,9 +58,10 @@ standard-deviation point estimate. Raw results and the accepted budget are in
 
 ## Regression and visual boundary
 
-The legacy suite passed 207 tests. The focused native/differential suite passed
-18 tests, native PPO smoke passed 2 tests, the strict native suite passed 60
-tests, and all 6 Kani harnesses passed. These results are retained in
+The legacy suite passed 211 tests. The focused native/differential suite passed
+18 tests, native GA loader tests passed 4 tests, native PPO smoke passed 2
+tests, the strict native suite passed 62 tests, and all 6 Kani harnesses
+passed. These results are retained in
 `p7-legacy-regression.json`.
 
 Macroquad’s lossless 128 × 128 capture also matched the native indexed pixels.

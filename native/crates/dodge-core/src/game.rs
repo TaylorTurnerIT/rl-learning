@@ -467,7 +467,16 @@ impl NativeGame {
         self.render_current_frame();
         let draw_snapshot = self.snapshot();
         self.apply_draw_side_effects(mode_before);
-        self.input.finalize_frame(post_frame_mask);
+        // The cartridge exits from the update loop immediately after death,
+        // before it can advance to the next command. Preserve the terminal
+        // frame's simulation mask in both input slots; ordinary command
+        // boundaries still expose the scheduled post-frame mask.
+        let observed_post_mask = if self.lifecycle.dead {
+            input_mask
+        } else {
+            post_frame_mask
+        };
+        self.input.finalize_frame(observed_post_mask);
         let result = self.result_with_snapshot(
             reward,
             events,
@@ -939,37 +948,41 @@ impl NativeGame {
             let Some(pattern) = self.patterns.get(pattern_index) else {
                 return;
             };
-            if pattern.pattern_type == 1 {
-                for rect in &pattern.rects {
-                    if self
+            // Static patterns kill the player once fully expanded; moving
+            // patterns are lethal throughout their active rectangle, matching
+            // `collisioncheck` in the cartridge.
+            for rect in &pattern.rects {
+                if pattern.pattern_type != 1 && rect.sh != PicoFixed::from_int(2) {
+                    continue;
+                }
+                if self
+                    .player
+                    .x
+                    .sub(PicoFixed::from_int(2))
+                    .add(self.player.size)
+                    > rect.x
+                    && self
                         .player
-                        .x
+                        .y
                         .sub(PicoFixed::from_int(2))
                         .add(self.player.size)
-                        > rect.x
-                        && self
-                            .player
-                            .y
-                            .sub(PicoFixed::from_int(2))
-                            .add(self.player.size)
-                            > rect.y
-                        && self
-                            .player
-                            .x
-                            .add(PicoFixed::from_int(2))
-                            .sub(self.player.size)
-                            < rect.x.add(rect.width).sub(PicoFixed::ONE)
-                        && self
-                            .player
-                            .y
-                            .add(PicoFixed::from_int(2))
-                            .sub(self.player.size)
-                            < rect.y.add(rect.height).sub(PicoFixed::ONE)
-                    {
-                        self.die();
-                        events.push(FrameEvent::Death);
-                        break;
-                    }
+                        > rect.y
+                    && self
+                        .player
+                        .x
+                        .add(PicoFixed::from_int(2))
+                        .sub(self.player.size)
+                        < rect.x.add(rect.width).sub(PicoFixed::ONE)
+                    && self
+                        .player
+                        .y
+                        .add(PicoFixed::from_int(2))
+                        .sub(self.player.size)
+                        < rect.y.add(rect.height).sub(PicoFixed::ONE)
+                {
+                    self.die();
+                    events.push(FrameEvent::Death);
+                    break;
                 }
             }
         }
@@ -2800,7 +2813,7 @@ mod tests {
             PicoFixed::from_int(64),
             PicoFixed::from_int(3),
         ));
-        let result = game.advance_frame(0);
+        let result = game.advance_frame(crate::Button::Right.mask());
         assert_eq!(result.as_ref().map(|value| value.done), Ok(true));
         assert!(game.lifecycle().dead);
         assert!(game.enemies().is_empty());
@@ -2809,6 +2822,61 @@ mod tests {
             result.as_ref().map(|value| value.reward),
             Ok(PicoFixed::ZERO)
         );
+        assert_eq!(
+            result.as_ref().map(|value| value.input_mask),
+            Ok(crate::Button::Right.mask())
+        );
+        assert_eq!(
+            result.as_ref().map(|value| value.previous_input_mask),
+            Ok(crate::Button::Right.mask())
+        );
+    }
+
+    #[test]
+    fn v161_static_pattern_collision_matches_source() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        start_game(&mut game);
+        game.player.x = PicoFixed::from_int(5);
+        game.player.y = PicoFixed::from_int(5);
+        game.patterns = vec![PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::ONE,
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 0,
+            bounce_cap: false,
+            spawn_enabled: false,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
+            counter: 0,
+            timer: PicoFixed::ZERO,
+            rects: vec![PatternRect {
+                x: PicoFixed::ZERO,
+                y: PicoFixed::ZERO,
+                width: PicoFixed::from_int(16),
+                height: PicoFixed::from_int(16),
+                speed: PicoFixed::from_int(12),
+                dx: PicoFixed::ZERO,
+                dy: PicoFixed::ZERO,
+                targets: Vec::new(),
+                target_index: 0,
+                wait: PicoFixed::ZERO,
+                shown: true,
+                sh: PicoFixed::from_int(2),
+                warnings: Vec::new(),
+                collision_done: false,
+                finished: false,
+            }],
+        }];
+        game.active_pattern = Some(0);
+
+        let result = game.advance_frame(0);
+
+        assert_eq!(result.as_ref().map(|value| value.done), Ok(true));
+        assert!(result.is_ok_and(|value| value.events.contains(&FrameEvent::Death)));
+        assert!(game.lifecycle().dead);
     }
 
     #[test]

@@ -154,6 +154,11 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native python scripts/visual_compare_native.py "$@"
     '';
+    dodge-native-ga-visual-compare.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/native_ga_differential.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

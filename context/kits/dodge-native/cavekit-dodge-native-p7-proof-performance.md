@@ -5,7 +5,7 @@ metadata:
   type: project-phase
   phase: P7
   created: "2026-09-01"
-  last_edited: "2026-09-01"
+  last_edited: "2026-09-02"
 ---
 
 # Cavekit: P7 Proof and Performance Hardening
@@ -104,6 +104,13 @@ benchmark statistics, known limitations, and owner signoff.
   call Kani local properties “full-game equivalence.”
 - V11: unresolved parity, proof, fuzz, or benchmark failure blocks release and
   records owner, reproducer, classification, and next action.
+- V12: GA SQLite replay validates the stored no-draw result separately from the
+  full-draw oracle; native/Pemsa comparison runs to the rendered terminal frame
+  over every frame, and incomplete action schedules are rejected or skipped
+  rather than truncated.
+- V13: GA replays that reach static patterns preserve source terminal input and
+  death behavior, while odd-sized pattern geometry retains its fractional
+  midpoint until rasterization.
 
 ### §T TASKS
 
@@ -117,6 +124,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T6 | x | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | x | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
 | P7-T8 | ~ | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
+| P7-T9 | x | Replay a selected GA SQLite episode in no-draw and full-draw modes, comparing native to Pemsa through the rendered terminal frame | V12,V13 |
 
 ### §B BUGS
 
@@ -139,6 +147,11 @@ benchmark statistics, known limitations, and owner signoff.
 | B15 | 2026-09-02 | Adding retained Criterion estimate identity introduced a hash helper before restoring its module import | Import hashlib and rerun the benchmark-checker lint gate |
 | B16 | 2026-09-02 | The first focused native/Pemsa smoke invocation bypassed the `app-test` wrapper and omitted its required X11 library path, causing a false hidden-window timeout | Rerun the focused suite through `app-test`, which owns the project X11 runtime environment |
 | B17 | 2026-09-02 | The first visual comparison wrapper used bare Python, so importing the native differential decoder could not find the project NumPy dependency | Run `dodge-native-visual-compare` through `uv run --extra native` and rerun the exact-pixel packet |
+| B18 | 2026-09-02 | The first GA full-run gate compared a no-draw fast-forward result with a full-draw render result and stopped before native comparison; older episodes can also omit tail genome steps | Keep execution modes separate, skip incomplete database episodes, and compare native against the rendered oracle through its own terminal frame |
+| B19 | 2026-09-02 | The first rendered GA pattern replay found a one-frame pixel mismatch because Rust truncated `x + width / 2` and `y + height / 2` before interpolation, unlike Lua's fractional division | Carry odd rectangle midpoints as Q16.16 values through interpolation and lock the behavior with a raster regression test |
+| B20 | 2026-09-02 | After the pixel fix, the native replay stayed alive when the source killed the player inside a fully expanded static pattern; native collision handling only checked moving-pattern rectangles | Apply the source `rect.sh==2 or pattern_type==1` death predicate and retain a static-pattern terminal regression |
+| B21 | 2026-09-02 | The terminal native observation cleared the input mask via the scheduled post-frame boundary even though the cartridge exits before advancing to the next command | Preserve the simulation mask in both terminal input slots and assert the terminal observation contract |
+| B22 | 2026-09-02 | The new midpoint regression lived in the nested snapshot test module but did not import the private helper it exercised | Import `lerp_fixed` through the module boundary and rerun the focused core test target |
 
 ## Gate
 

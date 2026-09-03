@@ -1032,6 +1032,17 @@ fn render_pattern(
         let height = rounded_coordinate(rect.height);
         let xw = x + width;
         let yh = y + height;
+        // Lua evaluates `x + w / 2` and `y + h / 2` before `line()` gets
+        // integer raster coordinates. Keep the half-pixel for odd-sized
+        // rectangles instead of truncating it with integer division.
+        let half_width = PicoFixed::from_int(width)
+            .div_fixed(PicoFixed::from_int(2))
+            .unwrap_or(PicoFixed::ZERO);
+        let half_height = PicoFixed::from_int(height)
+            .div_fixed(PicoFixed::from_int(2))
+            .unwrap_or(PicoFixed::ZERO);
+        let center_x = PicoFixed::from_int(x).add(half_width);
+        let center_y = PicoFixed::from_int(y).add(half_height);
         if rect.sh < PicoFixed::from_int(2) && pattern.pattern_type == 0 {
             let mut shrink = rect.sh.min(PicoFixed::ONE);
             let mut dotted = true;
@@ -1047,7 +1058,7 @@ fn render_pattern(
                 framebuffer,
                 x,
                 y,
-                lerp_fixed(x, x + width / 2, shrink),
+                lerp_fixed(x, center_x, shrink),
                 y,
                 dotted,
                 render,
@@ -1056,7 +1067,7 @@ fn render_pattern(
                 framebuffer,
                 xw,
                 y,
-                lerp_fixed(xw, x + width / 2, shrink),
+                lerp_fixed(xw, center_x, shrink),
                 y,
                 dotted,
                 render,
@@ -1066,7 +1077,7 @@ fn render_pattern(
                 xw,
                 y,
                 x + width,
-                lerp_fixed(y, y + height / 2, shrink),
+                lerp_fixed(y, center_y, shrink),
                 dotted,
                 render,
             );
@@ -1075,7 +1086,7 @@ fn render_pattern(
                 xw,
                 yh,
                 xw,
-                lerp_fixed(yh, y + height / 2, shrink),
+                lerp_fixed(yh, center_y, shrink),
                 dotted,
                 render,
             );
@@ -1083,7 +1094,7 @@ fn render_pattern(
                 framebuffer,
                 x,
                 yh,
-                lerp_fixed(x, x + width / 2, shrink),
+                lerp_fixed(x, center_x, shrink),
                 y + height,
                 dotted,
                 render,
@@ -1092,7 +1103,7 @@ fn render_pattern(
                 framebuffer,
                 xw,
                 yh,
-                lerp_fixed(xw, x + width / 2, shrink),
+                lerp_fixed(xw, center_x, shrink),
                 y + height,
                 dotted,
                 render,
@@ -1102,7 +1113,7 @@ fn render_pattern(
                 x,
                 y,
                 x,
-                lerp_fixed(y, y + height / 2, shrink),
+                lerp_fixed(y, center_y, shrink),
                 dotted,
                 render,
             );
@@ -1111,7 +1122,7 @@ fn render_pattern(
                 x,
                 yh,
                 x,
-                lerp_fixed(yh, y + height / 2, shrink),
+                lerp_fixed(yh, center_y, shrink),
                 dotted,
                 render,
             );
@@ -1168,9 +1179,8 @@ fn patterned_render_state(render: &RenderState, fill_pattern: u16) -> RenderStat
     patterned
 }
 
-fn lerp_fixed(position: i32, target: i32, percentage: PicoFixed) -> i32 {
+fn lerp_fixed(position: i32, target: PicoFixed, percentage: PicoFixed) -> i32 {
     let start = PicoFixed::from_int(position);
-    let target = PicoFixed::from_int(target);
     coordinate(
         PicoFixed::ONE
             .sub(percentage)
@@ -2027,7 +2037,7 @@ impl<'a> Reader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FRAMEBUFFER_SIZE, IndexedFramebuffer, RenderState, Snapshot};
+    use super::{FRAMEBUFFER_SIZE, IndexedFramebuffer, RenderState, Snapshot, lerp_fixed};
     use crate::{Action, NativeConfig, NativeGame, PicoFixed};
 
     #[test]
@@ -2101,6 +2111,17 @@ mod tests {
         subpixel.clear(12, &render);
         assert_eq!(subpixel.pixel(0, 0), Some(0));
         assert_eq!(subpixel.pixel(127, 127), Some(0));
+    }
+
+    #[test]
+    fn v161_pattern_lerp_preserves_odd_midpoint_before_rasterization() {
+        let midpoint = PicoFixed::from_int(63).add(
+            PicoFixed::from_int(1)
+                .div_fixed(PicoFixed::from_int(2))
+                .unwrap_or(PicoFixed::ZERO),
+        );
+
+        assert_eq!(lerp_fixed(95, midpoint, PicoFixed::from_f32(0.22)), 88);
     }
 
     #[test]

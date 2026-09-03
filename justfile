@@ -77,6 +77,10 @@ dodge-native-visual-compare *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-visual-compare {{ options }}
 
 [group("dodge")]
+dodge-native-ga-visual-compare *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-ga-visual-compare {{ options }}
+
+[group("dodge")]
 dodge-native-extract-assets source output *options:
     devenv -q shell -- dodge-native-extract-assets --source {{ source }} --output {{ output }} {{ options }}
 

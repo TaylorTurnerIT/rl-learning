@@ -23,20 +23,20 @@
       "name": "legacy_full_suite",
       "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q",
       "status": "passed",
-      "passed": 207,
+      "passed": 211,
       "failed": 0,
       "skipped": 0,
-      "duration_seconds": 157.25,
+      "duration_seconds": 99.31,
       "scope": "legacy control, headless, NEAT, PPO, native backend, batch, and differential tests"
     },
     {
       "name": "native_focused_suite",
-      "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q tests/dodge/test_native_backend.py tests/dodge/test_native_batch.py tests/dodge/test_native_differential.py",
+      "command": "DODGE_HEADLESS=1 UV_NO_SYNC=1 devenv -q shell -- app-test -q tests/dodge/test_native_backend.py tests/dodge/test_native_batch.py tests/dodge/test_native_differential.py tests/dodge/test_native_ga.py",
       "status": "passed",
-      "passed": 18,
+      "passed": 22,
       "failed": 0,
       "skipped": 0,
-      "duration_seconds": 9.22
+      "duration_seconds": 9.16
     },
     {
       "name": "native_ppo_smoke",
@@ -52,10 +52,30 @@
       "name": "native_strict_gate",
       "command": "DODGE_HEADLESS=1 just dodge-native-check",
       "status": "passed",
-      "nextest_passed": 60,
+      "nextest_passed": 62,
       "nextest_failed": 0,
       "nextest_skipped": 0,
       "scope": "pinned rustfmt, locked Clippy, and nextest"
+    },
+    {
+      "name": "native_ga_sqlite_longest_replay",
+      "command": "DODGE_HEADLESS=1 just dodge-native-ga-visual-compare",
+      "status": "passed",
+      "episode_id": 4,
+      "headless_frames": 2205,
+      "full_draw_frames_compared": 371,
+      "full_indexed_pixels": true,
+      "evidence": "context/kits/dodge-native/p7-ga-full-run-report.json"
+    },
+    {
+      "name": "native_ga_sqlite_pattern_replay",
+      "command": "DODGE_HEADLESS=1 just dodge-native-ga-visual-compare --episode-id 113",
+      "status": "passed",
+      "episode_id": 113,
+      "headless_frames": 1940,
+      "full_draw_frames_compared": 562,
+      "full_indexed_pixels": true,
+      "evidence": "context/kits/dodge-native/p7-ga-rendered-pattern-report.json"
     },
     {
       "name": "kani_gate",
@@ -78,6 +98,12 @@
       "status": "resolved",
       "summary": "The first visual comparison wrapper invoked bare Python and could not import the native NumPy dependency.",
       "resolution": "The visual comparison wrapper now invokes uv with the native extra, and the packet completes with zero pixel mismatches."
+    },
+    {
+      "id": "B19-B21",
+      "status": "resolved",
+      "summary": "The GA pattern replay found midpoint rasterization, static-pattern death, and terminal-input boundary defects that shorter fixtures did not exercise.",
+      "resolution": "The native renderer and game core now preserve Lua midpoint semantics, apply static-pattern death, and preserve the terminal simulation mask; the retained 562-frame pattern report is exact."
     }
   ],
   "claims_not_made": [

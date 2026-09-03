@@ -1,0 +1,84 @@
+{
+  "claims_not_made": [
+    "infinite-input proof",
+    "full-game mathematical equivalence",
+    "owner visual approval",
+    "headless GA result equals the rendered oracle result"
+  ],
+  "comparison": {
+    "first_mismatch": null,
+    "frames_compared": 371,
+    "full_indexed_pixels": true
+  },
+  "database": {
+    "byte_length": 128999424,
+    "path": "/home/taylor/Projects/rl-learning/history/dodge/dataset.sqlite3",
+    "sha256": "ba76abbd6c1f092fab8c986fa516dbdd722c3028fbcd86f2a71df3705780b445"
+  },
+  "dataset_replay": {
+    "matches_stored_result": true,
+    "mode": "headless_fast_forward_no_draw",
+    "result": {
+      "died": true,
+      "frames": 2205,
+      "score": 17,
+      "seed": 0,
+      "started": true,
+      "survival_frames": 2178
+    }
+  },
+  "episode": {
+    "action_hash": "38db593a3274d47d3faf75a86e4430abce2fd24b5e50f18dc5f5cfa06b7f056f",
+    "id": 4,
+    "seed": 0,
+    "skipped_incomplete_episode_ids": [],
+    "stored_result": {
+      "died": true,
+      "frames": 2205,
+      "score": 17,
+      "seed": 0,
+      "started": true,
+      "survival_frames": 2178
+    }
+  },
+  "mode_boundary": {
+    "note": "The GA result is from no-draw fast-forward execution; the full-draw oracle executes the source draw path, including drawtransition's source-side update.",
+    "status": "different_execution_length"
+  },
+  "native": {
+    "frames": 371,
+    "result": {
+      "done": true,
+      "frames": 371
+    },
+    "runner": {
+      "byte_length": 904376,
+      "path": "/home/taylor/Projects/rl-learning/native/target/release/dodge-native-runner",
+      "sha256": "3fd19055d788b66fa8b223290d33e62b02dbb04cb04594115d8436e82f3d8ace"
+    },
+    "trace_sha256": "f5902e831b9793f13d4c4ef3527c2aa0f7bd35c9a15d7d47a7fc02e89e2f0e6a"
+  },
+  "oracle": {
+    "frames": 371,
+    "matches_stored_result": false,
+    "result": {
+      "died": true,
+      "frames": 371,
+      "score": 1,
+      "seed": 0,
+      "started": true,
+      "survival_frames": 357
+    },
+    "trace_sha256": "338242a8fd53637d69c595a3e82f5985b0e2643d8ad0827ca196c390327ed77b"
+  },
+  "phase": "P7",
+  "schedule": {
+    "command_sha256": "962f995b5e1f3e8dcec54821339995a6f6f248e810dca7ba882d6715f1ad5d2a",
+    "commands": 230,
+    "genome_actions": 225,
+    "recorded_steps": 229
+  },
+  "schema_version": 1,
+  "status": "match",
+  "validation": "sqlite_ga_longest_episode_full_draw"
+}
