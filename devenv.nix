@@ -150,6 +150,11 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native dodge-ng-compare "$@"
     '';
+    dodge-ng-dagger.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-dagger "$@"
+    '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

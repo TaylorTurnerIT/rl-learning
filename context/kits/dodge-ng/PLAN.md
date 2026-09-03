@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-2-warm-start-complete
+  status: phase-2-dagger-in-progress
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -50,6 +50,9 @@ Phase 0 and Phase 1 are implemented under the scoped root
   selects checkpoints on a training-side inner split.
 - [`ng/compare.py`](../../../src/dodge/ng/compare.py) evaluates selected PPO
   checkpoints and writes matched sample-efficiency comparisons.
+- [`ng/dagger.py`](../../../src/dodge/ng/dagger.py) collects states visited by
+  the selected learner, scores them with the native teacher, aggregates them,
+  and retrains BC under the same split protocol.
 - [`imitation/data.py`](../../../src/dodge/imitation/data.py) still loads the
   existing SQLite trajectories for historical experiments; NG does not use it.
 - [`neat/evaluator.py`](../../../src/dodge/neat/evaluator.py) preserves the older

@@ -34,6 +34,7 @@ I9|`src/dodge/ng/teacher.py` owns fresh manifest-scoped planner data, score marg
 I10|`src/dodge/ng/bc.py` owns board BC training, training-seed inner selection, closed-loop evaluation, artifacts, and plots.
 I11|`src/dodge/rl/ppo.py` accepts an actor-only warm start while reinitializing value/optimizer state; `src/dodge/ng/bc.py` owns the compatible bridge.
 I12|`src/dodge/ng/compare.py` owns matched PPO selected-checkpoint evaluation, sample-efficiency deltas, and comparison plots without holdout selection.
+I13|`src/dodge/ng/dagger.py` owns learner-visited training-state collection, fresh counterfactual labels, dataset aggregation, and round BC retraining.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -82,7 +83,7 @@ T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions,
 T12|x|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
 T13|x|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
 T14|x|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11,I12
-T15|.|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9
+T15|~|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9,I13
 T16|.|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
 
 §B
@@ -95,3 +96,4 @@ B5|2026-09-03|The cache test counted duplicate positions in one request as cache
 B6|2026-09-03|New BC/warm-start tests exceeded repository import/line-width lint rules.|Format imports and signatures before next verification gate.
 B7|2026-09-03|Comparison report called an omitted JSON writer and exceeded line width in its Markdown table.|Add atomic comparison JSON write and format table literal before next verification gate.
 B8|2026-09-03|Comparison fixture expected holdout delta with incorrect hardcoded arithmetic.|Derive expected delta from fixture values and keep comparison arithmetic covered.
+B9|2026-09-03|DAgger collector imported unused tensor alias after switching to module-qualified torch calls.|Remove unused import before next verification gate.
