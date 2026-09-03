@@ -1,0 +1,38 @@
+{
+  "phase": "P7",
+  "schema_version": 1,
+  "status": "blocked_release_owner_review_pending",
+  "release_blocked": true,
+  "owner": "project owner",
+  "blocker": {
+    "classification": "external_owner_review_gate",
+    "technical_failure": false,
+    "summary": "Automated pixel/state and Macroquad capture checks pass, but human approval of the presented visuals has not been recorded.",
+    "unresolved_technical_reproducer": null
+  },
+  "review_scope": [
+    "menu",
+    "settings",
+    "gameplay",
+    "patterns",
+    "particles",
+    "death",
+    "transitions"
+  ],
+  "reproducer": {
+    "native_command": "devenv shell -- dodge-native-viewer --trace src/dodge/runtime/.native-p4-full-native-f64-20260902.json --frame 0 --pause --debug --capture /tmp/dodge-native-owner-frame.pgm",
+    "native_trace": "src/dodge/runtime/.native-p4-full-native-f64-20260902.json",
+    "automated_capture": "src/dodge/runtime/.native-viewer-smoke-20260902.pgm",
+    "original_command": "devenv shell -- dodge-run",
+    "reference_report": "context/kits/dodge-native/p5-acceptance-report.json"
+  },
+  "required_owner_action": "Compare representative original and native frames at native resolution, confirm the seven review categories, then record approval or a concrete parity defect in the P7 kit.",
+  "next_action": "Project owner performs the side-by-side review; if approved, change P7-T8 to x and update this gate to released. If a difference is found, retain the frame and trace as a new differential reproducer and route it through backprop.",
+  "automated_evidence": {
+    "acceptance_report": "context/kits/dodge-native/p7-acceptance-report.md",
+    "p4_finite_conformance": "context/kits/dodge-native/p4-acceptance-report.json",
+    "p5_macroquad_capture": "context/kits/dodge-native/p5-acceptance-report.json",
+    "p7_fuzz": "context/kits/dodge-native/p7-fuzz-report.json",
+    "p7_provenance": "context/kits/dodge-native/p7-provenance.json"
+  }
+}

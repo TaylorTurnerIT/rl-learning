@@ -116,7 +116,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T5 | x | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | x | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | x | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
-| P7-T8 | . | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
+| P7-T8 | ~ | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
 
 ### §B BUGS
 
@@ -156,6 +156,10 @@ benchmark statistics, known limitations, and owner signoff.
 Review the final report's wording. Confirm that formal local properties,
 finite Pemsa conformance, visual approval, and performance results are clearly
 separated. Approve release only with no unresolved blocking reproducer.
+
+Current owner gate: `context/kits/dodge-native/p7-owner-gate.json`. Automated
+checks pass, but visual approval is not recorded; release remains blocked until
+the project owner completes the listed side-by-side review.
 
 ### Handoff
 
