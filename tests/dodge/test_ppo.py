@@ -115,6 +115,28 @@ def test_v37_training_seed_stream_excludes_reserved_validation_seeds() -> None:
     assert sampled.isdisjoint(set(range(29_991, 30_001)))
 
 
+def test_explicit_training_seed_stream_is_reproducible_and_scoped() -> None:
+    candidates = (30_100, 30_101, 30_102)
+    first = TrainingSeedStream(42, candidates)
+    second = TrainingSeedStream(42, candidates)
+
+    first_values = [first.next() for _ in range(100)]
+    second_values = [second.next() for _ in range(100)]
+
+    assert first_values == second_values
+    assert set(first_values) <= set(candidates)
+
+
+def test_explicit_training_seed_config_is_json_serializable() -> None:
+    config = _config(
+        training_seeds=(30_100, 30_101),
+        training_seed_manifest="manifest-hash",
+    )
+
+    assert config.to_json()["training_seeds"] == [30_100, 30_101]
+    assert config.to_json()["training_seed_manifest"] == "manifest-hash"
+
+
 def test_v33_gae_resets_at_episode_boundaries_and_bootstraps_truncation() -> None:
     advantages, returns = compute_gae(
         torch.tensor([1.0, 1.0, 1.0]),
@@ -233,6 +255,29 @@ def test_ppo_run_checkpoints_and_resumes(tmp_path: Path) -> None:
 
     assert resumed["updates_completed"] == 2
     assert len((run_directory / "metrics.jsonl").read_text().splitlines()) == 2
+
+
+def test_ppo_run_records_training_side_evaluation(tmp_path: Path) -> None:
+    run_directory = tmp_path / "ppo-run"
+    train_ppo(
+        _config(
+            eval_every=1,
+            training_seeds=(30_100, 30_101),
+            training_seed_manifest="manifest-hash",
+        ),
+        run_directory,
+        environment_factory=FakePPOEnvironment,
+        validation_seeds=(30_100,),
+        training_evaluation_seeds=(30_100, 30_101),
+        evaluation_seeds=(30_102,),
+    )
+
+    metrics = json.loads(
+        (run_directory / "metrics.jsonl").read_text().splitlines()[0]
+    )
+    record = json.loads((run_directory / "run.json").read_text())
+    assert metrics["training_evaluation"]["seeds"] == [30_100, 30_101]
+    assert record["final_training_evaluation"]["seeds"] == [30_100, 30_101]
 
 
 def test_v39_ppo_run_passes_run_scoped_temporary_root(tmp_path: Path) -> None:

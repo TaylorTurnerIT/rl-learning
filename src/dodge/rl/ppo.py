@@ -88,6 +88,8 @@ class PPOConfig:
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
+    training_seeds: tuple[int, ...] = ()
+    training_seed_manifest: str | None = None
 
     def validate(self) -> None:
         if any(
@@ -132,6 +134,20 @@ class PPOConfig:
             raise ValueError("native execution must be 'serial' or 'parallel'")
         if self.observation_mode != "board":
             raise ValueError("only the 'board' PPO observation is supported")
+        if self.training_seed_manifest is not None and not isinstance(
+            self.training_seed_manifest, str
+        ):
+            raise ValueError("training seed manifest must be a string or null")
+        if self.training_seeds:
+            if len(set(self.training_seeds)) != len(self.training_seeds):
+                raise ValueError("training seeds must be unique")
+            if any(
+                isinstance(seed, bool) or not isinstance(seed, int) or seed < 0
+                for seed in self.training_seeds
+            ):
+                raise ValueError("training seeds must be nonnegative integers")
+            if any(seed > 32_767 for seed in self.training_seeds):
+                raise ValueError("training seeds must fit the native seed range")
         if self.backend == "native":
             if self.native_lanes > self.rollout_steps:
                 raise ValueError("native lane count must not exceed rollout steps")
@@ -141,7 +157,9 @@ class PPOConfig:
                 )
 
     def to_json(self) -> dict[str, object]:
-        return asdict(self)
+        value = asdict(self)
+        value["training_seeds"] = list(self.training_seeds)
+        return value
 
 
 class BoardFeatureEncoder(nn.Module):
@@ -340,11 +358,16 @@ class EvaluationResult:
 
 
 class TrainingSeedStream:
-    def __init__(self, seed: int) -> None:
+    def __init__(
+        self, seed: int, candidates: Sequence[int] = TRAINING_SEEDS
+    ) -> None:
         self._random = random.Random(seed)
+        self._candidates = tuple(candidates)
+        if not self._candidates:
+            raise ValueError("training seed candidates must not be empty")
 
     def next(self) -> int:
-        return self._random.choice(TRAINING_SEEDS)
+        return self._random.choice(self._candidates)
 
     def getstate(self) -> object:
         return self._random.getstate()
@@ -381,7 +404,9 @@ class PPOTrainer:
             step_frames=config.step_frames,
             temporary_root=runtime_directory,
         )
-        self._seed_stream = TrainingSeedStream(config.seed)
+        self._seed_stream = TrainingSeedStream(
+            config.seed, config.training_seeds or TRAINING_SEEDS
+        )
         self._observation: Observation | None = None
         self._episode_seed: int | None = None
         self._episode_steps = 0
@@ -716,7 +741,9 @@ class NativePPOTrainer(PPOTrainer):
         )
         self.runtime_directory = runtime_directory
         self._environment = self._new_environment()
-        self._seed_stream = TrainingSeedStream(config.seed)
+        self._seed_stream = TrainingSeedStream(
+            config.seed, config.training_seeds or TRAINING_SEEDS
+        )
         self._boards: np.ndarray | None = None
         self._lane_seeds: list[int] = []
         self._episode_steps: list[int] = []
@@ -945,6 +972,8 @@ def _validate_resume_config(stored: Mapping[str, object], current: PPOConfig) ->
         "native_lanes": 32,
         "native_execution": "parallel",
         "observation_mode": "board",
+        "training_seeds": [],
+        "training_seed_manifest": None,
     }
     mismatches = []
     for key, value in current_values.items():
@@ -1108,6 +1137,7 @@ def train_ppo(
     environment_factory: EnvironmentFactory = DodgeEnv,
     validation_seeds: Sequence[int] = DEVELOPMENT_VALIDATION_SEEDS,
     evaluation_seeds: Sequence[int] = EVALUATION_SEEDS,
+    training_evaluation_seeds: Sequence[int] | None = None,
 ) -> dict[str, object]:
     config.validate()
     if resume:
@@ -1170,6 +1200,15 @@ def train_ppo(
                     temporary_root=runtime_directory,
                 )
                 metrics["validation"] = validation.to_json()
+                if training_evaluation_seeds is not None:
+                    training_evaluation = evaluate_policy(
+                        trainer.model,
+                        config,
+                        training_evaluation_seeds,
+                        environment_factory=environment_factory,
+                        temporary_root=runtime_directory,
+                    )
+                    metrics["training_evaluation"] = training_evaluation.to_json()
                 if (
                     trainer.best_validation is None
                     or validation.mean_survival_frames
@@ -1188,6 +1227,15 @@ def train_ppo(
             environment_factory=environment_factory,
             temporary_root=runtime_directory,
         )
+        final_training_evaluation = None
+        if training_evaluation_seeds is not None:
+            final_training_evaluation = evaluate_policy(
+                trainer.model,
+                config,
+                training_evaluation_seeds,
+                environment_factory=environment_factory,
+                temporary_root=runtime_directory,
+            )
         final_evaluation = evaluate_policy(
             trainer.model,
             config,
@@ -1201,6 +1249,7 @@ def train_ppo(
             config,
             trainer,
             final_validation=final_validation,
+            final_training_evaluation=final_training_evaluation,
             final_evaluation=final_evaluation,
         )
         return record
@@ -1214,6 +1263,7 @@ def _write_run_record(
     trainer: PPOTrainer,
     *,
     final_validation: EvaluationResult | None = None,
+    final_training_evaluation: EvaluationResult | None = None,
     final_evaluation: EvaluationResult | None = None,
 ) -> dict[str, object]:
     record: dict[str, object] = {
@@ -1233,6 +1283,8 @@ def _write_run_record(
     }
     if final_validation is not None:
         record["final_validation"] = final_validation.to_json()
+    if final_training_evaluation is not None:
+        record["final_training_evaluation"] = final_training_evaluation.to_json()
     if final_evaluation is not None:
         record["final_evaluation"] = final_evaluation.to_json()
     _atomic_write_json(run_directory / "run.json", record)
