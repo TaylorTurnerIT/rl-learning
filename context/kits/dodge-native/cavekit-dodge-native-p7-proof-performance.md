@@ -107,7 +107,7 @@ benchmark statistics, known limitations, and owner signoff.
 |----|--------|------|-------|
 | P7-T1 | x | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
 | P7-T2 | x | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
-| P7-T3 | . | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
+| P7-T3 | x | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
 | P7-T4 | . | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
 | P7-T5 | . | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | . | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
@@ -123,6 +123,11 @@ benchmark statistics, known limitations, and owner signoff.
 | B3 | 2026-09-02 | Kani downloaded its bundle but could not invoke the required `nightly-2025-11-21` toolchain because the project devenv had no `rustup` executable | Added `pkgs.rustup` to the project devenv; rerun Kani setup and keep the application channel pinned independently at Rust 1.97.1 |
 | B4 | 2026-09-02 | The Kani proof crate needed the public palette-size contract, but `PALETTE_SIZE` was only re-exported inside the snapshot module | Re-exported `PALETTE_SIZE` from `dodge-core` and reran the native compile gates before proof execution |
 | B5 | 2026-09-02 | The first composed `dodge-native-check` recipe passed `--locked` to `cargo fmt`, which has no Cargo lockfile option | Removed `--locked` from the format invocation and reran the composed format, Clippy, and nextest gate |
+| B6 | 2026-09-02 | The first fuzz run passed the in-memory `OracleTrace.to_json()` tuple values directly to a comparator that expects JSON-decoded lists, producing a false particle-color mismatch | Compare against `json.loads(oracle.canonical_bytes())` so the fuzz path uses the same canonical JSON boundary as the persisted differential tool |
+| B7 | 2026-09-02 | Seed 17 first-pattern fuzzing exposed a fixed-point weighted-selection index using raw Q16.16 units, so every sampled index above zero silently selected no pattern | Convert the floored sample to an integer weighted-list position before checked lookup; retain seed 17 as a regression case and rerun the complete fuzz corpus |
+| B8 | 2026-09-02 | The first focused pattern-selection regression test referenced the private delay constant without importing it into the test module | Import the constant through the module boundary and rerun the focused test before the composed gate |
+| B9 | 2026-09-02 | The corrected selection path and regression import were not yet normalized by rustfmt, so the strict check stopped at its format gate | Run the pinned workspace formatter, then rerun the complete strict check |
+| B10 | 2026-09-02 | The strict Clippy profile applies to test targets and rejected the new regression test's `expect()` call under `clippy::expect_used` | Assert the result is successful and unwrap it through checked control flow with no panic-capable test helper |
 
 ## Gate
 

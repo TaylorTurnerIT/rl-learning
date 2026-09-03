@@ -1536,12 +1536,15 @@ impl NativeGame {
                 }
             }
         }
-        let Some(&selected) = weighted.get(
-            self.rng
-                .rnd(PicoFixed::from_int(weighted.len() as i32))
-                .floor()
-                .raw() as usize,
-        ) else {
+        let selected_position = self
+            .rng
+            .rnd(PicoFixed::from_int(weighted.len() as i32))
+            .floor()
+            .raw()
+            / PicoFixed::ONE.raw();
+        let Some(&selected) =
+            weighted.get(usize::try_from(selected_position).unwrap_or(usize::MAX))
+        else {
             return;
         };
         self.active_pattern = Some(selected);
@@ -2205,7 +2208,7 @@ fn settings_row(cursor: u8) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeGame, pico_cosine, pico_sine};
+    use super::{FrameEvent, INITIAL_PATTERN_DELAY_FRAMES, NativeGame, pico_cosine, pico_sine};
     use crate::{
         Action, AudioEvent, BUTTON_X_MASK, CoreError, EnemyState, Mode, NativeConfig, PatternRect,
         PatternState, PatternTarget, PicoFixed,
@@ -2340,6 +2343,27 @@ mod tests {
             game.enemies().get(4).map(|enemy| enemy.max_size),
             Some(PicoFixed::from_int(5))
         );
+    }
+
+    #[test]
+    fn first_pattern_selection_converts_sample_to_integer_index() {
+        let mut game = NativeGame::new(NativeConfig::new(17));
+        game.lifecycle.mode = Mode::Game;
+        game.lifecycle.game_ready = true;
+        game.lifecycle.started = true;
+        game.should_collide = false;
+        game.enemy_should_collide = false;
+        game.pattern_timer = INITIAL_PATTERN_DELAY_FRAMES - 1;
+
+        let boundary_result = game.advance_frame(0);
+        assert!(boundary_result.is_ok());
+        let Some(boundary) = boundary_result.ok() else {
+            return;
+        };
+
+        assert_eq!(game.lifecycle().frame, 1);
+        assert!(boundary.events.contains(&FrameEvent::PatternActive));
+        assert!(game.snapshot().logical_state().active_pattern.is_some());
     }
 
     #[test]

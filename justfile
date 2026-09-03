@@ -61,6 +61,10 @@ dodge-native-bench *options:
     @DODGE_HEADLESS=1 devenv -q shell -- cargo bench --locked --manifest-path native/Cargo.toml -p dodge-batch --bench batch -- {{ options }}
 
 [group("dodge")]
+dodge-native-fuzz *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-fuzz {{ options }}
+
+[group("dodge")]
 dodge-native-extract-assets source output *options:
     devenv -q shell -- dodge-native-extract-assets --source {{ source }} --output {{ output }} {{ options }}
 

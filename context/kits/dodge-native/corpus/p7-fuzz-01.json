@@ -1,0 +1,18 @@
+{
+  "commands": [
+    {"duration_ms": 50, "move": "x"},
+    {"duration_ms": 125, "move": "down_left"},
+    {"duration_ms": 75, "move": "up_right"},
+    {"duration_ms": 125, "move": "down"},
+    {"duration_ms": 75, "move": "neutral"},
+    {"duration_ms": 125, "move": "right"},
+    {"duration_ms": 75, "move": "left"},
+    {"duration_ms": 125, "move": "up_right"},
+    {"duration_ms": 75, "move": "right"},
+    {"duration_ms": 125, "move": "neutral"},
+    {"duration_ms": 75, "move": "down_right"},
+    {"duration_ms": 125, "move": "up"},
+    {"duration_ms": 75, "move": "left"}
+  ],
+  "seed": 17
+}

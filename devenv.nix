@@ -137,6 +137,11 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native python scripts/benchmark_dodge_native_batch.py "$@"
     '';
+    dodge-native-fuzz.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/native_differential_fuzz.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

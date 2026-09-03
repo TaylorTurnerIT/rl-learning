@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "commands": 13,
+      "first_mismatch": null,
+      "frames_compared": 190,
+      "index": 0,
+      "native_trace_sha256": "b0492b3ce0d4d90fa3d8c5796c2ba9cae0ec0f95eb4e7e5ee1ab7fa98a3e2c27",
+      "oracle_trace_sha256": "388c1afff07daa33e8f1b3de4c96caddffc2da549d69bedb610c9b7f5232f2e4",
+      "path": "context/kits/dodge-native/corpus/p7-fuzz-00.json",
+      "scenario_sha256": "38e7d5d6b287885e6cd5eab11fb83e87b5c8f90a8c718f4012c03ac5611391c8",
+      "seed": 3,
+      "status": "match"
+    },
+    {
+      "commands": 13,
+      "first_mismatch": null,
+      "frames_compared": 480,
+      "index": 1,
+      "native_trace_sha256": "ba9fd8f87837082252bb49c25e55e25f0a57e4ae9d6c2e54c879d337ca12d9ce",
+      "oracle_trace_sha256": "129c2f26ed9272c02ed944a4a044321c7887e38807178d122d4463f5e5553c96",
+      "path": "context/kits/dodge-native/corpus/p7-fuzz-01.json",
+      "scenario_sha256": "114da3979823a1e91054857fd67a1c38cb90e787aab7bebad199900513742ed0",
+      "seed": 17,
+      "status": "match"
+    },
+    {
+      "commands": 13,
+      "first_mismatch": null,
+      "frames_compared": 199,
+      "index": 2,
+      "native_trace_sha256": "cae1b1cbeccb2cbba10529174587e9db4208a383b18b725611f2f12124bd1a75",
+      "oracle_trace_sha256": "38a50e61214860e2b2b588d6cdd2ded3900c90ca05368e8fc301e87e71004fec",
+      "path": "context/kits/dodge-native/corpus/p7-fuzz-02.json",
+      "scenario_sha256": "dffe47e1eb5ed00e716f32709162998d86871fc1039a5dd06ef80eb43f8955db",
+      "seed": 41,
+      "status": "match"
+    },
+    {
+      "commands": 13,
+      "first_mismatch": null,
+      "frames_compared": 173,
+      "index": 3,
+      "native_trace_sha256": "d0a74a6e0e2a8dec241033253502ab9d987fa7df6e358f33d29b5639da5794ee",
+      "oracle_trace_sha256": "c1798d8a1878ded5c970c1adf4e8cedc2cd1de342e2a3fae55b22cb8c743e87b",
+      "path": "context/kits/dodge-native/corpus/p7-fuzz-03.json",
+      "scenario_sha256": "4595da324e73ec283838a98546995a45e767b1cf3de706bf9ae167a4e4dedf99",
+      "seed": 89,
+      "status": "match"
+    }
+  ],
+  "claims_not_made": [
+    "infinite-input proof",
+    "full-game mathematical equivalence",
+    "owner visual approval"
+  ],
+  "generator": {
+    "algorithm": "uint32 LCG: state = state * 1664525 + 1013904223 modulo 2^32",
+    "case_count": 4,
+    "command_count": 13,
+    "durations_ms": [
+      50,
+      75,
+      100,
+      125
+    ],
+    "seeds": [
+      3,
+      17,
+      41,
+      89
+    ]
+  },
+  "host": {
+    "machine": "x86_64",
+    "platform": "Linux-6.18.46-x86_64-with-glibc2.42",
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [GCC 15.3.0]"
+  },
+  "pemsa": {
+    "byte_length": 2192520,
+    "path": "/home/taylor/Projects/rl-learning/src/dodge/runtime/pemsa",
+    "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+  },
+  "phase": "P7",
+  "runner": "native/target/release/dodge-native-runner",
+  "schema_version": 1,
+  "source": {
+    "path": "src/dodge/game/dodge.p8",
+    "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+  },
+  "status": "match"
+}
