@@ -18,6 +18,7 @@ def test_native_batch_returns_owned_arrays_with_documented_contract() -> None:
     reset = environment.reset_batch([42, 13, 27])
 
     assert reset.frames.shape == (3,)
+    np.testing.assert_array_equal(reset.lane_ids, [0, 1, 2])
     assert reset.frames.dtype == np.uint32
     assert reset.rewards.dtype == np.float32
     assert reset.done.dtype == np.bool_
@@ -102,6 +103,7 @@ def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
     seeds = [13, 27, 58, 101]
     serial_reset = serial.reset_batch(seeds)
     parallel_reset = parallel.reset_batch(seeds)
+    np.testing.assert_array_equal(serial_reset.lane_ids, parallel_reset.lane_ids)
 
     for left, right in (
         (serial_reset.frames, parallel_reset.frames),
@@ -117,6 +119,7 @@ def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
         actions = [(step + lane * 3) % 9 for lane in range(len(seeds))]
         serial_step = serial.step_batch(actions)
         parallel_step = parallel.step_batch(actions)
+        np.testing.assert_array_equal(serial_step.lane_ids, parallel_step.lane_ids)
         np.testing.assert_array_equal(serial_step.frames, parallel_step.frames)
         np.testing.assert_array_equal(serial_step.rewards, parallel_step.rewards)
         np.testing.assert_array_equal(serial_step.done, parallel_step.done)
@@ -134,3 +137,20 @@ def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
 
     serial.close()
     parallel.close()
+
+
+def test_per_lane_reset_preserves_other_lane_state() -> None:
+    environment = NativeBatchEnvironment(step_frames=4, board=True)
+    environment.reset_batch([13, 27])
+    environment.step_batch([0, 1])
+
+    reset = environment.reset_lanes([1], [99])
+    np.testing.assert_array_equal(reset.lane_ids, [1])
+    np.testing.assert_array_equal(reset.frames, [13])
+    np.testing.assert_array_equal(reset.seeds, [99])
+
+    mixed = environment.step_batch([0, 0])
+    np.testing.assert_array_equal(mixed.lane_ids, [0, 1])
+    np.testing.assert_array_equal(mixed.frames, [21, 17])
+    np.testing.assert_array_equal(mixed.seeds, [13, 99])
+    environment.close()

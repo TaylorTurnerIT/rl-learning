@@ -49,14 +49,15 @@ cli: `dodge-ppo-train [options]` → resumable direct PPO run + held-out surviva
 file: `history/dodge/ppo/<run>/checkpoint-latest.pt` → atomic PPO model/optimizer/RNG checkpoint.
 py: `DodgeEnv(..., temporary_root: Path|None)` → env with explicit Pemsa scratch root.
 cli: `dodge-ppo-train` → run-scoped durable scratch + free-space preflight.
-py: `NativeBatchEnvironment` → ordered `reset_batch(seeds)` and
-`step_batch(action_indexes)` with optional full-state, pixel, and board arrays;
+py: `NativeBatchEnvironment` → ordered `reset_batch(seeds)`, selective
+`reset_lanes(lanes, seeds)`, and `step_batch(action_indexes)` with optional
+full-state, pixel, and board arrays;
 the native path opens no display or emulator process.
 py: `NativeDodgeEnv` → single-lane `DodgeEnv`-compatible reset/step adapter for
 PPO/NEAT migration and differential tests.
-py: native batch result → contiguous `frames`, `rewards`, `done`, seed/hash,
-event-flag arrays plus optional `(N,128,128)` `uint8`, `(N,19,16,16)` `float32`,
-and canonical snapshot-byte views.
+py: native batch result → contiguous `lane_ids`, `frames`, `rewards`, `done`,
+seed/hash, event-flag arrays plus optional `(N,128,128)` `uint8`,
+`(N,19,16,16)` `float32`, and canonical snapshot-byte views.
 
 §R
 

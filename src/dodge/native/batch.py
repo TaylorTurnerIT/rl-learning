@@ -24,6 +24,7 @@ Execution = Literal["serial", "parallel"]
 class NativeBatchResult:
     """Owned batch arrays returned by the Rust boundary."""
 
+    lane_ids: np.ndarray
     frames: np.ndarray
     frames_advanced: np.ndarray
     rewards: np.ndarray
@@ -102,6 +103,17 @@ class NativeBatchEnvironment:
         self._ensure_open()
         values = _integer_array(seeds, "seeds", maximum=32_767)
         payload = self._native.reset_batch(values)
+        result = _result_from_payload(payload)
+        self._last_result = result
+        return result
+
+    def reset_lanes(self, lanes: object, seeds: object) -> NativeBatchResult:
+        self._ensure_open()
+        lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
+        seed_values = _integer_array(seeds, "seeds", maximum=32_767)
+        if lane_values.shape != seed_values.shape:
+            raise ValueError("lanes and seeds must have the same length")
+        payload = self._native.reset_lanes(lane_values, seed_values)
         result = _result_from_payload(payload)
         self._last_result = result
         return result
@@ -263,6 +275,7 @@ def _result_from_payload(payload: MappingLike) -> NativeBatchResult:
         for value in payload["snapshot_bytes"]
     )
     return NativeBatchResult(
+        lane_ids=_array(payload, "lane_ids"),
         frames=_array(payload, "frames"),
         frames_advanced=_array(payload, "frames_advanced"),
         rewards=_array(payload, "rewards"),
@@ -306,7 +319,7 @@ def _integer_array(value: object, name: str, *, maximum: int) -> np.ndarray:
     values = np.asarray(array, dtype=np.int64)
     if np.any(values < 0) or np.any(values > maximum):
         raise ValueError(f"{name} values must be between 0 and {maximum}")
-    dtype = np.uint32 if name == "seeds" else np.uint8
+    dtype = np.uint32 if name in {"lanes", "seeds"} else np.uint8
     return np.ascontiguousarray(values, dtype=dtype)
 
 

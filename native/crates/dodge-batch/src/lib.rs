@@ -144,6 +144,8 @@ pub enum BatchError {
     InvalidStepFrames(u32),
     EmptyBatch,
     LaneCountMismatch { expected: usize, actual: usize },
+    LaneIndexOutOfBounds { lane: usize, lane_count: usize },
+    DuplicateLane(usize),
     LaneAlreadyDone(usize),
     Core(CoreError),
 }
@@ -162,6 +164,11 @@ impl Display for BatchError {
                 formatter,
                 "batch lane count mismatch: expected {expected}, got {actual}"
             ),
+            Self::LaneIndexOutOfBounds { lane, lane_count } => write!(
+                formatter,
+                "batch lane index {lane} is outside lane count {lane_count}"
+            ),
+            Self::DuplicateLane(lane) => write!(formatter, "batch lane {lane} was repeated"),
             Self::LaneAlreadyDone(lane) => write!(formatter, "batch lane {lane} is complete"),
             Self::Core(error) => Display::fmt(error, formatter),
         }
@@ -245,6 +252,78 @@ impl BatchEnvironment {
             }
             if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
                 *last_survival = state.survival_frames;
+            }
+            observations.push(observation_from_snapshot(
+                lane,
+                0,
+                false,
+                Vec::new(),
+                Vec::new(),
+                &snapshot,
+                self.config.observations,
+            ));
+        }
+        Ok(observations)
+    }
+
+    /// Reset only the requested lanes, preserving every other lane's state.
+    pub fn reset_lanes(
+        &mut self,
+        lanes: &[usize],
+        seeds: &[u32],
+    ) -> Result<Vec<BatchObservation>, BatchError> {
+        if lanes.is_empty() || seeds.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        if lanes.len() != seeds.len() {
+            return Err(BatchError::LaneCountMismatch {
+                expected: lanes.len(),
+                actual: seeds.len(),
+            });
+        }
+        for (position, lane) in lanes.iter().copied().enumerate() {
+            if lane >= self.games.len() {
+                return Err(BatchError::LaneIndexOutOfBounds {
+                    lane,
+                    lane_count: self.games.len(),
+                });
+            }
+            if lanes
+                .iter()
+                .take(position)
+                .any(|candidate| *candidate == lane)
+            {
+                return Err(BatchError::DuplicateLane(lane));
+            }
+        }
+
+        let mut observations = Vec::with_capacity(lanes.len());
+        let lane_count = self.games.len();
+        for (lane, seed) in lanes.iter().copied().zip(seeds.iter().copied()) {
+            let mut config = self.config.native;
+            config.seed = seed;
+            let mut game = NativeGame::new(config);
+            let mut snapshot = game.reset();
+            for _ in 0..START_HOLD_FRAMES {
+                snapshot = game.advance_frame(BUTTON_X_MASK)?.snapshot;
+            }
+            let state = snapshot.logical_state();
+            let game_slot = self
+                .games
+                .get_mut(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            *game_slot = game;
+            if let Some(seed_slot) = self.seeds.get_mut(lane) {
+                *seed_slot = seed;
+            }
+            if let Some(last_frame) = self.last_frames.get_mut(lane) {
+                *last_frame = state.lifecycle.frame;
+            }
+            if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+                *last_survival = state.survival_frames;
+            }
+            if let Some(done) = self.done.get_mut(lane) {
+                *done = false;
             }
             observations.push(observation_from_snapshot(
                 lane,
@@ -545,6 +624,60 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[test]
+    fn reset_lanes_preserves_unselected_lane_progress() {
+        let mut environment = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        environment
+            .reset(&[13, 27])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        environment
+            .step(&[Action::Neutral, Action::Left])
+            .unwrap_or_else(|_| unreachable!("first step should succeed"));
+
+        let reset = environment
+            .reset_lanes(&[1], &[99])
+            .unwrap_or_else(|_| unreachable!("lane reset should succeed"));
+        let reset_observation = reset
+            .first()
+            .unwrap_or_else(|| unreachable!("one lane should be reset"));
+        assert_eq!(reset.len(), 1);
+        assert_eq!(reset_observation.lane, 1);
+        assert_eq!(reset_observation.seed, 99);
+        assert_eq!(reset_observation.frame, 13);
+
+        let mixed = environment
+            .step(&[Action::Neutral, Action::Neutral])
+            .unwrap_or_else(|_| unreachable!("step after lane reset should succeed"));
+        let mixed_lane0 = mixed
+            .first()
+            .unwrap_or_else(|| unreachable!("lane zero result should exist"));
+        let mixed_lane1 = mixed
+            .get(1)
+            .unwrap_or_else(|| unreachable!("lane one result should exist"));
+        assert_eq!(mixed_lane0.seed, 13);
+        assert_eq!(mixed_lane0.frame, 21);
+        assert_eq!(mixed_lane1.seed, 99);
+        assert_eq!(mixed_lane1.frame, 17);
+
+        let mut control = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        control
+            .reset(&[13])
+            .unwrap_or_else(|_| unreachable!("control reset should succeed"));
+        control
+            .step(&[Action::Neutral])
+            .unwrap_or_else(|_| unreachable!("control first step should succeed"));
+        let control_step = control
+            .step(&[Action::Neutral])
+            .unwrap_or_else(|_| unreachable!("control second step should succeed"));
+        let control_observation = control_step
+            .first()
+            .unwrap_or_else(|| unreachable!("control result should exist"));
+        assert_eq!(mixed_lane0.state_hash, control_observation.state_hash);
+        assert_eq!(mixed_lane0.pixel_hash, control_observation.pixel_hash);
     }
 
     #[test]

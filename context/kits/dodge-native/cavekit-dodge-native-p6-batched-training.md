@@ -65,8 +65,8 @@ binding copies these into NumPy arrays with shapes `(N,128,128)` and
 `(N,19,16,16)`.
 
 Python environment → reset(seed), step(action), reset_batch(seeds),
-step_batch(actions), observe_full_state(), observe_pixels(), and
-observe_board_19x16().
+reset_lanes(lanes, seeds), step_batch(actions), observe_full_state(),
+observe_pixels(), and observe_board_19x16().
 
 PPO backend → python fallback or native batch backend; backend selection and
 observation mode recorded in run configuration/checkpoint.
@@ -120,10 +120,10 @@ repetitions, host, toolchain, statistic, throughput, and comparison baseline.
 | id | status | task | cites |
 |----|--------|------|-------|
 | P6-T1 | x | Select and research Python binding boundary; record PyO3/NumPy/maturin decision before coding | R1-R7 |
-| P6-T2 | . | Add native batch crate/API over accepted P4 core with serial lane mode | V1,V3 |
+| P6-T2 | x | Add native batch crate/API over accepted P4 core with serial lane mode | V1,V3 |
 | P6-T3 | x | Add typed full-state, pixel, and derived-board buffer views with shape/dtype tests | V5,V9 |
-| P6-T4 | ~ | Add Python binding and native DodgeEnv compatibility adapter | V4,V6,V8 |
-| P6-T5 | ~ | Add reset_batch/step_batch and compare serial vs parallel lanes | V1,V2,V3 |
+| P6-T4 | x | Add Python binding and native DodgeEnv compatibility adapter | V4,V6,V8 |
+| P6-T5 | x | Add reset_batch/step_batch/selective reset and compare serial vs parallel lanes | V1,V2,V3 |
 | P6-T6 | . | Add PPO native backend, preserve fallback path, and record backend/observation config | V6,V12 |
 | P6-T7 | . | Add forbidden-IPC tests and short deterministic backend comparison | V4,V7,V8,V12 |
 | P6-T8 | . | Run fixed throughput benchmark with full-state and pixels, then pixels-off control | V10,V11 |

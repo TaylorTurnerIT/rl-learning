@@ -95,6 +95,29 @@ impl NativeBatchEnv {
         observations_to_dict(py, observations, self.flags)
     }
 
+    fn reset_lanes<'py>(
+        &mut self,
+        py: Python<'py>,
+        lanes: PyReadonlyArray1<'_, u32>,
+        seeds: PyReadonlyArray1<'_, u32>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let lanes = lanes
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .copied()
+            .map(|lane| lane as usize)
+            .collect::<Vec<_>>();
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_lanes(&lanes, &seeds))
+            .map_err(batch_error)?;
+        observations_to_dict(py, observations, self.flags)
+    }
+
     fn step_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -155,6 +178,7 @@ fn observations_to_dict<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let lane_count = observations.len();
     let frames = observations.iter().map(|value| value.frame).collect();
+    let lane_ids = observations.iter().map(|value| value.lane as u32).collect();
     let frames_advanced = observations
         .iter()
         .map(|value| value.frames_advanced)
@@ -177,6 +201,7 @@ fn observations_to_dict<'py>(
         .collect();
 
     let frames = Array1::from_vec(frames).into_pyarray(py);
+    let lane_ids = Array1::from_vec(lane_ids).into_pyarray(py);
     let frames_advanced = Array1::from_vec(frames_advanced).into_pyarray(py);
     let rewards = Array1::from_vec(rewards).into_pyarray(py);
     let done = Array1::from_vec(done).into_pyarray(py);
@@ -239,6 +264,7 @@ fn observations_to_dict<'py>(
     let result = PyDict::new(py);
     result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
     result.set_item("lane_count", lane_count)?;
+    result.set_item("lane_ids", lane_ids)?;
     result.set_item("frames", frames)?;
     result.set_item("frames_advanced", frames_advanced)?;
     result.set_item("rewards", rewards)?;

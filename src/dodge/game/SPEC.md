@@ -535,3 +535,5 @@ B132|2026-09-02|initial native batch scaffold retained an invalid import, borrow
 B133|2026-09-02|batch reset bookkeeping used direct vector indexing under the workspace no-panic lint profile|V160; replace writes with checked mutable access
 B134|2026-09-02|PyO3 action tests compared `PyErr`, which intentionally has no equality implementation, and retained an unused tuple import|V161; assert successful action values through `Option`/error predicates and remove the import
 B135|2026-09-02|PyO3 `extension-module` linkage omitted `libpython` when Cargo attempted to link a Rust test binary|V161; make extension linkage an explicit feature and reserve it for Maturin builds
+B136|2026-09-02|per-lane reset duplicate detection and regression assertions used direct slicing/indexing under the workspace no-panic lint profile|V160; use iterator-based duplicate detection and checked test access
+B137|2026-09-02|native Python lane IDs passed through the action-index array helper and were narrowed to `uint8`|V161; classify lane IDs with seed-like `uint32` conversion
