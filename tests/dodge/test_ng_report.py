@@ -59,6 +59,7 @@ def test_build_report_validates_splits_and_writes_plots(tmp_path: Path) -> None:
                         "training_evaluation": {"mean_survival_frames": 100.0},
                         "validation": {"mean_survival_frames": 90.0},
                         "rollout_reward": 20.0,
+                        "rollout_neutral_fraction": 0.2,
                         "entropy": 1.0,
                         "policy_loss": 0.1,
                         "value_loss": 0.2,
@@ -71,6 +72,7 @@ def test_build_report_validates_splits_and_writes_plots(tmp_path: Path) -> None:
                         "training_evaluation": {"mean_survival_frames": 110.0},
                         "validation": {"mean_survival_frames": 95.0},
                         "rollout_reward": 22.0,
+                        "rollout_neutral_fraction": 0.8,
                         "entropy": 0.9,
                         "policy_loss": 0.08,
                         "value_loss": 0.18,
@@ -88,6 +90,7 @@ def test_build_report_validates_splits_and_writes_plots(tmp_path: Path) -> None:
     assert isinstance(comparison, dict)
     assert comparison["mean_train_minus_holdout"] == 70.0
     assert report["trend"]["training_mean_survival"]["gain"] == 10.0  # type: ignore[index]
+    assert report["trend"]["rollout_neutral_fraction"]["last_value"] == 0.8  # type: ignore[index]
     assert (run_directory / "REPORT.md").is_file()
     assert (run_directory / "report.json").is_file()
     assert all(

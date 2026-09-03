@@ -90,6 +90,7 @@ def build_report(run_directory: Path, manifest: SeedManifest) -> dict[str, objec
         - float(final_holdout["horizon_completion_fraction"]),
     }
     ng_record = _optional_object(run_directory / "ng-run.json")
+    performance = _performance_summary(run_record, ng_record)
     report: dict[str, object] = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "kind": "dodge_ng_baseline_report",
@@ -115,6 +116,7 @@ def build_report(run_directory: Path, manifest: SeedManifest) -> dict[str, objec
         "comparison": comparison,
         "curves": curves,
         "trend": trend,
+        "performance": performance,
         "plots": list(PLOT_NAMES),
     }
     _write_report_files(run_directory, report)
@@ -150,6 +152,7 @@ def _curves(
         "training_mean_survival": [],
         "inner_validation_mean_survival": [],
         "rollout_reward": [],
+        "rollout_neutral_fraction": [],
         "entropy": [],
         "policy_loss": [],
         "value_loss": [],
@@ -170,6 +173,7 @@ def _curves(
         )
         for name in (
             "rollout_reward",
+            "rollout_neutral_fraction",
             "entropy",
             "policy_loss",
             "value_loss",
@@ -199,7 +203,12 @@ def _trend_summary(
     curves: Mapping[str, Sequence[Mapping[str, float]]],
 ) -> dict[str, object]:
     summary: dict[str, object] = {}
-    for name in ("training_mean_survival", "inner_validation_mean_survival"):
+    for name in (
+        "training_mean_survival",
+        "inner_validation_mean_survival",
+        "rollout_neutral_fraction",
+        "entropy",
+    ):
         points = curves[name]
         if not points:
             continue
@@ -218,6 +227,27 @@ def _trend_summary(
             "best_update": best["update"],
         }
     return summary
+
+
+def _performance_summary(
+    run_record: Mapping[str, object], ng_record: Mapping[str, object] | None
+) -> dict[str, float]:
+    if ng_record is None:
+        return {}
+    wall_seconds = ng_record.get("training_wall_seconds")
+    global_step = run_record.get("global_step")
+    if (
+        isinstance(wall_seconds, (int, float))
+        and not isinstance(wall_seconds, bool)
+        and isinstance(global_step, (int, float))
+        and not isinstance(global_step, bool)
+        and wall_seconds > 0
+    ):
+        return {
+            "training_wall_seconds": float(wall_seconds),
+            "training_transitions_per_second": float(global_step) / wall_seconds,
+        }
+    return {}
 
 
 def _write_report_files(run_directory: Path, report: Mapping[str, object]) -> None:
@@ -341,9 +371,9 @@ def _plot_diagnostics(run_directory: Path, report: Mapping[str, object]) -> None
     curves = _object(report, "curves")
     names = (
         ("rollout_reward", "rollout reward"),
+        ("rollout_neutral_fraction", "neutral action fraction"),
         ("entropy", "policy entropy"),
         ("value_loss", "value loss"),
-        ("approx_kl", "approx KL"),
     )
     figure, axes = plt.subplots(2, 2, figsize=(10, 7), squeeze=False)
     for axis, (key, label) in zip(axes.flat, names, strict=True):
@@ -376,6 +406,7 @@ def _markdown_report(report: Mapping[str, object]) -> str:
     splits = _object(report, "splits")
     comparison = _object(report, "comparison")
     trend = _object(report, "trend")
+    performance = _object(report, "performance")
     provenance = _object(report, "provenance")
     train = _object(splits, "training")
     holdout = _object(splits, "holdout")
@@ -415,6 +446,14 @@ def _markdown_report(report: Mapping[str, object]) -> str:
             f"**{_number(comparison, 'mean_train_minus_holdout'):.1f} frames**.",
             "Train minus holdout p10: "
             f"**{_number(comparison, 'p10_train_minus_holdout'):.1f} frames**.",
+            (
+                "Training wall time: "
+                f"**{_number(performance, 'training_wall_seconds'):.1f}s** "
+                f"({_number(performance, 'training_transitions_per_second'):.1f} "
+                "transitions/s)."
+                if performance
+                else "Training wall time: unavailable."
+            ),
             "",
             "## Learning trend",
             "",
@@ -426,6 +465,10 @@ def _markdown_report(report: Mapping[str, object]) -> str:
     _append_trend_markdown(
         lines, trend, "inner_validation_mean_survival", "Inner validation"
     )
+    _append_scalar_trend_markdown(
+        lines, trend, "rollout_neutral_fraction", "Neutral action fraction", ".1%"
+    )
+    _append_scalar_trend_markdown(lines, trend, "entropy", "Policy entropy", ".3f")
     lines.extend(
         [
             "",
@@ -456,6 +499,27 @@ def _append_trend_markdown(
         f"{_number(value, 'last_value'):.1f} frames "
         f"({_number(value, 'gain'):+.1f}); best {_number(value, 'best_value'):.1f} "
         f"at update {int(_number(value, 'best_update'))}."
+    )
+
+
+def _append_scalar_trend_markdown(
+    lines: list[str],
+    trend: Mapping[str, object],
+    key: str,
+    label: str,
+    format_spec: str,
+) -> None:
+    value = trend.get(key)
+    if not isinstance(value, Mapping):
+        lines.append(f"{label}: no curve recorded.")
+        return
+    first = _number(value, "first_value")
+    last = _number(value, "last_value")
+    best = _number(value, "best_value")
+    lines.append(
+        f"{label}: {format(first, format_spec)} → {format(last, format_spec)} "
+        f"(best {format(best, format_spec)} at update "
+        f"{int(_number(value, 'best_update'))})."
     )
 
 
