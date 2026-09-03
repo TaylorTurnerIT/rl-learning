@@ -1,10 +1,12 @@
-# Dodge NG Phase 0/1 control spec
+# Dodge NG Phase 0/1/2 control spec
 
 §G
 G1|Build a fresh, reproducible NG experiment boundary and run a native board-observation PPO baseline.
 G2|Measure learning on the 70% training partition and expose the untouched 30% partition only as a final generalization check.
 G3|Produce machine-readable provenance, metrics, plots, and a human-readable baseline report.
 G4|Close the board-PPO gate by separating action-credit/evaluator limits from learner-seed variance before Phase 2.
+G5|Use a fresh native counterfactual planner to provide board-action supervision, then test whether BC and BC-to-PPO improve closed-loop learning on unseen NG seeds.
+G6|Give each later learner the same frozen manifest, native interaction budget, and training-side selection boundary so improvements and failures transfer across methods.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -15,6 +17,9 @@ C5|Use the existing native batch environment and board encoder for the hot path;
 C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and the board PPO baseline; pixels, replay, DAgger, gradient actions, and HPO remain later phases.
 C7|Do not alter the native game contract or nested game/NEAT specs as part of this slice.
 C8|Neutral bonus is a controlled ablation, not the assumed cause of policy collapse; diagnosis must also test action advantage and learner-seed variance.
+C9|P2 teacher states, labels, BC validation, DAgger aggregation, and warm-start selection use only manifest training seeds; holdout remains final-report-only.
+C10|Teacher scores simulate every action from the same canonical snapshot with one fixed native config/lookahead and must not mutate the live batch environment.
+C11|A teacher dataset is fresh NG data with manifest/config/provenance metadata; legacy databases, checkpoints, and prior experiment artifacts are never inputs.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -24,6 +29,10 @@ I4|`src/dodge/rl/ppo.py` accepts an optional explicit training-seed tuple and op
 I5|`context/kits/dodge-ng/ng-v1.json` is the committed frozen manifest; run artifacts live under `history/dodge/ng/`.
 I6|NG commands are `dodge-ng-manifest`, `dodge-ng-train`, and `dodge-ng-report`; the training recipe uses the devenv runtime boundary.
 I7|`src/dodge/ng/diagnostics.py` owns fixed-action controls and action-advantage evidence on the frozen manifest.
+I8|`native/crates/dodge-batch` owns deterministic all-action counterfactual scoring from canonical snapshots; `src/dodge/native/batch.py` exposes it without changing lane state.
+I9|`src/dodge/ng/teacher.py` owns fresh manifest-scoped planner data, score margins, dataset validation, and learner-state collection hooks.
+I10|`src/dodge/ng/bc.py` owns board BC training, training-seed inner selection, closed-loop evaluation, artifacts, and plots.
+I11|`src/dodge/rl/ppo.py` accepts an actor-only warm start while reinitializing value/optimizer state; `src/dodge/ng/bc.py` owns the compatible bridge.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -47,6 +56,13 @@ V12|P1 comparison runs use the same manifest, interaction budget, evaluation pro
 V13|The locked holdout is absent from all P1 diagnosis and selection decisions; it is reported only after training-side comparison is frozen.
 V14|Native policy evaluation resets every lane reported done, including lanes already excluded from the measured episode, before the next batch step.
 V15|When inner validation selects a best PPO checkpoint, `checkpoint-best.pt` preserves that model while `checkpoint-latest.pt` remains the final resumable state.
+V16|Counterfactual scoring restores each supplied canonical snapshot independently, evaluates all nine actions for the fixed lookahead, returns finite deterministic scores, and leaves the source batch state unchanged.
+V17|A valid teacher dataset contains only manifest training seeds, board tensors with the documented shape, one finite action/score/margin record per example, and manifest/config/lookahead provenance; legacy inputs are absent.
+V18|Teacher/BC train and inner-validation subsets are disjoint by environment seed and selected before training; holdout seeds never enter data collection, checkpoint selection, or HPO.
+V19|Repeated teacher scoring of the same snapshot/config is byte-for-byte or numerically identical, action ties/margins are explicit, and invalid snapshots/lookaheads fail closed.
+V20|BC artifacts preserve model/action/board metadata, manifest hash, teacher-data hash, split seeds, normalization/config, per-epoch metrics, and the selected inner checkpoint.
+V21|PPO warm start copies only compatible actor feature/policy weights from BC, resets value and optimizer state, records initialization provenance, and remains resumable under the matched PPO config.
+V22|DAgger rounds append only learner-visited training-seed states with fresh teacher labels, record round/version provenance, and compare rounds only under the frozen BC/PPO evaluation protocol.
 
 §T
 id|status|task|cites
@@ -60,6 +76,12 @@ T7|x|Implement fixed-action controls and action-advantage reporting across the f
 T8|x|Run two additional current-control learner seeds with the matched P1 budget and compare training-side curves.|V7,V12,V13
 T9|x|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
 T10|x|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
+T11|x|Add native canonical-snapshot counterfactual scoring for all nine actions, Python exposure, validation errors, and serial/parallel/nonmutation/determinism tests.|V16,V19,I8,C10
+T12|.|Collect fresh native planner demonstrations on training seeds, persist board/action/score/margin data with provenance, and validate legacy exclusion and seed routing.|V17,V18,V19,I9,C9,C11
+T13|.|Train compatible board BC with training-side inner selection, closed-loop evaluation, and metrics/plots/artifacts.|V18,V20,I10
+T14|.|Add actor-only BC-to-PPO initialization, run matched from-scratch/warm-start controls, and report whether sample efficiency/generalization improves.|V21,G5,G6,I11
+T15|.|Implement learner-state DAgger aggregation/retraining and compare rounds only if T14 supplies a viable teacher/learner baseline.|V22,G6,C9
+T16|.|Freeze the P2 method decision from training-side evidence, report final locked holdout comparisons, and select the next pixels/replay/gradient/HPO phase.|V7,V18,V20,V21,V22,G6
 
 §B
 id|date|cause|fix

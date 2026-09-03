@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
@@ -129,6 +130,35 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         return result
+
+    def score_actions(
+        self, snapshots: Sequence[bytes], lookahead_steps: int
+    ) -> np.ndarray:
+        """Score all nine actions from independent canonical snapshots.
+
+        The native scorer restores each snapshot into a private game, so this
+        call never advances the environment's active lanes. Scores are
+        additional survival frames over the fixed native lookahead.
+        """
+        self._ensure_open()
+        if isinstance(lookahead_steps, bool) or lookahead_steps < 1:
+            raise ValueError("lookahead_steps must be a positive integer")
+        values = list(snapshots)
+        if not values or any(
+            not isinstance(value, bytes) or not value for value in values
+        ):
+            raise ValueError("snapshots must be a non-empty sequence of bytes")
+        payload = self._native.score_actions(values, lookahead_steps)
+        scores = payload.get("scores")
+        if not isinstance(scores, np.ndarray):
+            raise ControlRuntimeError("native counterfactual result has no scores")
+        expected_shape = (len(values), len(ACTION_CHOICES))
+        if scores.shape != expected_shape:
+            raise ControlRuntimeError(
+                "native counterfactual scores have unexpected shape: "
+                f"expected {expected_shape}, got {scores.shape}"
+            )
+        return np.asarray(scores, dtype=np.float32)
 
     def observe_full_state(self) -> tuple[NativeSnapshot, ...]:
         self._ensure_open()

@@ -1,11 +1,11 @@
 #![doc = "PyO3/NumPy boundary for batched native Dodge training."]
 
 use dodge_batch::{
-    BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, BatchConfig, BatchEnvironment, BatchError,
-    BatchObservation, ExecutionMode, ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
+    ACTION_COUNT, BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, BatchConfig, BatchEnvironment,
+    BatchError, BatchObservation, ExecutionMode, ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
 };
 use dodge_core::{Action, FrameEvent, Mode};
-use ndarray::{Array1, Array3, Array4};
+use ndarray::{Array1, Array2, Array3, Array4};
 use numpy::{IntoPyArray, PyReadonlyArray1};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -135,6 +135,45 @@ impl NativeBatchEnv {
             .detach(|| self.inner.step(&native_actions))
             .map_err(batch_error)?;
         observations_to_dict(py, observations, self.flags)
+    }
+
+    /// Return survival-frame deltas for every action from each canonical state.
+    /// The live batch is borrowed immutably and is never advanced by scoring.
+    fn score_actions<'py>(
+        &self,
+        py: Python<'py>,
+        snapshots: &Bound<'_, PyList>,
+        lookahead_steps: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let snapshots = snapshots
+            .iter()
+            .map(|value| {
+                let bytes = value.cast::<PyBytes>().map_err(|_| {
+                    PyValueError::new_err(
+                        "counterfactual snapshots must be a non-empty list of bytes",
+                    )
+                })?;
+                Ok(bytes.as_bytes().to_vec())
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let snapshot_count = snapshots.len();
+        let scores = py
+            .detach(|| self.inner.score_actions(&snapshots, lookahead_steps))
+            .map_err(batch_error)?;
+        let values = scores
+            .into_iter()
+            .flat_map(|row| row.into_iter())
+            .collect::<Vec<_>>();
+        let scores = Array2::from_shape_vec((snapshot_count, ACTION_COUNT), values)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+            .into_pyarray(py);
+        let result = PyDict::new(py);
+        result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
+        result.set_item("snapshot_count", snapshot_count)?;
+        result.set_item("action_count", ACTION_COUNT)?;
+        result.set_item("lookahead_steps", lookahead_steps)?;
+        result.set_item("scores", scores)?;
+        Ok(result)
     }
 }
 

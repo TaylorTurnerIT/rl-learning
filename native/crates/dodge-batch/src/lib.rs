@@ -17,6 +17,7 @@ const START_HOLD_FRAMES: usize = 13;
 pub const PIXEL_WIDTH: usize = dodge_core::FRAMEBUFFER_WIDTH;
 pub const PIXEL_HEIGHT: usize = dodge_core::FRAMEBUFFER_HEIGHT;
 pub const PIXEL_VALUES: usize = FRAMEBUFFER_SIZE;
+pub const ACTION_COUNT: usize = Action::ALL.len();
 
 /// Selects whether independent environment lanes execute serially or with Rayon.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -142,7 +143,9 @@ impl BatchObservation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BatchError {
     InvalidStepFrames(u32),
+    InvalidLookaheadSteps(u32),
     EmptyBatch,
+    EmptySnapshots,
     LaneCountMismatch { expected: usize, actual: usize },
     LaneIndexOutOfBounds { lane: usize, lane_count: usize },
     DuplicateLane(usize),
@@ -159,7 +162,16 @@ impl Display for BatchError {
                     "batch step_frames must be between 3 and 5: {frames}"
                 )
             }
+            Self::InvalidLookaheadSteps(steps) => {
+                write!(
+                    formatter,
+                    "counterfactual lookahead must be positive: {steps}"
+                )
+            }
             Self::EmptyBatch => formatter.write_str("batch must contain at least one lane"),
+            Self::EmptySnapshots => {
+                formatter.write_str("counterfactual scoring requires at least one snapshot")
+            }
             Self::LaneCountMismatch { expected, actual } => write!(
                 formatter,
                 "batch lane count mismatch: expected {expected}, got {actual}"
@@ -343,6 +355,52 @@ impl BatchEnvironment {
         match self.config.execution {
             ExecutionMode::Serial => self.step_serial(actions),
             ExecutionMode::Parallel => self.step_parallel(actions),
+        }
+    }
+
+    /// Score every action from each supplied canonical state independently.
+    ///
+    /// This method intentionally borrows the live batch immutably. Each
+    /// counterfactual restores its own `NativeGame`, so scoring cannot advance,
+    /// reset, or otherwise mutate any active training lane.
+    pub fn score_actions(
+        &self,
+        snapshots: &[Vec<u8>],
+        lookahead_steps: u32,
+    ) -> Result<Vec<[f32; ACTION_COUNT]>, BatchError> {
+        if snapshots.is_empty() {
+            return Err(BatchError::EmptySnapshots);
+        }
+        if lookahead_steps == 0 {
+            return Err(BatchError::InvalidLookaheadSteps(lookahead_steps));
+        }
+
+        let score_snapshot = |bytes: &Vec<u8>| -> Result<[f32; ACTION_COUNT], BatchError> {
+            let snapshot = Snapshot::from_canonical_bytes(bytes)?;
+            let initial_survival = snapshot.logical_state().survival_frames;
+            Action::ALL.into_iter().enumerate().try_fold(
+                [0.0; ACTION_COUNT],
+                |mut scores, (index, action)| {
+                    let mut game = NativeGame::restore(&snapshot)?;
+                    let mut result = None;
+                    for _ in 0..lookahead_steps {
+                        let frame_result = game.step(action, self.config.step_frames)?;
+                        let done = frame_result.done;
+                        result = Some(frame_result);
+                        if done {
+                            break;
+                        }
+                    }
+                    let _ = result;
+                    scores[index] = game.survival_frames().saturating_sub(initial_survival) as f32;
+                    Ok(scores)
+                },
+            )
+        };
+
+        match self.config.execution {
+            ExecutionMode::Serial => snapshots.iter().map(score_snapshot).collect(),
+            ExecutionMode::Parallel => snapshots.par_iter().map(score_snapshot).collect(),
         }
     }
 
@@ -742,5 +800,98 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("owned snapshot should decode"));
         assert_eq!(restored.state_hash(), observation.state_hash);
         assert_eq!(restored.pixel_hash(), observation.pixel_hash);
+    }
+
+    #[test]
+    fn counterfactual_scores_are_repeatable_and_do_not_mutate_live_lanes() {
+        let mut environment = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        environment
+            .reset(&[42])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        let before = environment
+            .step(&[Action::Neutral])
+            .unwrap_or_else(|_| unreachable!("step should succeed"));
+        let snapshot = before
+            .first()
+            .and_then(|observation| observation.canonical_snapshot.clone())
+            .unwrap_or_else(|| unreachable!("full snapshot should be present"));
+
+        let first = environment
+            .score_actions(std::slice::from_ref(&snapshot), 8)
+            .unwrap_or_else(|_| unreachable!("counterfactual scoring should succeed"));
+        let second = environment
+            .score_actions(std::slice::from_ref(&snapshot), 8)
+            .unwrap_or_else(|_| unreachable!("counterfactual scoring should repeat"));
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].len(), Action::ALL.len());
+        assert!(first[0].iter().all(|score| score.is_finite()));
+
+        let after = environment
+            .step(&[Action::Left])
+            .unwrap_or_else(|_| unreachable!("live lane should remain usable"));
+        let mut control = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        control
+            .reset(&[42])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        control
+            .step(&[Action::Neutral])
+            .unwrap_or_else(|_| unreachable!("step should succeed"));
+        let control_after = control
+            .step(&[Action::Left])
+            .unwrap_or_else(|_| unreachable!("control step should succeed"));
+        assert_eq!(after, control_after);
+    }
+
+    #[test]
+    fn counterfactual_serial_and_parallel_scores_match() {
+        let snapshot = {
+            let mut environment = BatchEnvironment::new(configured(ExecutionMode::Serial))
+                .unwrap_or_else(|_| unreachable!("valid batch config"));
+            environment
+                .reset(&[13, 27])
+                .unwrap_or_else(|_| unreachable!("reset should succeed"))
+                .into_iter()
+                .map(|observation| {
+                    observation
+                        .canonical_snapshot
+                        .unwrap_or_else(|| unreachable!("full snapshot should be present"))
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut serial = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        let mut parallel = BatchEnvironment::new(configured(ExecutionMode::Parallel))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        serial
+            .reset(&[13, 27])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        parallel
+            .reset(&[13, 27])
+            .unwrap_or_else(|_| unreachable!("reset should succeed"));
+        assert_eq!(
+            serial
+                .score_actions(&snapshot, 8)
+                .unwrap_or_else(|_| unreachable!("serial scoring should succeed")),
+            parallel
+                .score_actions(&snapshot, 8)
+                .unwrap_or_else(|_| unreachable!("parallel scoring should succeed"))
+        );
+    }
+
+    #[test]
+    fn counterfactual_scoring_rejects_empty_and_zero_lookahead() {
+        let environment = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        assert_eq!(
+            environment.score_actions(&[], 1),
+            Err(super::BatchError::EmptySnapshots)
+        );
+        assert_eq!(
+            environment.score_actions(&[vec![0]], 0),
+            Err(super::BatchError::InvalidLookaheadSteps(0))
+        );
     }
 }

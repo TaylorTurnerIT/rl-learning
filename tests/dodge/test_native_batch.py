@@ -154,3 +154,46 @@ def test_per_lane_reset_preserves_other_lane_state() -> None:
     np.testing.assert_array_equal(mixed.frames, [21, 17])
     np.testing.assert_array_equal(mixed.seeds, [13, 99])
     environment.close()
+
+
+def test_counterfactual_scores_are_deterministic_and_non_mutating() -> None:
+    environment = NativeBatchEnvironment(
+        step_frames=4,
+        execution="parallel",
+        full_state=True,
+        board=True,
+    )
+    environment.reset_batch([42, 13])
+    before = environment.step_batch([0, 1])
+    snapshots = [value for value in before.snapshot_bytes if value is not None]
+
+    first = environment.score_actions(snapshots, lookahead_steps=8)
+    second = environment.score_actions(snapshots, lookahead_steps=8)
+    np.testing.assert_array_equal(first, second)
+    assert first.shape == (2, 9)
+    assert first.dtype == np.float32
+    assert np.isfinite(first).all()
+
+    after = environment.step_batch([2, 3])
+    control = NativeBatchEnvironment(step_frames=4, full_state=True, board=True)
+    control.reset_batch([42, 13])
+    control.step_batch([0, 1])
+    expected = control.step_batch([2, 3])
+    np.testing.assert_array_equal(after.state_hashes, expected.state_hashes)
+    np.testing.assert_array_equal(after.pixel_hashes, expected.pixel_hashes)
+    environment.close()
+    control.close()
+
+
+def test_counterfactual_scores_validate_inputs() -> None:
+    environment = NativeBatchEnvironment(step_frames=4, full_state=True, board=True)
+    environment.reset_batch([42])
+    snapshot = environment.last_result.snapshot_bytes[0]
+    assert snapshot is not None
+    with pytest.raises(ValueError, match="positive"):
+        environment.score_actions([snapshot], lookahead_steps=0)
+    with pytest.raises(ValueError, match="non-empty"):
+        environment.score_actions([], lookahead_steps=8)
+    with pytest.raises(ValueError, match="bytes"):
+        environment.score_actions(["not-bytes"], lookahead_steps=8)  # type: ignore[list-item]
+    environment.close()
