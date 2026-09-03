@@ -124,6 +124,10 @@ native backend.
 V48: native PPO records backend, lane count, execution mode, and board
 observation in its config/checkpoint; its rollout preserves the existing
 survival reward, neutral bonus, GAE, and checkpoint interfaces.
+V49: the accepted native core reset boundary is frame 13; the current live
+Pemsa step bridge reports its first ready counter at frame 26, so migration
+comparison records the +13 startup-counter offset and compares relative
+state, action, reward, and terminal trajectories explicitly.
 
 §T
 
@@ -190,3 +194,5 @@ B32|2026-08-22|v3 population doubled evaluation cost without clear early gain|C1
 B33|2026-08-28|GAE test omitted nonterminal next-value bootstrap from expected advantage|V33
 B34|2026-08-28|PPO bridge inherited shared 2GiB `/tmp`; launch OSError dropped path/context; run failed at update 50|V39,V40,V41
 B35|2026-08-28|PPO recipe bypassed devenv SDL library wrapper; xdotool could not load `libXext.so.6`; live tests timed out|V42
+B36|2026-09-02|native/Pemsa live comparison was first invoked without the devenv X11 library wrapper and timed out during hidden-window discovery|V42; rerun through `app-test` or the explicit SDL2/libX11/libXext runtime path
+B37|2026-09-02|native/Pemsa short-trajectory test assumed identical absolute startup counters although the accepted core and live step bridge use frame 13 and frame 26|V49; assert the documented offset and compare relative state/action/reward progression
