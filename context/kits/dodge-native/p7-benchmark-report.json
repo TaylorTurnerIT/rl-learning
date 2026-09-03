@@ -1,0 +1,145 @@
+{
+  "budget": {
+    "baseline": {
+      "durations_seconds": [
+        0.6307040319952648,
+        0.6287918350135442,
+        0.5919747879961506,
+        0.6524385210068431,
+        0.6167208550032228
+      ],
+      "median_seconds": 0.6287918350135442,
+      "path": {
+        "byte_length": 2366,
+        "path": "context/kits/dodge-native/p6-benchmark-raw.json",
+        "sha256": "5548d6a91ab161ea8b74fe3429706049cf349880c30f6a2b141c3dd27a8174f2"
+      },
+      "population_stddev_seconds": 0.01977460984599619
+    },
+    "median_limit_seconds": 0.7859897937669302,
+    "median_multiplier": 1.25,
+    "median_within_budget": true,
+    "stddev_floor_seconds": 0.05,
+    "stddev_limit_seconds": 0.05,
+    "stddev_multiplier": 2.0,
+    "stddev_within_budget": true
+  },
+  "claims_not_made": [
+    "benchmark equivalence across different hosts",
+    "mathematical proof of full-game equivalence"
+  ],
+  "phase": "P7",
+  "provenance": {
+    "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+    "criterion": {
+      "estimates": {
+        "mean": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 574124086.02,
+            "upper_bound": 581495808.51
+          },
+          "point_estimate": 577626069.05,
+          "standard_error": 1891238.901225054
+        },
+        "median": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 569333101.0,
+            "upper_bound": 575084623.0
+          },
+          "point_estimate": 570675244.0,
+          "standard_error": 1386764.3860249228
+        },
+        "median_abs_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 7462317.073917389,
+            "upper_bound": 14717244.357016683
+          },
+          "point_estimate": 11216553.020766377,
+          "standard_error": 1965963.3313969495
+        },
+        "slope": null,
+        "std_dev": {
+          "confidence_interval": {
+            "confidence_level": 0.95,
+            "lower_bound": 13517486.780174524,
+            "upper_bound": 23890998.613599803
+          },
+          "point_estimate": 18976310.07385584,
+          "standard_error": 2649304.965866641
+        }
+      },
+      "path": "native/target/criterion/batch_full_state_pixels/new/estimates.json",
+      "sha256": "6cc6b7de5e7ccf579106bbcff2d831ab9b6ca1f6528d2fc92dd9b8fc629c6bff"
+    },
+    "host": {
+      "machine": "x86_64",
+      "platform": "Linux-6.18.46-x86_64-with-glibc2.42"
+    },
+    "native_cargo_lock": {
+      "byte_length": 28161,
+      "path": "native/Cargo.lock",
+      "sha256": "5ef04e8ecf565e5e595bd8a5d94d3caedd0a1f8e40534f225de99c0e171f455a"
+    },
+    "pemsa": {
+      "byte_length": 2192520,
+      "path": "src/dodge/runtime/pemsa",
+      "sha256": "19823433dd0fa75568207408d09646960113858a43c159930388b7bf62b259e4"
+    },
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [GCC 15.3.0]",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14) (built from a source tarball)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 21.1.8",
+    "source": {
+      "path": "src/dodge/game/dodge.p8",
+      "section_sha256": {
+        "gfx": "aa7ae8dbbe94f9c9af0f6428394c94482fc4e4753172bec06f17b89b1fb5912f",
+        "lua": "f83abb74e63c6ad0751278545492d0992bca3cfc08ba2463e5207a1ea5ace920",
+        "music": "ef4a5e2d770a5d9558548e78af19ee6941452f5e96a1aec66710c919346a8009",
+        "sfx": "7349c01463d35b3506e7003e83f7a6e7665752ddc9c722a4f98531080d529bc4"
+      },
+      "sha256": "7453a9658fd32577385ad72672a54ad84ff70567fadbde75ba6634aa5cc684a3"
+    },
+    "uv_lock": {
+      "byte_length": 414307,
+      "path": "uv.lock",
+      "sha256": "dc78c23f89bd2c284a146f3fc14da12071ae26f8504645d8c8b036f6137aba02"
+    }
+  },
+  "raw": {
+    "digest_per_repetition": [
+      15060826238599898208,
+      8807524489051515608,
+      279880676931742872,
+      2097848209100260031,
+      8947767068553823901
+    ],
+    "durations_seconds": [
+      0.6219831760099623,
+      0.6164871350047179,
+      0.6073759369901381,
+      0.6143616310146172,
+      0.6265795360086486
+    ]
+  },
+  "repetitions": 5,
+  "schema_version": 1,
+  "statistics": {
+    "median_seconds": 0.6164871350047179,
+    "population_stddev_seconds": 0.006569736570288671,
+    "throughput_lane_steps_per_second": 1661.0241185197863
+  },
+  "status": "within_budget",
+  "workload": {
+    "action_schedule": "global_decision_index modulo nine",
+    "batch_steps": 32,
+    "lane_count": 32,
+    "lane_steps": 1024,
+    "observation_payload": {
+      "board": false,
+      "full_state": true,
+      "pixels": true
+    },
+    "step_frames": 4
+  }
+}

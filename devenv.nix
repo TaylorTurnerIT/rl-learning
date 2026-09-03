@@ -146,6 +146,10 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native python scripts/record_native_provenance.py "$@"
     '';
+    dodge-native-regression-bench.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native python scripts/check_native_benchmark.py "$@"
+    '';
   };
 
   # Shell hook executed when entering devenv shell

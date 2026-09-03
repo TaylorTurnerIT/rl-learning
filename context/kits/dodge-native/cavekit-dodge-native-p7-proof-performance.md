@@ -45,6 +45,10 @@ protection with no claim stronger than the evidence.
   reviewed, and covered by a proof/test boundary.
 - Performance evidence retains workload, host, toolchain, repetitions, raw
   results, statistic, and budget.
+- The P7 full-observation regression budget is at most 1.25× the accepted P6
+  median and at most 2× the accepted P6 population standard deviation, with a
+  0.05-second minimum variance limit; changing this budget requires a reviewed
+  amendment.
 
 ### §I INTERFACES
 
@@ -109,7 +113,7 @@ benchmark statistics, known limitations, and owner signoff.
 | P7-T2 | x | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
 | P7-T3 | x | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
 | P7-T4 | x | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
-| P7-T5 | . | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
+| P7-T5 | x | Add full-state + pixel benchmark regression and raw evidence retention | V8 |
 | P7-T6 | . | Run legacy Python/Pemsa/NEAT/PPO regression and native backend smoke tests | V9 |
 | P7-T7 | . | Write evidence report separating proof, conformance, visual review, and performance claims | V10,V11 |
 | P7-T8 | . | Obtain owner signoff or record blocked release with reproducer and next action | V11 |
@@ -130,6 +134,9 @@ benchmark statistics, known limitations, and owner signoff.
 | B10 | 2026-09-02 | The strict Clippy profile applies to test targets and rejected the new regression test's `expect()` call under `clippy::expect_used` | Assert the result is successful and unwrap it through checked control flow with no panic-capable test helper |
 | B11 | 2026-09-02 | The first P7-T4 Python lint pass found provenance line-width violations and a missing `NativeBatchEnvironment` test import | Wrap the provenance strings, use checked candidate selection, and import/type the native batch result in the reproducibility test |
 | B12 | 2026-09-02 | The P7-T4 Ruff format check found one new list-comprehension wrapping issue and three legacy shapes in the touched native-backend test | Run the pinned Ruff formatter on the two touched Python files, then rerun Ruff checks |
+| B13 | 2026-09-02 | The first P7-T5 benchmark checker lint pass found an unused hash import and two line-width violations | Remove the unused import and apply the pinned Ruff wrapping before executing the benchmark |
+| B14 | 2026-09-02 | Removing the temporary local subprocess import from the benchmark checker left its command-version helper without a module import | Add the module-level subprocess import and rerun Ruff |
+| B15 | 2026-09-02 | Adding retained Criterion estimate identity introduced a hash helper before restoring its module import | Import hashlib and rerun the benchmark-checker lint gate |
 
 ## Gate
 
