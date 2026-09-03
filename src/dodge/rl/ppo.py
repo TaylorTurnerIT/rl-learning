@@ -225,6 +225,33 @@ class DodgeActorCriticCNN(nn.Module):
         distribution = Categorical(logits=logits)
         return distribution.log_prob(actions), distribution.entropy(), values
 
+    def load_actor_state_dict(self, state_dict: Mapping[str, Tensor]) -> None:
+        """Load compatible actor weights while resetting the value head."""
+        current = self.state_dict()
+        actor_keys = {
+            name
+            for name in current
+            if name.startswith("features.") or name.startswith("policy_head.")
+        }
+        supplied = {
+            name: value for name, value in state_dict.items() if name in actor_keys
+        }
+        missing = actor_keys - supplied.keys()
+        if missing:
+            raise ValueError(
+                "actor warm start is missing compatible weights: "
+                f"{sorted(missing)[:3]}"
+            )
+        try:
+            self.load_state_dict(supplied, strict=False)
+        except (RuntimeError, TypeError) as error:
+            raise ValueError(
+                f"actor warm start has incompatible weights: {error}"
+            ) from error
+        nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+        if self.value_head.bias is not None:
+            nn.init.zeros_(self.value_head.bias)
+
     def _initialize_weights(self) -> None:
         for module in self.modules():
             if isinstance(module, (nn.Conv2d, nn.Linear)):
@@ -386,6 +413,8 @@ class PPOTrainer:
         environment_factory: EnvironmentFactory = DodgeEnv,
         checkpoint: Path | None = None,
         runtime_directory: Path | None = None,
+        initial_actor_state: Mapping[str, Tensor] | None = None,
+        initialization: Mapping[str, object] | None = None,
     ) -> None:
         config.validate()
         if config.backend != "python":
@@ -394,6 +423,11 @@ class PPOTrainer:
         self.device = _resolve_device(config.device)
         _seed_torch(config.seed)
         self.model = DodgeActorCriticCNN().to(self.device)
+        self.initialization = (
+            dict(initialization) if initialization is not None else None
+        )
+        if initial_actor_state is not None:
+            self.model.load_actor_state_dict(initial_actor_state)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=config.learning_rate, eps=1e-5
         )
@@ -674,6 +708,7 @@ class PPOTrainer:
                 torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
             ),
             "best_validation": self.best_validation,
+            "initialization": self.initialization,
         }
 
     def _load_checkpoint(self, path: Path) -> None:
@@ -712,6 +747,10 @@ class PPOTrainer:
             self.best_validation = (
                 dict(best_validation) if isinstance(best_validation, Mapping) else None
             )
+            initialization = payload.get("initialization")
+            self.initialization = (
+                dict(initialization) if isinstance(initialization, Mapping) else None
+            )
         except (KeyError, TypeError, ValueError, RuntimeError) as error:
             raise ControlRuntimeError(
                 f"PPO checkpoint state is invalid: {error}"
@@ -728,6 +767,8 @@ class NativePPOTrainer(PPOTrainer):
         *,
         checkpoint: Path | None = None,
         runtime_directory: Path | None = None,
+        initial_actor_state: Mapping[str, Tensor] | None = None,
+        initialization: Mapping[str, object] | None = None,
     ) -> None:
         config.validate()
         if config.backend != "native":
@@ -736,6 +777,11 @@ class NativePPOTrainer(PPOTrainer):
         self.device = _resolve_device(config.device)
         _seed_torch(config.seed)
         self.model = DodgeActorCriticCNN().to(self.device)
+        self.initialization = (
+            dict(initialization) if initialization is not None else None
+        )
+        if initial_actor_state is not None:
+            self.model.load_actor_state_dict(initial_actor_state)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=config.learning_rate, eps=1e-5
         )
@@ -1145,8 +1191,12 @@ def train_ppo(
     validation_seeds: Sequence[int] = DEVELOPMENT_VALIDATION_SEEDS,
     evaluation_seeds: Sequence[int] = EVALUATION_SEEDS,
     training_evaluation_seeds: Sequence[int] | None = None,
+    initial_actor_state: Mapping[str, Tensor] | None = None,
+    initialization: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     config.validate()
+    if resume and (initial_actor_state is not None or initialization is not None):
+        raise ControlInputError("PPO warm start cannot be combined with --resume")
     if resume:
         checkpoint = run_directory / "checkpoint-latest.pt"
         if not checkpoint.is_file():
@@ -1165,6 +1215,8 @@ def train_ppo(
             config,
             checkpoint=checkpoint,
             runtime_directory=runtime_directory,
+            initial_actor_state=initial_actor_state,
+            initialization=initialization,
         )
     else:
         trainer = PPOTrainer(
@@ -1172,6 +1224,8 @@ def train_ppo(
             environment_factory=environment_factory,
             checkpoint=checkpoint,
             runtime_directory=runtime_directory,
+            initial_actor_state=initial_actor_state,
+            initialization=initialization,
         )
     metrics_path = run_directory / "metrics.jsonl"
     try:
@@ -1287,6 +1341,7 @@ def _write_run_record(
         "latest_checkpoint": "checkpoint-latest.pt",
         "runtime_directory": PPO_RUNTIME_DIRECTORY_NAME,
         "best_validation": trainer.best_validation,
+        "initialization": trainer.initialization,
     }
     if (
         trainer.best_validation is not None

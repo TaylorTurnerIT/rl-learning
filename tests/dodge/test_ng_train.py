@@ -64,3 +64,55 @@ def test_run_baseline_passes_locked_split_to_ppo(monkeypatch, tmp_path: Path) ->
     stored = json.loads((run_directory / "ng-run.json").read_text())
     assert stored["legacy_inputs"] == "none"
     assert result["report"] == {"run_directory": str(run_directory)}
+
+
+def test_run_baseline_routes_actor_only_bc_warm_start(
+    monkeypatch, tmp_path: Path
+) -> None:
+    manifest = SeedManifest.fresh_default()
+    manifest_path = tmp_path / "manifest.json"
+    run_directory = tmp_path / "run"
+    checkpoint = tmp_path / "bc-checkpoint.pt"
+    save_manifest(manifest_path, manifest)
+    checkpoint.write_bytes(b"test checkpoint")
+    calls: dict[str, object] = {}
+    marker = object()
+
+    def fake_load(path, loaded_manifest):
+        assert path == checkpoint
+        assert loaded_manifest == manifest
+        return {"features.projection.0.weight": marker}
+
+    def fake_train(config, directory, **kwargs):
+        calls["kwargs"] = kwargs
+        directory.mkdir()
+        return {"updates_completed": config.updates}
+
+    monkeypatch.setattr("dodge.ng.train.load_bc_actor_state", fake_load)
+    monkeypatch.setattr("dodge.ng.train.train_ppo", fake_train)
+    monkeypatch.setattr(
+        "dodge.ng.train.build_report",
+        lambda directory, loaded: {"run_directory": str(directory)},
+    )
+
+    result = run_baseline(
+        BaselineConfig(
+            manifest_path=manifest_path,
+            run_directory=run_directory,
+            updates=3,
+            rollout_steps=32,
+            native_lanes=8,
+            initial_bc_checkpoint=checkpoint,
+        )
+    )
+
+    kwargs = calls["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["initial_actor_state"] == {
+        "features.projection.0.weight": marker
+    }
+    assert kwargs["initialization"]["kind"] == "board_behavior_cloning_actor"  # type: ignore[index]
+    stored = json.loads((run_directory / "ng-run.json").read_text())
+    assert stored["kind"] == "dodge_ng_bc_to_ppo_run"
+    assert stored["initialization"]["checkpoint"] == str(checkpoint)
+    assert result["report"] == {"run_directory": str(run_directory)}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 import torch
 
 from dodge.control import PROJECT_ROOT, ControlInputError, ControlRuntimeError
+from dodge.ng.bc import load_bc_actor_state
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import build_report
 from dodge.rl.ppo import NativeExecution, PPOConfig, train_ppo
@@ -48,11 +50,14 @@ class BaselineConfig:
     device: str = "auto"
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
+    initial_bc_checkpoint: Path | None = None
 
     def to_json(self) -> dict[str, object]:
         value = asdict(self)
         value["manifest_path"] = str(self.manifest_path)
         value["run_directory"] = str(self.run_directory)
+        if self.initial_bc_checkpoint is not None:
+            value["initial_bc_checkpoint"] = str(self.initial_bc_checkpoint)
         return value
 
     def ppo_config(self, manifest: SeedManifest) -> PPOConfig:
@@ -91,6 +96,21 @@ def run_baseline(config: BaselineConfig) -> dict[str, object]:
     ppo_config = config.ppo_config(manifest)
     ppo_config.validate()
     inner_validation_seeds = manifest.training_seeds[:INNER_VALIDATION_COUNT]
+    initial_actor_state = None
+    initialization: dict[str, object] | None = None
+    run_kind = "dodge_ng_baseline_run"
+    if config.initial_bc_checkpoint is not None:
+        initial_actor_state = load_bc_actor_state(
+            config.initial_bc_checkpoint,
+            manifest,
+        )
+        initialization = {
+            "kind": "board_behavior_cloning_actor",
+            "checkpoint": str(config.initial_bc_checkpoint),
+            "checkpoint_sha256": _sha256(config.initial_bc_checkpoint),
+            "manifest_sha256": manifest.sha256,
+        }
+        run_kind = "dodge_ng_bc_to_ppo_run"
     started_at = datetime.now(UTC).isoformat()
     started = time.monotonic()
     record = train_ppo(
@@ -100,11 +120,13 @@ def run_baseline(config: BaselineConfig) -> dict[str, object]:
         validation_seeds=inner_validation_seeds,
         training_evaluation_seeds=manifest.training_seeds,
         evaluation_seeds=manifest.holdout_seeds,
+        initial_actor_state=initial_actor_state,
+        initialization=initialization,
     )
     wall_seconds = time.monotonic() - started
     ng_record = {
         "schema_version": 1,
-        "kind": "dodge_ng_baseline_run",
+        "kind": run_kind,
         "started_at_utc": started_at,
         "training_wall_seconds": wall_seconds,
         "host": platform.node(),
@@ -119,6 +141,7 @@ def run_baseline(config: BaselineConfig) -> dict[str, object]:
         "holdout_seeds": list(manifest.holdout_seeds),
         "legacy_inputs": "none",
         "baseline_config": config.to_json(),
+        "initialization": initialization,
     }
     _write_json(config.run_directory / "ng-run.json", ng_record)
     report = build_report(config.run_directory, manifest)
@@ -178,6 +201,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--native-execution", choices=("serial", "parallel"), default="parallel"
     )
+    parser.add_argument(
+        "--initial-bc-checkpoint",
+        type=Path,
+        default=None,
+        help="initialize the PPO actor from a compatible NG BC checkpoint",
+    )
     return parser
 
 
@@ -209,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         device=arguments.device,
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
+        initial_bc_checkpoint=arguments.initial_bc_checkpoint,
     )
     try:
         result = run_baseline(config)
@@ -227,6 +257,19 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise ControlInputError(
+            f"could not read initialization checkpoint: {error}"
+        ) from error
+    return digest.hexdigest()
 
 
 if __name__ == "__main__":

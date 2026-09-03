@@ -98,6 +98,54 @@ def test_actor_critic_returns_nine_logits_and_one_value() -> None:
     assert all(parameter.grad is None for parameter in model.parameters())
 
 
+def test_v21_actor_warm_start_copies_policy_but_not_value_weights() -> None:
+    source = DodgeActorCriticCNN(hidden_size=16)
+    target = DodgeActorCriticCNN(hidden_size=16)
+    source_value = source.value_head.weight.detach().clone()
+    source_policy = source.policy_head.weight.detach().clone()
+
+    target.load_actor_state_dict(source.state_dict())
+
+    assert torch.equal(target.policy_head.weight, source_policy)
+    assert not torch.equal(target.value_head.weight, source_value)
+
+
+def test_v21_warm_start_provenance_survives_checkpoint(tmp_path: Path) -> None:
+    run_directory = tmp_path / "warm-start"
+    source = DodgeActorCriticCNN()
+    record = train_ppo(
+        _config(),
+        run_directory,
+        environment_factory=FakePPOEnvironment,
+        validation_seeds=(1,),
+        evaluation_seeds=(2,),
+        initial_actor_state=source.state_dict(),
+        initialization={
+            "kind": "board_behavior_cloning",
+            "checkpoint": "bc/checkpoint-best.pt",
+        },
+    )
+
+    stored = json.loads((run_directory / "run.json").read_text())
+    checkpoint = torch.load(
+        run_directory / "checkpoint-latest.pt", map_location="cpu", weights_only=False
+    )
+    assert record["initialization"]["kind"] == "board_behavior_cloning"  # type: ignore[index]
+    assert stored["initialization"]["checkpoint"] == "bc/checkpoint-best.pt"
+    assert checkpoint["initialization"]["kind"] == "board_behavior_cloning"
+
+
+def test_v21_warm_start_cannot_be_combined_with_resume(tmp_path: Path) -> None:
+    source = DodgeActorCriticCNN()
+    with pytest.raises(ControlInputError, match="combined"):
+        train_ppo(
+            _config(),
+            tmp_path / "warm-start-resume",
+            resume=True,
+            initial_actor_state=source.state_dict(),
+        )
+
+
 def test_stability_bonus_is_capped_below_survival_reward() -> None:
     reward = StabilityReward(neutral_bonus=0.2, cap=0.5)
 
