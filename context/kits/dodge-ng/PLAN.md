@@ -6,7 +6,7 @@ metadata:
   generation: NG
   created: "2026-09-03"
   last_edited: "2026-09-03"
-  status: phase-1-baseline-complete
+  status: phase-1-diagnosis-complete
 ---
 
 # Dodge NG: reinforcement learning and visual training plan
@@ -39,6 +39,8 @@ Phase 0 and Phase 1 are implemented under the scoped root
   routes it into native PPO without reading legacy trajectories.
 - [`ng/report.py`](../../../src/dodge/ng/report.py) produces split statistics,
   learning curves, diagnostics, and a locked-holdout report.
+- [`ng/diagnostics.py`](../../../src/dodge/ng/diagnostics.py) measures all nine
+  fixed-action controls without changing the learner or the game contract.
 - [`imitation/data.py`](../../../src/dodge/imitation/data.py) still loads the
   existing SQLite trajectories for historical experiments; NG does not use it.
 - [`neat/evaluator.py`](../../../src/dodge/neat/evaluator.py) preserves the older
@@ -66,6 +68,16 @@ improving survival. This is a useful baseline failure signal, not evidence that
 the later pixel, replay, teacher, or continuous-action tracks cannot work. The
 full artifacts are in
 [`history/dodge/ng/baseline-p1/REPORT.md`](../../../history/dodge/ng/baseline-p1/REPORT.md).
+
+Three matched learner-control seeds and three neutral-bonus-off controls are now
+complete. The fixed-action diagnostic shows a real action advantage: cardinal
+actions survive longer than neutral, while diagonal actions are substantially
+worse. The learner controls remain seed-sensitive: one current control retains
+non-neutral behavior, while the others collapse; removing the neutral bonus
+produces larger transient inner-validation peaks but still collapses or becomes
+unstable by the final checkpoint. This closes P1 as a diagnosis rather than a
+promotion. The measured decision record is
+[`P1_DIAGNOSIS.md`](P1_DIAGNOSIS.md).
 
 ## Target
 
@@ -286,6 +298,12 @@ diagnose before adding algorithms.
 - Record survival against environment frames and wall-clock time.
 
 ## NG-P2: data, imitation, and exact-simulator teachers
+
+P2 is the next intervention. The P1 evidence supports improving action credit
+and initialization before adding pixels, recurrence, or continuous gradients.
+The first P2 comparison will be fresh native planner labels, board behavior
+cloning, BC-to-PPO, and a learner-visited DAgger-style relabeling loop. All
+labels and states will come from the NG training partition only.
 
 ### §G Goal
 

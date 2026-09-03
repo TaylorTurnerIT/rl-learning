@@ -58,8 +58,8 @@ T5|x|Run Phase 0 native smoke/throughput checks and freeze their evidence withou
 T6|x|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
 T7|x|Implement fixed-action controls and action-advantage reporting across the frozen manifest.|V6,V11,I7
 T8|x|Run two additional current-control learner seeds with the matched P1 budget and compare training-side curves.|V7,V12,V13
-T9|~|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
-T10|.|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
+T9|x|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
+T10|x|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
 
 §B
 id|date|cause|fix
