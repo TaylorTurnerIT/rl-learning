@@ -105,7 +105,7 @@ benchmark statistics, known limitations, and owner signoff.
 
 | id | status | task | cites |
 |----|--------|------|-------|
-| P7-T1 | . | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
+| P7-T1 | x | Add strict Rust workspace configuration, pinned toolchains, formatting, clippy, nextest, and benchmark commands | §C,R3,R4,V6 |
 | P7-T2 | . | Add Kani harnesses for bounded state, action, framebuffer, palette, and buffer properties | V1,V2 |
 | P7-T3 | . | Add deterministic differential fuzzing against Pemsa with retained reproducers | V3,V4 |
 | P7-T4 | . | Add repeated-run reproducibility and source/generated-artifact provenance records | V5,V7 |
@@ -118,7 +118,7 @@ benchmark statistics, known limitations, and owner signoff.
 
 | id | date | cause | fix |
 |----|------|-------|-----|
-| B1 | - | - | - |
+| B1 | 2026-09-02 | The first P7 format gate used `use_small_heuristics = "Max"`, which changed the existing native formatting rather than only checking the new benchmark target | Removed that override, formatted the benchmark with the pinned Rust toolchain, and reran format, locked check, Clippy, nextest, and benchmark compilation successfully |
 
 ## Gate
 

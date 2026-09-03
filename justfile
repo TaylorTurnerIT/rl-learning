@@ -43,6 +43,20 @@ dodge-native-probe *options:
     @DODGE_HEADLESS=1 devenv -q shell -- dodge-native-probe {{ options }}
 
 [group("dodge")]
+dodge-native-test:
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo nextest run --locked --manifest-path native/Cargo.toml --workspace
+
+[group("dodge")]
+dodge-native-check:
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo fmt --locked --manifest-path native/Cargo.toml --all -- --check
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo clippy --locked --manifest-path native/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo nextest run --locked --manifest-path native/Cargo.toml --workspace
+
+[group("dodge")]
+dodge-native-bench *options:
+    @DODGE_HEADLESS=1 devenv -q shell -- cargo bench --locked --manifest-path native/Cargo.toml -p dodge-batch --bench batch -- {{ options }}
+
+[group("dodge")]
 dodge-native-extract-assets source output *options:
     devenv -q shell -- dodge-native-extract-assets --source {{ source }} --output {{ output }} {{ options }}
 
