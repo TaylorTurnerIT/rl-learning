@@ -117,6 +117,19 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run dodge-ppo-train "$@"
     '';
+    dodge-ng-manifest.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-ng-manifest "$@"
+    '';
+    dodge-ng-train.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-ng-train "$@"
+    '';
+    dodge-ng-report.exec = ''
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run dodge-ng-report "$@"
+    '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

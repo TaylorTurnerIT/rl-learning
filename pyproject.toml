@@ -39,6 +39,9 @@ dodge-native-probe = "dodge.native.probe:main"
 dodge-native-extract-assets = "dodge.native.assets:main"
 dodge-native-p2-report = "dodge.native.p2:main"
 dodge-native-diff = "dodge.native.differential:main"
+dodge-ng-manifest = "dodge.ng.manifest:main"
+dodge-ng-train = "dodge.ng.train:main"
+dodge-ng-report = "dodge.ng.report:main"
 
 [build-system]
 requires = ["hatchling"]

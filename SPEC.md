@@ -38,15 +38,17 @@ V6|Per-split evaluation reports finite mean, median, p10, worst, best, and solve
 V7|Reports contain training/inner/holdout comparison, train-minus-holdout gap, learning curves, diagnostic curves, provenance, and throughput when available.
 V8|A successful baseline run writes valid `run.json`, `metrics.jsonl`, checkpoints, `report.json`, `REPORT.md`, and plot files under its run directory.
 V9|Phase 0/1 tests run without legacy databases or checkpoints and cover manifest, seed routing, evaluator statistics, report generation, and CLI configuration.
+V10|Every NG provenance/report JSON artifact is JSON-serializable after path and typed-config normalization.
 
 §T
 id|status|task|cites
 T1|.|Implement `SeedManifest`, deterministic fresh default, validation/hash, committed NG manifest, and unit tests.|V1,V2,I1,I5
 T2|.|Add explicit PPO training-seed routing and training-side checkpoint evaluation while preserving legacy defaults; add regression tests.|V3,V4,V5,I4
 T3|.|Implement split evaluator, trend metrics, plot/report generation, and tests using synthetic run artifacts.|V6,V7,I2
-T4|.|Add NG baseline CLI, package entry points, devenv-backed just recipe, provenance wiring, and CLI tests.|V3,V4,V8,V9,I3,I6
+T4|.|Add NG baseline CLI, package entry points, devenv-backed just recipe, provenance wiring, and CLI tests.|V3,V4,V8,V9,V10,I3,I6
 T5|.|Run Phase 0 native smoke/throughput checks and freeze their evidence without touching legacy artifacts.|V8,V9,C1,C3,C5
 T6|.|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
 
 §B
 id|date|cause|fix
+B1|2026-09-03|NG provenance serialized `Path` fields from a dataclass directly to JSON.|Add an explicit JSON serializer for baseline configuration and enforce V10 with the runner test.
