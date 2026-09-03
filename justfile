@@ -135,6 +135,11 @@ dodge-ng-report run *options:
     devenv -q shell -- dodge-ng-report {{ run }} {{ options }}
 
 [group("dodge")]
+dodge-ng-diagnose-actions *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-diagnose-actions {{ options }}
+
+[group("dodge")]
 dodge-marimo:
     devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 

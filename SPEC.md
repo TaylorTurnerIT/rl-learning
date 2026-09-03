@@ -4,6 +4,7 @@
 G1|Build a fresh, reproducible NG experiment boundary and run a native board-observation PPO baseline.
 G2|Measure learning on the 70% training partition and expose the untouched 30% partition only as a final generalization check.
 G3|Produce machine-readable provenance, metrics, plots, and a human-readable baseline report.
+G4|Close the board-PPO gate by separating action-credit/evaluator limits from learner-seed variance before Phase 2.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -13,6 +14,7 @@ C4|Holdout seeds stay locked: training, checkpoint selection, and future HPO may
 C5|Use the existing native batch environment and board encoder for the hot path; preserve legacy PPO defaults and behavior when NG fields are unset.
 C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and the board PPO baseline; pixels, replay, DAgger, gradient actions, and HPO remain later phases.
 C7|Do not alter the native game contract or nested game/NEAT specs as part of this slice.
+C8|Neutral bonus is a controlled ablation, not the assumed cause of policy collapse; diagnosis must also test action advantage and learner-seed variance.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -21,6 +23,7 @@ I3|`src/dodge/ng/train.py` owns the baseline CLI and wires one manifest into nat
 I4|`src/dodge/rl/ppo.py` accepts an optional explicit training-seed tuple and optional training-side evaluation seeds; absent values retain legacy behavior.
 I5|`context/kits/dodge-ng/ng-v1.json` is the committed frozen manifest; run artifacts live under `history/dodge/ng/`.
 I6|NG commands are `dodge-ng-manifest`, `dodge-ng-train`, and `dodge-ng-report`; the training recipe uses the devenv runtime boundary.
+I7|`src/dodge/ng/diagnostics.py` owns fixed-action controls and action-advantage evidence on the frozen manifest.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -34,11 +37,14 @@ V2|Every NG seed is outside the recorded legacy seed range; loading malformed, d
 V3|A baseline config names the manifest hash and uses exactly the manifest training seeds; no default legacy seed stream may leak into NG training.
 V4|Holdout seeds are passed only to final evaluation; inner checkpoint evaluation is a deterministic subset of training seeds.
 V5|Explicit PPO seed streams are reproducible and emit only their configured candidate set; legacy default streams remain unchanged.
-V6|Per-split evaluation reports finite mean, median, p10, worst, best, and solved-fraction statistics with per-seed outcomes.
+V6|Per-split evaluation reports finite mean, median, p10, worst, best, and horizon-completion statistics with per-seed outcomes.
 V7|Reports contain training/inner/holdout comparison, train-minus-holdout gap, learning curves, diagnostic curves, provenance, and throughput when available.
 V8|A successful baseline run writes valid `run.json`, `metrics.jsonl`, checkpoints, `report.json`, `REPORT.md`, and plot files under its run directory.
 V9|Phase 0/1 tests run without legacy databases or checkpoints and cover manifest, seed routing, evaluator statistics, report generation, and CLI configuration.
 V10|Every NG provenance/report JSON artifact is JSON-serializable after path and typed-config normalization.
+V11|Fixed-action controls evaluate all nine action choices on both manifest partitions and report finite per-action survival distributions.
+V12|P1 comparison runs use the same manifest, interaction budget, evaluation protocol, and architecture; only declared learner/configuration variables differ.
+V13|The locked holdout is absent from all P1 diagnosis and selection decisions; it is reported only after training-side comparison is frozen.
 
 §T
 id|status|task|cites
@@ -48,6 +54,10 @@ T3|x|Implement split evaluator, trend metrics, plot/report generation, and tests
 T4|x|Add NG baseline CLI, package entry points, devenv-backed just recipe, provenance wiring, and CLI tests.|V3,V4,V8,V9,V10,I3,I6
 T5|x|Run Phase 0 native smoke/throughput checks and freeze their evidence without touching legacy artifacts.|V8,V9,C1,C3,C5
 T6|x|Run the Phase 1 native board PPO baseline on the frozen 70% partition, evaluate the locked 30%, and deliver the generated trend/performance report.|V4,V6,V7,V8,C2,C4,C6
+T7|x|Implement fixed-action controls and action-advantage reporting across the frozen manifest.|V6,V11,I7
+T8|~|Run two additional current-control learner seeds with the matched P1 budget and compare training-side curves.|V7,V12,V13
+T9|.|Run matched neutral-bonus-off controls across three learner seeds and compare against the current control.|V7,V12,V13
+T10|.|Freeze the P1 diagnosis and select the next intervention without using holdout results.|V7,V12,V13,G4
 
 §B
 id|date|cause|fix

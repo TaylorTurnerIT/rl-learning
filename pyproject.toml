@@ -42,6 +42,7 @@ dodge-native-diff = "dodge.native.differential:main"
 dodge-ng-manifest = "dodge.ng.manifest:main"
 dodge-ng-train = "dodge.ng.train:main"
 dodge-ng-report = "dodge.ng.report:main"
+dodge-ng-diagnose-actions = "dodge.ng.diagnostics:main"
 
 [build-system]
 requires = ["hatchling"]
