@@ -9,6 +9,8 @@ G5|Use a fresh native counterfactual planner to provide board-action supervision
 G6|Give each later learner the same frozen manifest, native interaction budget, and training-side selection boundary so improvements and failures transfer across methods.
 G7|Train an exact-raster pixel CNN with temporal context and measure visual learning cost against the board reference.
 G8|Treat 800 native survival frames as the first true-learning threshold for the focused baseline campaign; do not call shorter survival progress learned.
+G9|Test whether waypoint-discretized movement plus DQN improves action credit, sample efficiency, and 800-frame learning over direct nine-action PPO.
+G10|Retain predictive hazard-field/gradient control as matched later method; separate hazard prediction from movement control and compare under same NG protocol.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -16,7 +18,7 @@ C2|Split is exact 70/30 over the complete NG sample space; train and holdout set
 C3|Legacy GA/NEAT/BC/PPO data, checkpoints, databases, manifests, and scores are archival context only and cannot be NG inputs.
 C4|Holdout seeds stay locked: training, checkpoint selection, and future HPO may use training-side seeds only.
 C5|Use the existing native batch environment and board encoder for the hot path; preserve legacy PPO defaults and behavior when NG fields are unset.
-C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and the board PPO baseline; later phases add pixels, replay, DAgger, gradient actions, and HPO.
+C6|Phase 0/1 scope stops at manifest/provenance/evaluation/plots and board PPO baseline; later phases add waypoint DQN, replay, DAgger, predictive hazard gradients, pixels, and HPO.
 C7|Do not alter the native game contract or nested game/NEAT specs as part of this slice.
 C8|Neutral bonus is a controlled ablation, not the assumed cause of policy collapse; diagnosis must also test action advantage and learner-seed variance.
 C9|P2 teacher states, labels, BC validation, DAgger aggregation, and warm-start selection use only manifest training seeds; holdout remains final-report-only.
@@ -25,6 +27,12 @@ C11|A teacher dataset is fresh NG data with manifest/config/provenance metadata;
 C12|The first pixel control receives only native indexed pixels with shape `(N,4,128,128)`, normalizes palette indexes by `15`, and uses no augmentation or derived board channels.
 C13|Pixel PPO uses the same frozen NG manifest, nine-action contract, native frame schedule, and training-side selection boundary as board PPO; holdout remains report-only.
 C14|The focused baseline target is 800 survival frames, equal to 200 native decisions at `step_frames=4`; target completion is evaluated on the training split and holdout is report-only.
+C15|Waypoint actions never teleport, alter native physics, bypass collision, or emit controls outside existing nine-action contract.
+C16|Waypoint candidate resolutions start at 8, 16, and 32 pixels; valid centers respect native player-center bounds and resolve wall targets deterministically.
+C17|Waypoint transitions use fixed native frame cadence and explicit target reached, timeout, terminal, and reset semantics; replay never crosses episode boundaries.
+C18|Waypoint oracle feasibility may use canonical full state; learned DQN input contains only declared observation channels and no hidden simulator state.
+C19|Waypoint/DQN training, inner selection, and HPO use training seeds only; holdout remains final report-only under same 800-frame gate.
+C20|Hazard-field control predicts future risk at declared horizons; instantaneous occupancy alone cannot define gradient labels or pass method comparison.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -45,6 +53,11 @@ I15|`src/dodge/ng/relevance.py` owns multi-horizon decision-relevance audits, po
 I16|`src/dodge/rl/ppo.py` owns lane-independent GAE for the interleaved native batch rollout and records the configured baseline target in NG provenance.
 I17|Native board encoders and PPO observation-mode routing own the opt-in off-screen-preserving `board_full` representation; the Python reference encoder mirrors it for parity tests.
 I18|`src/dodge/rl/ppo.py` owns explicit board spatial-pooling configuration and reconstructs the selected pooling mode for PPO checkpoints and relevance audits.
+I19|Native full-coordinate board encoding owns canonical off-screen hazard position channels while legacy `board` and edge-pinned `board_full` remain unchanged.
+I20|`src/dodge/ng/waypoint.py` owns grid geometry, valid-center generation, waypoint action encoding, bounded native steering, and feasibility metrics.
+I21|`src/dodge/ng/dqn.py` owns waypoint DQN observations, replay, target updates, checkpoints, evaluation, and run provenance.
+I22|`src/dodge/ng/hazard.py` owns future-horizon hazard labels, hazard-field prediction, gradient/waypoint control, and matched comparison artifacts.
+I23|NG waypoint commands are `dodge-ng-waypoint-feasibility` and `dodge-ng-dqn`; hazard-field command is `dodge-ng-hazard`.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -88,6 +101,14 @@ V32|Native PPO computes GAE independently along each lane's time axis; interleav
 V33|A focused baseline run declares target completion only when its configured training evaluation reaches 800 survival frames; shorter runs remain diagnostic progress regardless of holdout performance.
 V34|Opt-in `board_full` pins entirely off-screen canonical hazards to the nearest 19x16 edge cells, leaves legacy `board` unchanged, and agrees across native serial/parallel and Python reference encoders.
 V35|Board pooling is explicit in PPO configuration/checkpoint provenance; average pooling remains the default and max pooling is an isolated board-trial option that preserves sparse hazard evidence without changing observation shape.
+V36|Opt-in `board_full_coords` preserves normalized canonical x/y for enemy and AOE entities in four extra channels, pins their cells only for indexing, and agrees across native/Python/serial/parallel; legacy board shapes and values remain unchanged.
+V37|∀ waypoint resolutions → candidate centers stay within native player-center bounds; target quantization, clamping, and wall handling deterministic; no teleport.
+V38|Waypoint controller emits only existing native `ACTION_CHOICES`; same state, target, config, and cadence → same native action sequence and unchanged game hashes.
+V39|Waypoint transition records target/action/reward/next-state plus terminated/truncated boundary; replay sampling never bootstraps across terminal or reset.
+V40|Oracle feasibility evaluates every candidate waypoint resolution across complete training partition before resolution selection; holdout cannot influence choice.
+V41|DQN checkpoints identify manifest hash, grid resolution, observation shape, controller/cadence, replay/target configuration, and nine-action contract; matching resumes validate metadata.
+V42|DQN selection/evaluation preserves exact 70/30 split and 800-frame gate; holdout scores remain report-only.
+V43|Hazard-field labels encode future collision risk at each declared horizon; controller considers only reachable candidate moves and records label/controller provenance.
 
 §T
 id|status|task|cites
@@ -116,6 +137,14 @@ T22|x|Repair native PPO lane-wise GAE, expose the 800-frame focused-baseline tar
 T23|~|Run the focused board-PPO baseline under the 800-frame target, audit checkpoints with T21 on training seeds, and iterate baseline-only until the target is reached or the blocker is diagnosed.|V30,V31,V33,G4,G8,C14
 T24|~|Add an isolated `board_full` observation mode that preserves off-screen hazards at board edges, proves native/Python parity, and reruns the focused baseline with the same PPO protocol.|V34,C5,G8,I17
 T25|~|Expose explicit average/max board pooling, preserve legacy defaults, and run the `board_full` max-pooling baseline under the same 800-frame gate.|V35,G8,I18
+T26|~|Add coordinate-preserving `board_full_coords` observation mode, prove native/Python parity, and run the baseline max-pooling trial under the 800-frame relevance gate.|V36,C5,G8,I19
+T27|x|Implement waypoint grid/target codec, deterministic bounded steering, transition contract, and native-physics regression tests.|V37,V38,V39,I20,C15,C16,C17
+T28|.|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,G9,C2,C4,I20
+T29|.|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,I21,C18
+T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevance gate; report training/inner/holdout trends and throughput.|V42,G9,G8,C19,I21
+T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
+T32|.|Implement future-horizon hazard labels, hazard-field model, reachable gradient/waypoint controller, and method-specific tests.|V43,G10,I22,C20
+T33|.|Run matched waypoint/DQN versus hazard-field comparison and freeze next method from training-side evidence before locked holdout report.|V42,V43,G6,G10,I22
 
 §B
 id|date|cause|fix
@@ -138,3 +167,4 @@ B16|2026-09-03|Full-suite rerun reproduced B11's concurrent Pemsa/Xvfb hidden-wi
 B17|2026-09-03|Native PPO flattened time-major transitions from independent lanes before GAE, so advantages crossed lane boundaries and mixed unrelated episodes.|Compute GAE on `[time,lane]` tensors before flattening; enforce V32 with a multi-lane boundary regression test.
 B18|2026-09-04|The legacy 19x16 board and pixels dropped enemies entirely while their canonical positions remained outside the screen, leaving the baseline blind to the first incoming hazard.|Add an opt-in off-screen-preserving board observation and enforce V34 with native/Python parity and legacy-unchanged tests.
 B19|2026-09-04|The native workspace Clippy gate found pre-existing unchecked indexing in counterfactual scoring and its regression assertion.|Use iterator/get access at the native boundary; no new behavior invariant is required.
+B20|2026-09-04|The relevance gate could pass while `board_full` still collapsed every off-screen hazard onto an edge cell, so the CNN saw hazard presence but not time-to-arrival; max pooling then learned a vertical edge policy and plateaued below 800.|Add coordinate-preserving `board_full_coords` and require native/Python parity before another baseline campaign.
