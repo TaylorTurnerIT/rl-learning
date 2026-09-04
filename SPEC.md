@@ -119,6 +119,7 @@ V47|Native waypoint ML features equal `encode_waypoint_observation` after canoni
 V48|`ml_observation` returns finite `(N,225)` `float32` rows; enabling it does not alter state, pixel, board, reward, done, hash, or snapshot results.
 V49|DQN hot collection uses native ML observations and native player coordinates without full Python snapshot decoding; the reference encoder remains callable for parity tests.
 V50|800 frames remains a relevance gate only; DQN training/evaluation horizons may exceed 800 and report uncapped survival until terminal or an explicit safety limit.
+V51|Waypoint grid geometry is constructed once per grid; allocation-free scalar steering emits the same native action as full `WaypointDecision` steering across positions, targets, tolerances, and action choices.
 
 §T
 id|status|task|cites
@@ -157,6 +158,7 @@ T32|.|Implement future-horizon hazard labels, hazard-field model, reachable grad
 T33|.|Run matched waypoint/DQN versus hazard-field comparison and freeze next method from training-side evidence before locked holdout report.|V42,V43,G6,G10,I22
 T34|x|Add native `ml.rs` waypoint feature encoding, optional batch/PyO3 `ml_observation` and player-coordinate outputs, and canonical Python parity tests.|V47,V48,I24,C21
 T35|x|Migrate waypoint DQN collection/evaluation to native ML observations, retain a reference path for debugging, remove the 800-frame horizon cap, and benchmark the hot path.|V49,V50,G11,I21,I24
+T36|x|Cache immutable waypoint geometry, add allocation-free scalar steering for the DQN hot path, and profile before/after under the same native-ML run.|V51,I20,G11
 
 §B
 id|date|cause|fix
@@ -188,3 +190,4 @@ B25|2026-09-03|Waypoint DQN decoded full canonical entity/pattern graphs to read
 B26|2026-09-03|Fast snapshot reader regression test added private imports out of Ruff order.|Sort test imports and rerun targeted lint before behavioral verification.
 B27|2026-09-04|Native ML encoder assigned an `f64` stage calculation directly into its `f32` feature buffer.|Cast every native feature at the output boundary and keep the native ML lint/build gate mandatory.
 B28|2026-09-04|Native ML encoder initially used dynamic array indexing and a derived partial order that violated the native safety lint gate.|Use checked feature writes and an explicit total float ordering before native verification.
+B29|2026-09-04|Waypoint optimization regression test exceeded the repository's 88-column Ruff gate.|Wrap new hot-path assertions before verification; no behavior invariant added.

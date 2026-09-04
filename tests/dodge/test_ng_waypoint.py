@@ -94,6 +94,49 @@ def test_waypoint_controller_maps_relative_targets_to_native_actions() -> None:
     assert wall.target_reached is True
 
 
+@pytest.mark.parametrize("tolerance", [0.0, 2.0, 7.5])
+def test_waypoint_hot_path_matches_full_decision_for_all_targets_and_actions(
+    tolerance: float,
+) -> None:
+    grid = WaypointGrid(32)
+    controller = WaypointController(grid, tolerance=tolerance)
+    positions = (2.0, 18.0, 50.0, 66.0, 82.0, 125.0)
+    target_cells = ((0, 0), (1, 2), (4, 4))
+
+    assert grid.axis_points is grid.axis_points
+    for x in positions:
+        for y in positions:
+            for target_cell in target_cells:
+                for action_index in range(len(ACTION_CHOICES)):
+                    decision = controller.steer_position(
+                        x,
+                        y,
+                        target_cell,
+                        action_index,
+                    )
+                    assert (
+                        controller.native_action_index_for_position(
+                            x,
+                            y,
+                            target_cell,
+                        )
+                        == decision.native_action_index
+                    )
+
+
+def test_waypoint_target_cell_hot_path_matches_full_target_contract() -> None:
+    grid = WaypointGrid(16)
+    for x, y in ((2.0, 2.0), (50.0, 66.0), (124.0, 124.0)):
+        for action_index in range(len(ACTION_CHOICES)):
+            assert grid.target_cell_for_action(
+                x, y, action_index
+            ) == grid.target_for_action(
+                x,
+                y,
+                action_index,
+            )[1]
+
+
 def test_waypoint_controller_native_actions_preserve_game_hashes() -> None:
     controller = WaypointController(WaypointGrid(16))
     controlled = NativeBatchEnvironment(step_frames=4, full_state=True, board=True)

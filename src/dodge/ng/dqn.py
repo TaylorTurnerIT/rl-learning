@@ -650,11 +650,11 @@ def _collect_macro_transition(
     epsilon = _epsilon(config, global_step)
     waypoint_actions = _choose_actions(model, observations, epsilon, rng, device)
     target_cells = [
-        controller.grid.target_for_action(
+        controller.grid.target_cell_for_action(
             float(current_positions[lane, 0]),
             float(current_positions[lane, 1]),
             int(action),
-        )[1]
+        )
         for lane, action in enumerate(waypoint_actions)
     ]
     macro_rewards = np.zeros(lane_count, dtype=np.float32)
@@ -669,12 +669,11 @@ def _collect_macro_transition(
             if boundary[lane]:
                 continue
             x, y = current_positions[lane]
-            native_actions[lane] = controller.steer_position(
+            native_actions[lane] = controller.native_action_index_for_position(
                 float(x),
                 float(y),
                 target_cells[lane],
-                int(waypoint_actions[lane]),
-            ).native_action_index
+            )
         result = environment.step_batch(native_actions)
         result_observations, result_positions = _native_ml_state(result)
         native_steps += lane_count
@@ -828,11 +827,11 @@ def _evaluate_batch(
                     .astype(np.uint8)
                 )
             target_cells = [
-                controller.grid.target_for_action(
+                controller.grid.target_cell_for_action(
                     float(current_positions[int(lane), 0]),
                     float(current_positions[int(lane), 1]),
                     int(action),
-                )[1]
+                )
                 for lane, action in zip(active_indices, waypoint_actions, strict=True)
             ]
             block_done = np.zeros(len(active_indices), dtype=bool)
@@ -843,12 +842,11 @@ def _evaluate_batch(
                         continue
                     lane = int(lane_value)
                     x, y = current_positions[lane]
-                    native_actions[lane] = controller.steer_position(
+                    native_actions[lane] = controller.native_action_index_for_position(
                         float(x),
                         float(y),
                         target_cells[local],
-                        int(waypoint_actions[local]),
-                    ).native_action_index
+                    )
                 result = environment.step_batch(native_actions)
                 result_observations, result_positions = _native_ml_state(result)
                 current_observations[:] = result_observations

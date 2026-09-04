@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from bisect import bisect_left
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
@@ -41,6 +42,13 @@ _ACTION_DELTAS: Final[dict[Direction, tuple[int, int]]] = {
 _DELTA_TO_ACTION: Final[dict[tuple[int, int], Direction]] = {
     delta: action for action, delta in _ACTION_DELTAS.items()
 }
+_ACTION_INDEX_BY_ACTION: Final[dict[Direction, int]] = {
+    action: index for index, action in enumerate(ACTION_CHOICES)
+}
+_DELTA_TO_ACTION_INDEX: Final[dict[tuple[int, int], int]] = {
+    delta: _ACTION_INDEX_BY_ACTION[action]
+    for delta, action in _DELTA_TO_ACTION.items()
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +58,7 @@ class WaypointGrid:
     spacing: int
     min_center: float = PLAYER_CENTER_MIN
     max_center: float = PLAYER_CENTER_MAX
+    _axis_points: tuple[float, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -65,8 +74,6 @@ class WaypointGrid:
         ):
             raise ValueError("waypoint center bounds are invalid")
 
-    @property
-    def axis_points(self) -> tuple[float, ...]:
         points: list[float] = []
         point = self.min_center
         while point < self.max_center:
@@ -74,7 +81,11 @@ class WaypointGrid:
             point += self.spacing
         if not points or points[-1] != self.max_center:
             points.append(self.max_center)
-        return tuple(points)
+        object.__setattr__(self, "_axis_points", tuple(points))
+
+    @property
+    def axis_points(self) -> tuple[float, ...]:
+        return self._axis_points
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -116,12 +127,26 @@ class WaypointGrid:
         target_cell = self.neighbor_cell(current_cell, waypoint_action_index)
         return current_cell, target_cell, self.point(target_cell)
 
+    def target_cell_for_action(
+        self, x: float, y: float, waypoint_action_index: int
+    ) -> tuple[int, int]:
+        """Return only the neighboring cell needed by the DQN hot path."""
+        return self.neighbor_cell(
+            self.nearest_cell(x, y),
+            waypoint_action_index,
+        )
+
     def _nearest_axis(self, value: float) -> int:
         points = self.axis_points
-        return min(
-            range(len(points)),
-            key=lambda index: (abs(points[index] - value), index),
-        )
+        right = bisect_left(points, value)
+        if right == 0:
+            return 0
+        if right == len(points):
+            return len(points) - 1
+        left = right - 1
+        if value - points[left] <= points[right] - value:
+            return left
+        return right
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +230,18 @@ class WaypointController:
             target_reached=horizontal == 0 and vertical == 0,
             native_action=native_action,
         )
+
+    def native_action_index_for_position(
+        self,
+        x: float,
+        y: float,
+        target_cell: tuple[int, int],
+    ) -> int:
+        """Return a native action without allocating a decision object."""
+        target = self.grid.point(target_cell)
+        horizontal = _sign(target[0] - x, self.tolerance)
+        vertical = _sign(target[1] - y, self.tolerance)
+        return _DELTA_TO_ACTION_INDEX[(horizontal, vertical)]
 
     def _decision(
         self,
