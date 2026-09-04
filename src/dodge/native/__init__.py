@@ -5,7 +5,12 @@ from dodge.native.assets import (
     extract_asset_bundle,
     validate_asset_bundle,
 )
-from dodge.native.batch import NativeBatchEnvironment, NativeBatchResult, NativeDodgeEnv
+from dodge.native.batch import (
+    ML_OBSERVATION_SIZE,
+    NativeBatchEnvironment,
+    NativeBatchResult,
+    NativeDodgeEnv,
+)
 from dodge.native.compat import PicoCompat, PicoFixed, PicoInput, PicoRng
 from dodge.native.compatibility import (
     build_compatibility_report,
@@ -29,6 +34,7 @@ __all__ = [
     "DatasetEpisode",
     "FileIdentity",
     "IndexedRaster",
+    "ML_OBSERVATION_SIZE",
     "NativeBatchEnvironment",
     "NativeBatchResult",
     "NativeDodgeEnv",

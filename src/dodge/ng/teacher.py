@@ -532,6 +532,10 @@ def _merge_results(full: object, partial: object) -> object:
     event_flags = full.event_flags.copy()
     pixels = None if full.pixels is None else full.pixels.copy()
     board = None if full.board is None else full.board.copy()
+    ml_observation = None if full.ml_observation is None else full.ml_observation.copy()
+    player_positions = (
+        None if full.player_positions is None else full.player_positions.copy()
+    )
     snapshots = list(full.snapshot_bytes)
     for position, lane_value in enumerate(partial.lane_ids.tolist()):
         lane = int(lane_value)
@@ -549,6 +553,10 @@ def _merge_results(full: object, partial: object) -> object:
             pixels[lane] = partial.pixels[position]
         if board is not None and partial.board is not None:
             board[lane] = partial.board[position]
+        if ml_observation is not None and partial.ml_observation is not None:
+            ml_observation[lane] = partial.ml_observation[position]
+        if player_positions is not None and partial.player_positions is not None:
+            player_positions[lane] = partial.player_positions[position]
     return NativeBatchResult(
         lane_ids=lane_ids,
         frames=frames,
@@ -562,6 +570,8 @@ def _merge_results(full: object, partial: object) -> object:
         event_flags=event_flags,
         pixels=pixels,
         board=board,
+        ml_observation=ml_observation,
+        player_positions=player_positions,
         snapshot_bytes=tuple(snapshots),
     )
 

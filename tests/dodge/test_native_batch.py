@@ -4,8 +4,15 @@ import numpy as np
 import pytest
 
 from dodge.imitation.board import encode_board
-from dodge.native.batch import NativeBatchEnvironment, NativeDodgeEnv
+from dodge.native.batch import (
+    ML_OBSERVATION_SIZE,
+    NativeBatchEnvironment,
+    NativeDodgeEnv,
+    _raw_state_from_snapshot,
+)
 from dodge.neat.state import EntityState, PlayerState, RawState
+from dodge.ng.dqn import encode_waypoint_observation
+from dodge.ng.waypoint import WaypointGrid
 
 pytest.importorskip("dodge_native")
 
@@ -71,6 +78,141 @@ def test_native_batch_can_omit_optional_buffers_without_changing_state_hashes() 
 
     full.close()
     compact.close()
+
+
+@pytest.mark.parametrize("spacing", [8, 16, 32])
+def test_native_ml_observation_matches_python_reference_for_grid_resolutions(
+    spacing: int,
+) -> None:
+    with NativeBatchEnvironment(
+        step_frames=4,
+        full_state=True,
+        pixels=False,
+        board=False,
+        ml=True,
+        ml_grid_spacing=spacing,
+    ) as environment:
+        result = environment.reset_batch([42, 30100])
+        for actions in ([0, 8], [1, 4], [8, 0], [3, 5], [2, 6]):
+            assert result.ml_observation is not None
+            assert result.ml_observation.shape == (2, ML_OBSERVATION_SIZE)
+            states = environment.observe_full_state()
+            expected = np.stack(
+                [
+                    encode_waypoint_observation(
+                        _raw_state_from_snapshot(state),
+                        WaypointGrid(spacing),
+                    )
+                    for state in states
+                ]
+            )
+            np.testing.assert_array_equal(result.ml_observation, expected)
+            assert result.player_positions is not None
+            expected_positions = np.asarray(
+                [
+                    [state.player[0] / 65_536, state.player[1] / 65_536]
+                    for state in states
+                ],
+                dtype=np.float32,
+            )
+            np.testing.assert_array_equal(result.player_positions, expected_positions)
+            result = environment.step_batch(actions)
+            if bool(np.any(result.done)):
+                break
+
+
+def test_native_ml_path_omits_snapshots_without_changing_game_results() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=True,
+            pixels=True,
+            board=True,
+        ) as reference,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as native_ml,
+    ):
+        reference_result = reference.reset_batch([42, 13])
+        ml_result = native_ml.reset_batch([42, 13])
+        for actions in ([0, 1], [2, 3], [8, 0], [4, 5]):
+            np.testing.assert_array_equal(
+                reference_result.frames,
+                ml_result.frames,
+            )
+            np.testing.assert_array_equal(
+                reference_result.rewards,
+                ml_result.rewards,
+            )
+            np.testing.assert_array_equal(
+                reference_result.done,
+                ml_result.done,
+            )
+            np.testing.assert_array_equal(
+                reference_result.state_hashes,
+                ml_result.state_hashes,
+            )
+            np.testing.assert_array_equal(
+                reference_result.pixel_hashes,
+                ml_result.pixel_hashes,
+            )
+            assert ml_result.snapshot_bytes == (None, None)
+            assert ml_result.ml_observation is not None
+            assert ml_result.player_positions is not None
+            ml_result = native_ml.step_batch(actions)
+            reference_result = reference.step_batch(actions)
+            if bool(np.any(reference_result.done)):
+                break
+
+
+def test_enabling_ml_preserves_existing_optional_observations() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=True,
+            pixels=True,
+            board=True,
+        ) as reference,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=True,
+            pixels=True,
+            board=True,
+            ml=True,
+        ) as augmented,
+    ):
+        reference_result = reference.reset_batch([42, 13])
+        augmented_result = augmented.reset_batch([42, 13])
+        for actions in ([0, 1], [2, 3], [8, 0]):
+            np.testing.assert_array_equal(
+                reference_result.state_hashes,
+                augmented_result.state_hashes,
+            )
+            np.testing.assert_array_equal(
+                reference_result.pixel_hashes,
+                augmented_result.pixel_hashes,
+            )
+            np.testing.assert_array_equal(
+                reference_result.pixels, augmented_result.pixels
+            )
+            np.testing.assert_array_equal(
+                reference_result.board, augmented_result.board
+            )
+            assert reference_result.snapshot_bytes == augmented_result.snapshot_bytes
+            assert augmented_result.ml_observation is not None
+            reference_result = reference.step_batch(actions)
+            augmented_result = augmented.step_batch(actions)
+            if bool(np.any(reference_result.done)):
+                break
+
+
+def test_native_ml_requires_positive_grid_spacing() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        NativeBatchEnvironment(ml=True, ml_grid_spacing=0)
 
 
 def test_board_full_preserves_offscreen_hazards_and_legacy_board_does_not() -> None:

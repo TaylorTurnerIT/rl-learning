@@ -11,6 +11,7 @@ from dodge.native.batch import NativeBatchEnvironment, _decode_snapshot
 from dodge.native.differential import NativeDifferentialError
 from dodge.neat.state import PlayerState, RawState
 from dodge.ng.dqn import (
+    RELEVANCE_GATE_FRAMES,
     WAYPOINT_OBSERVATION_SIZE,
     DQNConfig,
     DuelingWaypointDQN,
@@ -18,6 +19,7 @@ from dodge.ng.dqn import (
     ReplayBuffer,
     _checkpoint_payload,
     _load_checkpoint,
+    _native_ml_state,
     _player_position,
     encode_waypoint_observation,
 )
@@ -78,6 +80,29 @@ def test_fast_player_position_reader_matches_full_snapshot_decoder() -> None:
     )
     with pytest.raises(NativeDifferentialError, match="too short"):
         _player_position(b"DGSN")
+
+
+def test_native_ml_result_satisfies_waypoint_dqn_contract_without_snapshots() -> None:
+    with NativeBatchEnvironment(
+        step_frames=4,
+        full_state=False,
+        pixels=False,
+        board=False,
+        ml=True,
+        ml_grid_spacing=32,
+    ) as environment:
+        result = environment.reset_batch([30_200, 30_201])
+        observations, positions = _native_ml_state(result)
+
+    assert observations.shape == (2, WAYPOINT_OBSERVATION_SIZE)
+    assert positions.shape == (2, 2)
+    assert result.snapshot_bytes == (None, None)
+
+
+def test_dqn_relevance_gate_is_not_the_episode_safety_horizon() -> None:
+    config = DQNConfig()
+
+    assert config.max_episode_steps * config.step_frames > RELEVANCE_GATE_FRAMES
 
 
 def test_dueling_waypoint_dqn_returns_one_value_per_native_action() -> None:

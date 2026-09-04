@@ -20,6 +20,7 @@ from dodge.control import ControlRuntimeError
 from dodge.dataset import ACTION_CHOICES
 from dodge.native.batch import (
     NativeBatchEnvironment,
+    NativeBatchResult,
     _decode_snapshot,
     _raw_state_from_snapshot,
 )
@@ -34,7 +35,8 @@ from dodge.ng.report import summarize_evaluation
 from dodge.ng.waypoint import WaypointController, WaypointGrid
 
 WAYPOINT_OBSERVATION_SIZE: Final[int] = OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION + 4
-WAYPOINT_DQN_VERSION: Final[int] = 1
+WAYPOINT_DQN_VERSION: Final[int] = 2
+RELEVANCE_GATE_FRAMES: Final[int] = 800
 WaypointExecution = Literal["serial", "parallel"]
 
 
@@ -116,7 +118,7 @@ class DQNConfig:
     grid_spacing: int = 32
     hold_decisions: int = 8
     step_frames: int = 4
-    max_episode_steps: int = 200
+    max_episode_steps: int = 2_000
     native_lanes: int = 32
     native_execution: WaypointExecution = "parallel"
     checkpoint_every: int = 2_000
@@ -531,6 +533,32 @@ def _observations_from_snapshots(
     )
 
 
+def _native_ml_state(result: NativeBatchResult) -> tuple[np.ndarray, np.ndarray]:
+    """Validate and return the native ML features and player positions."""
+    observations = result.ml_observation
+    positions = result.player_positions
+    if observations is None or positions is None:
+        raise ControlRuntimeError(
+            "waypoint DQN requires native ML observations and player positions"
+        )
+    if observations.shape != (result.lane_count, WAYPOINT_OBSERVATION_SIZE):
+        raise ControlRuntimeError(
+            "native ML observations have unexpected shape: "
+            f"expected {(result.lane_count, WAYPOINT_OBSERVATION_SIZE)}, "
+            f"got {observations.shape}"
+        )
+    if positions.shape != (result.lane_count, 2):
+        raise ControlRuntimeError(
+            "native ML player positions have unexpected shape: "
+            f"expected {(result.lane_count, 2)}, got {positions.shape}"
+        )
+    if observations.dtype != np.float32 or positions.dtype != np.float32:
+        raise ControlRuntimeError("native ML arrays must use float32 values")
+    if not np.isfinite(observations).all() or not np.isfinite(positions).all():
+        raise ControlRuntimeError("native ML arrays must be finite")
+    return observations, positions
+
+
 def _epsilon(config: DQNConfig, step: int) -> float:
     decay_steps = max(config.total_steps // 2, 1)
     progress = min(1.0, step / decay_steps)
@@ -604,7 +632,8 @@ def _next_training_seed(
 
 def _collect_macro_transition(
     environment: NativeBatchEnvironment,
-    current_snapshots: list[bytes | None],
+    current_observations: np.ndarray,
+    current_positions: np.ndarray,
     controller: WaypointController,
     model: DuelingWaypointDQN,
     config: DQNConfig,
@@ -615,28 +644,23 @@ def _collect_macro_transition(
     rng: np.random.Generator,
     device: torch.device,
     global_step: int,
-) -> tuple[list[bytes | None], int, int, dict[str, float]]:
-    lane_count = len(current_snapshots)
-    start_snapshots = [
-        _snapshot_at(current_snapshots, lane) for lane in range(lane_count)
-    ]
-    start_states = [
-        _raw_state_from_snapshot(_decode_snapshot(snapshot))
-        for snapshot in start_snapshots
-    ]
-    observations = np.stack(
-        [encode_waypoint_observation(state, controller.grid) for state in start_states]
-    )
+) -> tuple[np.ndarray, np.ndarray, int, int, dict[str, float]]:
+    lane_count = len(current_observations)
+    observations = current_observations.copy()
     epsilon = _epsilon(config, global_step)
     waypoint_actions = _choose_actions(model, observations, epsilon, rng, device)
     target_cells = [
-        controller.decide(state, int(action)).target_cell
-        for state, action in zip(start_states, waypoint_actions, strict=True)
+        controller.grid.target_for_action(
+            float(current_positions[lane, 0]),
+            float(current_positions[lane, 1]),
+            int(action),
+        )[1]
+        for lane, action in enumerate(waypoint_actions)
     ]
     macro_rewards = np.zeros(lane_count, dtype=np.float32)
     macro_terminated = np.zeros(lane_count, dtype=bool)
     macro_truncated = np.zeros(lane_count, dtype=bool)
-    macro_next_snapshots: list[bytes | None] = [None] * lane_count
+    macro_next_observations = np.zeros_like(observations)
     boundary = np.zeros(lane_count, dtype=bool)
     native_steps = 0
     for _ in range(config.hold_decisions):
@@ -644,14 +668,15 @@ def _collect_macro_transition(
         for lane in range(lane_count):
             if boundary[lane]:
                 continue
-            x, y = _player_position(_snapshot_at(current_snapshots, lane))
+            x, y = current_positions[lane]
             native_actions[lane] = controller.steer_position(
-                x,
-                y,
+                float(x),
+                float(y),
                 target_cells[lane],
                 int(waypoint_actions[lane]),
             ).native_action_index
         result = environment.step_batch(native_actions)
+        result_observations, result_positions = _native_ml_state(result)
         native_steps += lane_count
         reset_lanes: set[int] = set()
         for lane in range(lane_count):
@@ -660,7 +685,8 @@ def _collect_macro_transition(
                 if actual_terminal:
                     reset_lanes.add(lane)
                 else:
-                    current_snapshots[lane] = result.snapshot_bytes[lane]
+                    current_observations[lane] = result_observations[lane]
+                    current_positions[lane] = result_positions[lane]
                     episode_steps[lane] += 1
                 continue
             macro_rewards[lane] += float(result.rewards[lane])
@@ -672,10 +698,11 @@ def _collect_macro_transition(
                 boundary[lane] = True
                 macro_terminated[lane] = actual_terminal
                 macro_truncated[lane] = truncated
-                macro_next_snapshots[lane] = result.snapshot_bytes[lane]
+                macro_next_observations[lane] = result_observations[lane]
                 reset_lanes.add(lane)
             else:
-                current_snapshots[lane] = result.snapshot_bytes[lane]
+                current_observations[lane] = result_observations[lane]
+                current_positions[lane] = result_positions[lane]
         if reset_lanes:
             replacement_seeds: list[int] = []
             ordered_reset_lanes = sorted(reset_lanes)
@@ -686,17 +713,14 @@ def _collect_macro_transition(
                 np.asarray(ordered_reset_lanes, dtype=np.uint32),
                 np.asarray(replacement_seeds, dtype=np.uint32),
             )
+            reset_observations, reset_positions = _native_ml_state(reset)
             for index, lane in enumerate(ordered_reset_lanes):
-                current_snapshots[lane] = reset.snapshot_bytes[index]
+                current_observations[lane] = reset_observations[index]
+                current_positions[lane] = reset_positions[index]
                 episode_steps[lane] = 0
-    next_snapshots = [
-        _snapshot_at(
-            [macro_next_snapshots[lane] if boundary[lane] else current_snapshots[lane]],
-            0,
-        )
-        for lane in range(lane_count)
-    ]
-    next_observations = _observations_from_snapshots(next_snapshots, controller.grid)
+    next_observations = np.where(
+        boundary[:, None], macro_next_observations, current_observations
+    )
     for lane in range(lane_count):
         replay_accumulator.append(
             lane,
@@ -709,7 +733,8 @@ def _collect_macro_transition(
             bool(macro_truncated[lane]),
         )
     return (
-        current_snapshots,
+        current_observations,
+        current_positions,
         seed_cursor,
         native_steps,
         {
@@ -773,34 +798,27 @@ def _evaluate_batch(
     environment = NativeBatchEnvironment(
         step_frames=config.step_frames,
         execution=config.native_execution,
-        full_state=True,
+        full_state=False,
         pixels=False,
         board=False,
+        ml=True,
+        ml_grid_spacing=config.grid_spacing,
     )
     lane_count = len(seeds)
     active = np.ones(lane_count, dtype=bool)
     episode_steps = np.zeros(lane_count, dtype=np.int64)
     survival = np.zeros(lane_count, dtype=np.float32)
     terminated = np.zeros(lane_count, dtype=bool)
-    current_snapshots: list[bytes | None]
+    current_observations: np.ndarray
+    current_positions: np.ndarray
     try:
         result = environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
-        current_snapshots = list(result.snapshot_bytes)
+        current_observations, current_positions = _native_ml_state(result)
+        current_observations = current_observations.copy()
+        current_positions = current_positions.copy()
         while bool(active.any()):
             active_indices = np.flatnonzero(active)
-            start_snapshots = [
-                _snapshot_at(current_snapshots, int(lane)) for lane in active_indices
-            ]
-            start_states = [
-                _raw_state_from_snapshot(_decode_snapshot(snapshot))
-                for snapshot in start_snapshots
-            ]
-            observations = np.stack(
-                [
-                    encode_waypoint_observation(state, controller.grid)
-                    for state in start_states
-                ]
-            )
+            observations = current_observations[active_indices]
             with torch.inference_mode():
                 waypoint_actions = (
                     model(torch.from_numpy(observations).to(device))
@@ -810,8 +828,12 @@ def _evaluate_batch(
                     .astype(np.uint8)
                 )
             target_cells = [
-                controller.decide(state, int(action)).target_cell
-                for state, action in zip(start_states, waypoint_actions, strict=True)
+                controller.grid.target_for_action(
+                    float(current_positions[int(lane), 0]),
+                    float(current_positions[int(lane), 1]),
+                    int(action),
+                )[1]
+                for lane, action in zip(active_indices, waypoint_actions, strict=True)
             ]
             block_done = np.zeros(len(active_indices), dtype=bool)
             for _ in range(config.hold_decisions):
@@ -820,14 +842,17 @@ def _evaluate_batch(
                     if block_done[local]:
                         continue
                     lane = int(lane_value)
-                    x, y = _player_position(_snapshot_at(current_snapshots, lane))
+                    x, y = current_positions[lane]
                     native_actions[lane] = controller.steer_position(
-                        x,
-                        y,
+                        float(x),
+                        float(y),
                         target_cells[local],
                         int(waypoint_actions[local]),
                     ).native_action_index
                 result = environment.step_batch(native_actions)
+                result_observations, result_positions = _native_ml_state(result)
+                current_observations[:] = result_observations
+                current_positions[:] = result_positions
                 completed: list[int] = []
                 for local, lane_value in enumerate(active_indices):
                     if block_done[local]:
@@ -835,7 +860,6 @@ def _evaluate_batch(
                     lane = int(lane_value)
                     survival[lane] += float(result.rewards[lane])
                     episode_steps[lane] += 1
-                    current_snapshots[lane] = result.snapshot_bytes[lane]
                     actual_terminal = bool(result.done[lane])
                     truncated = (
                         not actual_terminal
@@ -857,8 +881,10 @@ def _evaluate_batch(
                         np.asarray(reset_lanes, dtype=np.uint32),
                         np.zeros(len(reset_lanes), dtype=np.uint32),
                     )
+                    reset_observations, reset_positions = _native_ml_state(reset)
                     for index, lane in enumerate(reset_lanes):
-                        current_snapshots[lane] = reset.snapshot_bytes[index]
+                        current_observations[lane] = reset_observations[index]
+                        current_positions[lane] = reset_positions[index]
                         episode_steps[lane] = 0
                 if not bool(active.any()):
                     break
@@ -882,8 +908,11 @@ def _checkpoint_contract(config: DQNConfig) -> dict[str, object]:
         },
         "observation_size": WAYPOINT_OBSERVATION_SIZE,
         "observation_contract": (
-            "projected_state_with_time_to_intersection+grid_cell+overflow"
+            "native_projected_state_with_time_to_intersection+grid_cell+overflow"
         ),
+        "observation_source": "native_ml_with_python_reference_parity",
+        "relevance_gate_frames": RELEVANCE_GATE_FRAMES,
+        "max_episode_steps": config.max_episode_steps,
         "replay": {
             "capacity": config.replay_capacity,
             "n_step": config.n_step,
@@ -980,6 +1009,8 @@ def _load_checkpoint(
         raise ValueError("DQN checkpoint must contain an object")
     if payload.get("kind") != "dodge_ng_waypoint_dqn_checkpoint":
         raise ValueError("DQN checkpoint kind is invalid")
+    if payload.get("version") != WAYPOINT_DQN_VERSION:
+        raise ValueError("DQN checkpoint version is invalid")
     if payload.get("manifest_sha256") != manifest.sha256:
         raise ValueError("DQN checkpoint manifest does not match NG manifest")
     if payload.get("config") != config.to_json():
@@ -1091,34 +1122,44 @@ def train_waypoint_dqn(
     environment = NativeBatchEnvironment(
         step_frames=config.step_frames,
         execution=config.native_execution,
-        full_state=True,
+        full_state=False,
         pixels=False,
         board=False,
+        ml=True,
+        ml_grid_spacing=config.grid_spacing,
     )
     initial_seeds = manifest.training_seeds[: config.native_lanes]
     if len(initial_seeds) < config.native_lanes:
         raise ValueError("native lane count exceeds NG training seed count")
     episode_steps = np.zeros(config.native_lanes, dtype=np.int64)
-    current_snapshots: list[bytes | None]
+    current_observations: np.ndarray
+    current_positions: np.ndarray
     try:
         result = environment.reset_batch(np.asarray(initial_seeds, dtype=np.uint32))
-        current_snapshots = list(result.snapshot_bytes)
+        current_observations, current_positions = _native_ml_state(result)
+        current_observations = current_observations.copy()
+        current_positions = current_positions.copy()
         while step < config.total_steps:
-            current_snapshots, seed_cursor, native_steps, collection = (
-                _collect_macro_transition(
-                    environment,
-                    current_snapshots,
-                    controller,
-                    model,
-                    config,
-                    episode_steps,
-                    manifest.training_seeds,
-                    seed_cursor,
-                    accumulator,
-                    rng,
-                    device,
-                    step,
-                )
+            (
+                current_observations,
+                current_positions,
+                seed_cursor,
+                native_steps,
+                collection,
+            ) = _collect_macro_transition(
+                environment,
+                current_observations,
+                current_positions,
+                controller,
+                model,
+                config,
+                episode_steps,
+                manifest.training_seeds,
+                seed_cursor,
+                accumulator,
+                rng,
+                device,
+                step,
             )
             total_native_steps += native_steps
             step += 1
@@ -1243,8 +1284,9 @@ def train_waypoint_dqn(
                 "contract": _checkpoint_contract(config),
                 "observation_size": WAYPOINT_OBSERVATION_SIZE,
                 "observation_contract": (
-                    "projected_state_with_time_to_intersection+grid_cell+overflow"
+                    "native_projected_state_with_time_to_intersection+grid_cell+overflow"
                 ),
+                "observation_source": "native_ml_with_python_reference_parity",
                 "grid_shape": list(grid.shape),
                 "point_count": grid.point_count,
                 "actions": list(ACTION_CHOICES),
@@ -1256,11 +1298,14 @@ def train_waypoint_dqn(
                 "final_training_evaluation": final_training,
                 "final_evaluation": final_holdout,
                 "target": {
-                    "survival_frames": config.max_episode_steps * config.step_frames,
+                    "relevance_gate_frames": RELEVANCE_GATE_FRAMES,
+                    "safety_limit_frames": (
+                        config.max_episode_steps * config.step_frames
+                    ),
                     "training_mean_reached": float(
                         final_training["summary"]["mean_survival_frames"]
                     )
-                    >= config.max_episode_steps * config.step_frames,
+                    >= RELEVANCE_GATE_FRAMES,
                 },
             },
         ),
@@ -1319,7 +1364,7 @@ def _build_report(path: Path, manifest: SeedManifest) -> str:
             _summary_row("Training", training),
             _summary_row("Holdout", holdout),
             "",
-            "800-frame training gate: **"
+            "800-frame relevance gate: **"
             f"{'PASS' if run['target']['training_mean_reached'] else 'FAIL'}**.",
             "",
             "Selection used inner training seeds; holdout was evaluated "
@@ -1359,7 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--grid-spacing", type=int, default=32)
     parser.add_argument("--hold-decisions", type=int, default=8)
     parser.add_argument("--step-frames", type=int, default=4)
-    parser.add_argument("--max-episode-steps", type=int, default=200)
+    parser.add_argument("--max-episode-steps", type=int, default=2_000)
     parser.add_argument("--native-lanes", type=int, default=32)
     parser.add_argument(
         "--native-execution",

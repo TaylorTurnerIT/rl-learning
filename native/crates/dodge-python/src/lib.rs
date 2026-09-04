@@ -2,7 +2,8 @@
 
 use dodge_batch::{
     ACTION_COUNT, BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, BatchConfig, BatchEnvironment,
-    BatchError, BatchObservation, ExecutionMode, ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
+    BatchError, BatchObservation, ExecutionMode, ML_OBSERVATION_SIZE, ObservationFlags,
+    PIXEL_HEIGHT, PIXEL_WIDTH,
 };
 use dodge_core::{Action, FrameEvent, Mode};
 use ndarray::{Array1, Array2, Array3, Array4};
@@ -23,7 +24,7 @@ pub struct NativeBatchEnv {
 #[pymethods]
 impl NativeBatchEnv {
     #[new]
-    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true, include_offscreen_board=false))]
+    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true, include_offscreen_board=false, ml=false, ml_grid_spacing=32))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         step_frames: u32,
@@ -34,6 +35,8 @@ impl NativeBatchEnv {
         difficulty: u8,
         patterns_enabled: bool,
         powerups_enabled: bool,
+        ml: bool,
+        ml_grid_spacing: u32,
         include_offscreen_board: bool,
     ) -> PyResult<Self> {
         let execution = parse_execution(execution)?;
@@ -44,6 +47,8 @@ impl NativeBatchEnv {
         config.observations = ObservationFlags {
             full_state,
             pixels,
+            ml,
+            ml_grid_spacing,
             board,
             include_offscreen_board,
         };
@@ -80,6 +85,8 @@ impl NativeBatchEnv {
         flags.set_item("pixels", self.flags.pixels)?;
         flags.set_item("board", self.flags.board)?;
         flags.set_item(
+        flags.set_item("ml", self.flags.ml)?;
+        flags.set_item("ml_grid_spacing", self.flags.ml_grid_spacing)?;
             "include_offscreen_board",
             self.flags.include_offscreen_board,
         )?;
@@ -185,6 +192,7 @@ impl NativeBatchEnv {
 
 #[pymodule]
 fn dodge_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add("ML_OBSERVATION_SHAPE", (ML_OBSERVATION_SIZE,))?;
     module.add("BATCH_SCHEMA_VERSION", BATCH_SCHEMA_VERSION)?;
     module.add("BOARD_SHAPE", (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH))?;
     module.add("PIXEL_SHAPE", (PIXEL_HEIGHT, PIXEL_WIDTH))?;
@@ -294,6 +302,44 @@ fn observations_to_dict<'py>(
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
             .into_pyarray(py),
         )
+    let ml_observation = if flags.ml {
+        let values = observations
+            .iter()
+            .flat_map(|value| {
+                value
+                    .ml_observation
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|observation| observation.iter().copied())
+            })
+            .collect::<Vec<_>>();
+        Some(
+            Array2::from_shape_vec((lane_count, ML_OBSERVATION_SIZE), values)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+                .into_pyarray(py),
+        )
+    } else {
+        None
+    };
+    let player_positions = if flags.ml {
+        let values = observations
+            .iter()
+            .flat_map(|value| {
+                value
+                    .player_position
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|position| position.iter().copied())
+            })
+            .collect::<Vec<_>>();
+        Some(
+            Array2::from_shape_vec((lane_count, 2), values)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+                .into_pyarray(py),
+        )
+    } else {
+        None
+    };
     } else {
         None
     };
@@ -318,6 +364,8 @@ fn observations_to_dict<'py>(
     result.set_item("state_hashes", state_hashes)?;
     result.set_item("pixel_hashes", pixel_hashes)?;
     result.set_item("modes", modes)?;
+    result.set_item("ml_observation", ml_observation)?;
+    result.set_item("player_positions", player_positions)?;
     result.set_item("event_flags", event_flags)?;
     result.set_item("pixels", pixels)?;
     result.set_item("board", board)?;

@@ -11,6 +11,7 @@ G7|Train an exact-raster pixel CNN with temporal context and measure visual lear
 G8|Treat 800 native survival frames as the first true-learning threshold for the focused baseline campaign; do not call shorter survival progress learned.
 G9|Test whether waypoint-discretized movement plus DQN improves action credit, sample efficiency, and 800-frame learning over direct nine-action PPO.
 G10|Retain predictive hazard-field/gradient control as matched later method; separate hazard prediction from movement control and compare under same NG protocol.
+G11|Move waypoint ML observation extraction into the native batch runtime; preserve Python reference parity and expose uncapped survival beyond the 800-frame gate.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -33,6 +34,7 @@ C17|Waypoint transitions use fixed native frame cadence and explicit target reac
 C18|Waypoint oracle feasibility may use canonical full state; learned DQN input contains only declared observation channels and no hidden simulator state.
 C19|Waypoint/DQN training, inner selection, and HPO use training seeds only; holdout remains final report-only under same 800-frame gate.
 C20|Hazard-field control predicts future risk at declared horizons; instantaneous occupancy alone cannot define gradient labels or pass method comparison.
+C21|Native ML observation batches may omit canonical snapshots; legacy full-state, board, pixel, and snapshot APIs remain unchanged.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -58,6 +60,7 @@ I20|`src/dodge/ng/waypoint.py` owns grid geometry, valid-center generation, wayp
 I21|`src/dodge/ng/dqn.py` owns waypoint DQN observations, replay, target updates, checkpoints, evaluation, and run provenance.
 I22|`src/dodge/ng/hazard.py` owns future-horizon hazard labels, hazard-field prediction, gradient/waypoint control, and matched comparison artifacts.
 I23|NG waypoint commands are `dodge-ng-waypoint-feasibility` and `dodge-ng-dqn`; hazard-field command is `dodge-ng-hazard`.
+I24|`native/crates/dodge-batch/src/ml.rs` owns native waypoint ML feature extraction; `NativeBatchEnv` optionally returns `ml_observation` with shape `(N,225)` and player coordinates.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -112,6 +115,10 @@ V43|Hazard-field labels encode future collision risk at each declared horizon; c
 V44|Waypoint runners decode canonical snapshot bytes before typed-state conversion; invalid or missing snapshots fail closed.
 V45|Waypoint batch evaluation resets every native-done lane before next step, including inactive dummy lanes; measured lane survival remains unchanged by dummy resets.
 V46|Fast waypoint steering reads player coordinates from validated canonical snapshot prefix; coordinates equal full decode and invalid prefix fails closed.
+V47|Native waypoint ML features equal `encode_waypoint_observation` after canonical state conversion across enemies, AOEs, patterns, ordering ties, overflow, and grid spacing.
+V48|`ml_observation` returns finite `(N,225)` `float32` rows; enabling it does not alter state, pixel, board, reward, done, hash, or snapshot results.
+V49|DQN hot collection uses native ML observations and native player coordinates without full Python snapshot decoding; the reference encoder remains callable for parity tests.
+V50|800 frames remains a relevance gate only; DQN training/evaluation horizons may exceed 800 and report uncapped survival until terminal or an explicit safety limit.
 
 §T
 id|status|task|cites
@@ -148,6 +155,8 @@ T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevan
 T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
 T32|.|Implement future-horizon hazard labels, hazard-field model, reachable gradient/waypoint controller, and method-specific tests.|V43,G10,I22,C20
 T33|.|Run matched waypoint/DQN versus hazard-field comparison and freeze next method from training-side evidence before locked holdout report.|V42,V43,G6,G10,I22
+T34|x|Add native `ml.rs` waypoint feature encoding, optional batch/PyO3 `ml_observation` and player-coordinate outputs, and canonical Python parity tests.|V47,V48,I24,C21
+T35|x|Migrate waypoint DQN collection/evaluation to native ML observations, retain a reference path for debugging, remove the 800-frame horizon cap, and benchmark the hot path.|V49,V50,G11,I21,I24
 
 §B
 id|date|cause|fix
@@ -177,3 +186,5 @@ B23|2026-09-03|First waypoint DQN lint gate found unused import and line-width d
 B24|2026-09-03|DQN formatter left long metadata literals and report strings outside line limit.|Wrap remaining literals and rerun targeted lint before behavioral verification.
 B25|2026-09-03|Waypoint DQN decoded full canonical entity/pattern graphs to read player coordinates on every held steering frame, making long training impractical.|Read validated fixed snapshot prefix for player position; enforce V46 with full-decoder parity and malformed-prefix tests.
 B26|2026-09-03|Fast snapshot reader regression test added private imports out of Ruff order.|Sort test imports and rerun targeted lint before behavioral verification.
+B27|2026-09-04|Native ML encoder assigned an `f64` stage calculation directly into its `f32` feature buffer.|Cast every native feature at the output boundary and keep the native ML lint/build gate mandatory.
+B28|2026-09-04|Native ML encoder initially used dynamic array indexing and a derived partial order that violated the native safety lint gate.|Use checked feature writes and an explicit total float ordering before native verification.

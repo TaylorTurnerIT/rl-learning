@@ -19,6 +19,7 @@ from dodge.neat.state import (
 )
 
 Execution = Literal["serial", "parallel"]
+ML_OBSERVATION_SIZE = 225
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,8 @@ class NativeBatchResult:
     modes: np.ndarray
     event_flags: np.ndarray
     pixels: np.ndarray | None
+    ml_observation: np.ndarray | None
+    player_positions: np.ndarray | None
     board: np.ndarray | None
     snapshot_bytes: tuple[bytes | None, ...]
 
@@ -61,6 +64,8 @@ class NativeBatchEnvironment:
         pixels: bool = False,
         board: bool = True,
         difficulty: int = 2,
+        ml: bool = False,
+        ml_grid_spacing: int = 32,
         patterns_enabled: bool = True,
         powerups_enabled: bool = True,
         include_offscreen_board: bool = False,
@@ -68,6 +73,12 @@ class NativeBatchEnvironment:
         if not 3 <= step_frames <= 5:
             raise ValueError("step_frames must be between 3 and 5")
         if execution not in {"serial", "parallel"}:
+        if (
+            isinstance(ml_grid_spacing, bool)
+            or not isinstance(ml_grid_spacing, int)
+            or ml_grid_spacing < 1
+        ):
+            raise ValueError("ml_grid_spacing must be a positive integer")
             raise ValueError("execution must be serial or parallel")
         if not 1 <= difficulty <= 3:
             raise ValueError("difficulty must be between 1 and 3")
@@ -85,6 +96,8 @@ class NativeBatchEnvironment:
             pixels,
             board,
             difficulty,
+            ml,
+            ml_grid_spacing,
             patterns_enabled,
             powerups_enabled,
             include_offscreen_board,
@@ -92,6 +105,8 @@ class NativeBatchEnvironment:
         self.step_frames = step_frames
         self.execution = execution
         self.full_state_enabled = full_state
+        self.ml_enabled = ml
+        self.ml_grid_spacing = ml_grid_spacing
         self.pixels_enabled = pixels
         self.board_enabled = board
         self.include_offscreen_board = include_offscreen_board
@@ -180,6 +195,22 @@ class NativeBatchEnvironment:
     def observe_board_19x16(self) -> np.ndarray:
         self._ensure_open()
         result = self._require_result()
+    def observe_ml(self) -> np.ndarray:
+        """Return native waypoint features with shape ``(lanes, 225)``."""
+        self._ensure_open()
+        result = self._require_result()
+        if result.ml_observation is None:
+            raise ControlRuntimeError("ML observation was not enabled")
+        return result.ml_observation
+
+    def observe_player_positions(self) -> np.ndarray:
+        """Return native player-center coordinates with shape ``(lanes, 2)``."""
+        self._ensure_open()
+        result = self._require_result()
+        if result.player_positions is None:
+            raise ControlRuntimeError("ML player positions were not enabled")
+        return result.player_positions
+
         if result.board is None:
             raise ControlRuntimeError("board observation was not enabled")
         return result.board
@@ -322,6 +353,8 @@ def _result_from_payload(payload: MappingLike) -> NativeBatchResult:
         pixel_hashes=_array(payload, "pixel_hashes"),
         modes=_array(payload, "modes"),
         event_flags=_array(payload, "event_flags"),
+        ml_observation=_optional_array(payload, "ml_observation"),
+        player_positions=_optional_array(payload, "player_positions"),
         pixels=_optional_array(payload, "pixels"),
         board=_optional_array(payload, "board"),
         snapshot_bytes=snapshots,

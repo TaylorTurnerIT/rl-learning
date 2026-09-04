@@ -9,8 +9,10 @@ use dodge_core::{
 use rayon::prelude::*;
 
 mod board;
+mod ml;
 
 pub use board::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_VALUES, BOARD_WIDTH, Board19x16};
+pub use ml::{DEFAULT_GRID_SPACING, ML_OBSERVATION_SIZE, encode_waypoint_observation};
 
 const START_HOLD_FRAMES: usize = 13;
 
@@ -38,6 +40,8 @@ pub struct ObservationFlags {
     pub pixels: bool,
     pub board: bool,
     pub include_offscreen_board: bool,
+    pub ml: bool,
+    pub ml_grid_spacing: u32,
 }
 
 impl ObservationFlags {
@@ -45,6 +49,8 @@ impl ObservationFlags {
         Self {
             full_state: true,
             pixels: true,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: true,
             include_offscreen_board: false,
         }
@@ -54,6 +60,8 @@ impl ObservationFlags {
         Self {
             full_state: false,
             pixels: false,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: true,
             include_offscreen_board: false,
         }
@@ -63,6 +71,8 @@ impl ObservationFlags {
         Self {
             full_state: true,
             pixels: true,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: false,
             include_offscreen_board: false,
         }
@@ -94,6 +104,11 @@ impl BatchConfig {
         }
     }
 
+        if self.observations.ml && self.observations.ml_grid_spacing == 0 {
+            return Err(BatchError::InvalidMlGridSpacing(
+                self.observations.ml_grid_spacing,
+            ));
+        }
     fn validate(self) -> Result<Self, BatchError> {
         if !(3..=5).contains(&self.step_frames) {
             return Err(BatchError::InvalidStepFrames(self.step_frames));
@@ -123,6 +138,8 @@ pub struct BatchObservation {
     pub state_hash: u64,
     pub pixel_hash: u64,
     pub full_state: Option<FullState>,
+    pub ml_observation: Option<[f32; ML_OBSERVATION_SIZE]>,
+    pub player_position: Option<[f32; 2]>,
     pub render_state: Option<RenderState>,
     pub pixels: Option<[u8; FRAMEBUFFER_SIZE]>,
     pub board: Option<Board19x16>,
@@ -143,6 +160,7 @@ impl BatchObservation {
     }
 }
 
+    InvalidMlGridSpacing(u32),
 /// Errors raised at the batch boundary before a result can be returned.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BatchError {
@@ -162,6 +180,9 @@ impl Display for BatchError {
         match self {
             Self::InvalidStepFrames(frames) => {
                 write!(
+            Self::InvalidMlGridSpacing(spacing) => {
+                write!(formatter, "ML grid spacing must be positive: {spacing}")
+            }
                     formatter,
                     "batch step_frames must be between 3 and 5: {frames}"
                 )
@@ -603,6 +624,16 @@ fn observation_from_snapshot(
         full_state: flags.full_state.then(|| logical_state.clone()),
         render_state: flags.full_state.then(|| snapshot.render_state().clone()),
         pixels: flags.pixels.then(|| *snapshot.pixels()),
+        ml_observation: flags
+            .ml
+            .then(|| encode_waypoint_observation(logical_state, flags.ml_grid_spacing))
+            .flatten(),
+        player_position: flags.ml.then(|| {
+            [
+                logical_state.player.x.to_f32(),
+                logical_state.player.y.to_f32(),
+            ]
+        }),
         board: flags.board.then(|| {
             Board19x16::from_full_state_with_offscreen(logical_state, flags.include_offscreen_board)
         }),
