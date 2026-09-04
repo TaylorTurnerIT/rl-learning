@@ -121,6 +121,9 @@ V49|DQN hot collection uses native ML observations and native player coordinates
 V50|800 frames remains a relevance gate only; DQN training/evaluation horizons may exceed 800 and report uncapped survival until terminal or an explicit safety limit.
 V51|Waypoint grid geometry is constructed once per grid; allocation-free scalar steering emits the same native action as full `WaypointDecision` steering across positions, targets, tolerances, and action choices.
 V52|Native frame capture may avoid redundant intermediate snapshot construction only when it preserves the exact render-boundary framebuffer, render state, logical state, hashes, and canonical bytes.
+V53|The explicit ML-only native path shares the canonical simulation update and preserves logical state, RNG, frame/mode, reward, terminal flags, player positions, and feature vectors for identical seed/action traces while omitting render, hashes, and snapshots by contract.
+V54|Fast ML batch results contain ordered finite `float32` `(N,225)` observations and `(N,2)` player positions plus `uint32` frames/seeds, `float32` rewards, and boolean terminal flags.
+V55|Python batch payload parsers return their declared full or ML result type; fast ML results expose no snapshot-only fields.
 
 §T
 id|status|task|cites
@@ -161,6 +164,7 @@ T34|x|Add native `ml.rs` waypoint feature encoding, optional batch/PyO3 `ml_obse
 T35|x|Migrate waypoint DQN collection/evaluation to native ML observations, retain a reference path for debugging, remove the 800-frame horizon cap, and benchmark the hot path.|V49,V50,G11,I21,I24
 T36|x|Cache immutable waypoint geometry, add allocation-free scalar steering for the DQN hot path, and profile before/after under the same native-ML run.|V51,I20,G11
 T37|x|Remove redundant native per-frame snapshot construction while preserving exact frame-result parity, then profile the matched DQN workload again.|V52,I20,G11
+T38|x|Add a shared simulation ML-only frame path, expose fast batch reset/step results through PyO3/Python, migrate DQN to it, and verify canonical trace parity before profiling.|V53,V54,I20,G11,I24
 
 §B
 id|date|cause|fix
@@ -199,3 +203,10 @@ B32|2026-09-04|The native frame-capture change was not yet rustfmt-normalized wh
 B33|2026-09-04|The workspace native test build reached the PyO3 linker without Python C symbols in the active environment.|External PyO3/Python linker boundary; isolate core and batch verification, then restore the configured Python link environment with no behavior invariant added.
 B34|2026-09-04|The new frame-capture regression fixture included input mask 64, outside the core button domain.|Use only valid button masks in the capture sequence; no behavior invariant added.
 B35|2026-09-04|Rebuilding the editable PyO3 extension exposed a 10-argument constructor while the Python adapter supplies 12 arguments.|Keep the installed native extension constructor synchronized with the Python adapter before runtime verification; no frame-capture invariant added.
+B36|2026-09-04|ML reset borrowed lane mutably before reading lane count for its fallback error.|Capture lane count before mutable borrow; no behavior invariant added.
+B37|2026-09-04|Parallel ML result wrapper retained unused lane metadata after lane identity moved into result observation.|Remove unused wrapper field; no behavior invariant added.
+B38|2026-09-04|Python full-result parser lost its return when ML parser insertion split its body.|Restore typed full-result return and cover V55 with full/fast boundary tests.
+B39|2026-09-04|New native parity fixtures used direct action-table indexing, violating repository panic-safety lint.|Use checked action lookup in fixtures; no behavior invariant added.
+B40|2026-09-04|Native parity fixture formatting drifted from rustfmt output.|Run rustfmt before format verification; no behavior invariant added.
+B41|2026-09-04|Canonical snapshot construction moved across transition trail mutation during ML-path refactor, then closure formatting drifted.|Construct full snapshot at original post-input/pre-trail boundary and run rustfmt; V52.
+B42|2026-09-04|New Python ML boundary added two lines beyond repository Ruff width.|Wrap adapter and regression assertions before lint verification; no behavior invariant added.

@@ -8,6 +8,7 @@ from dodge.native.batch import (
     ML_OBSERVATION_SIZE,
     NativeBatchEnvironment,
     NativeDodgeEnv,
+    NativeMlBatchResult,
     _raw_state_from_snapshot,
 )
 from dodge.neat.state import EntityState, PlayerState, RawState
@@ -167,6 +168,89 @@ def test_native_ml_path_omits_snapshots_without_changing_game_results() -> None:
             reference_result = reference.step_batch(actions)
             if bool(np.any(reference_result.done)):
                 break
+
+
+def test_native_ml_fast_boundary_matches_full_batch_features_and_metadata() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=True,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as reference,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as fast,
+    ):
+        reference_result = reference.reset_batch([42, 13, 30100])
+        fast_result = fast.reset_ml_batch([42, 13, 30100])
+        assert isinstance(fast_result, NativeMlBatchResult)
+        assert not hasattr(fast_result, "snapshot_bytes")
+        assert fast_result.ml_observation.shape == (3, ML_OBSERVATION_SIZE)
+        assert fast_result.ml_observation.dtype == np.float32
+        assert fast_result.player_positions.shape == (3, 2)
+        assert fast_result.player_positions.dtype == np.float32
+        np.testing.assert_array_equal(fast_result.frames, reference_result.frames)
+        np.testing.assert_array_equal(fast_result.seeds, reference_result.seeds)
+        np.testing.assert_array_equal(
+            fast_result.ml_observation, reference_result.ml_observation
+        )
+        np.testing.assert_array_equal(
+            fast_result.player_positions, reference_result.player_positions
+        )
+
+        for step in range(90):
+            actions = [
+                step % 9,
+                (step + 2) % 9,
+                (step + 5) % 9,
+            ]
+            reference_result = reference.step_batch(actions)
+            fast_result = fast.step_ml_batch(actions)
+            np.testing.assert_array_equal(
+                fast_result.lane_ids, reference_result.lane_ids
+            )
+            np.testing.assert_array_equal(fast_result.frames, reference_result.frames)
+            np.testing.assert_array_equal(
+                fast_result.frames_advanced, reference_result.frames_advanced
+            )
+            np.testing.assert_array_equal(fast_result.rewards, reference_result.rewards)
+            np.testing.assert_array_equal(fast_result.done, reference_result.done)
+            np.testing.assert_array_equal(fast_result.seeds, reference_result.seeds)
+            np.testing.assert_array_equal(fast_result.modes, reference_result.modes)
+            np.testing.assert_array_equal(
+                fast_result.ml_observation, reference_result.ml_observation
+            )
+            np.testing.assert_array_equal(
+                fast_result.player_positions, reference_result.player_positions
+            )
+            if bool(np.any(fast_result.done)):
+                break
+
+
+def test_native_ml_lane_reset_preserves_unselected_progress() -> None:
+    with NativeBatchEnvironment(
+        step_frames=4,
+        full_state=False,
+        pixels=False,
+        board=False,
+        ml=True,
+    ) as environment:
+        environment.reset_ml_batch([13, 27])
+        environment.step_ml_batch([0, 1])
+        reset = environment.reset_ml_lanes([1], [99])
+        np.testing.assert_array_equal(reset.lane_ids, [1])
+        np.testing.assert_array_equal(reset.frames, [13])
+        np.testing.assert_array_equal(reset.seeds, [99])
+        mixed = environment.step_ml_batch([0, 0])
+        np.testing.assert_array_equal(mixed.lane_ids, [0, 1])
+        np.testing.assert_array_equal(mixed.frames, [21, 17])
+        np.testing.assert_array_equal(mixed.seeds, [13, 99])
 
 
 def test_enabling_ml_preserves_existing_optional_observations() -> None:

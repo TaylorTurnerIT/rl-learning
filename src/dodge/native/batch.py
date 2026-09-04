@@ -47,6 +47,25 @@ class NativeBatchResult:
         return int(self.frames.shape[0])
 
 
+@dataclass(frozen=True, slots=True)
+class NativeMlBatchResult:
+    """Render-free ML result returned by the Rust batch boundary."""
+
+    lane_ids: np.ndarray
+    frames: np.ndarray
+    frames_advanced: np.ndarray
+    rewards: np.ndarray
+    done: np.ndarray
+    seeds: np.ndarray
+    modes: np.ndarray
+    ml_observation: np.ndarray
+    player_positions: np.ndarray
+
+    @property
+    def lane_count(self) -> int:
+        return int(self.frames.shape[0])
+
+
 class NativeBatchEnvironment:
     """Python owner for independent native Rust lanes.
 
@@ -111,6 +130,7 @@ class NativeBatchEnvironment:
         self.board_enabled = board
         self.include_offscreen_board = include_offscreen_board
         self._last_result: NativeBatchResult | None = None
+        self._last_ml_result: NativeMlBatchResult | None = None
         self._closed = False
 
     @property
@@ -128,6 +148,7 @@ class NativeBatchEnvironment:
         payload = self._native.reset_batch(values)
         result = _result_from_payload(payload)
         self._last_result = result
+        self._last_ml_result = None
         return result
 
     def reset_lanes(self, lanes: object, seeds: object) -> NativeBatchResult:
@@ -139,6 +160,7 @@ class NativeBatchEnvironment:
         payload = self._native.reset_lanes(lane_values, seed_values)
         result = _result_from_payload(payload)
         self._last_result = result
+        self._last_ml_result = None
         return result
 
     def step_batch(self, actions: object) -> NativeBatchResult:
@@ -147,6 +169,40 @@ class NativeBatchEnvironment:
         payload = self._native.step_batch(values)
         result = _result_from_payload(payload)
         self._last_result = result
+        self._last_ml_result = None
+        return result
+
+    def reset_ml_batch(self, seeds: object) -> NativeMlBatchResult:
+        """Reset lanes without rendering or materializing canonical snapshots."""
+        self._ensure_open()
+        values = _integer_array(seeds, "seeds", maximum=32_767)
+        payload = self._native.reset_ml_batch(values)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        return result
+
+    def reset_ml_lanes(self, lanes: object, seeds: object) -> NativeMlBatchResult:
+        """Reset selected lanes through the render-free ML boundary."""
+        self._ensure_open()
+        lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
+        seed_values = _integer_array(seeds, "seeds", maximum=32_767)
+        if lane_values.shape != seed_values.shape:
+            raise ValueError("lanes and seeds must have the same length")
+        payload = self._native.reset_ml_lanes(lane_values, seed_values)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        return result
+
+    def step_ml_batch(self, actions: object) -> NativeMlBatchResult:
+        """Advance lanes without rendering or materializing snapshots."""
+        self._ensure_open()
+        values = _integer_array(actions, "actions", maximum=8)
+        payload = self._native.step_ml_batch(values)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
         return result
 
     def score_actions(
@@ -198,7 +254,7 @@ class NativeBatchEnvironment:
     def observe_ml(self) -> np.ndarray:
         """Return native waypoint features with shape ``(lanes, 225)``."""
         self._ensure_open()
-        result = self._require_result()
+        result = self._require_observation_result()
         if result.ml_observation is None:
             raise ControlRuntimeError("ML observation was not enabled")
         return result.ml_observation
@@ -206,7 +262,7 @@ class NativeBatchEnvironment:
     def observe_player_positions(self) -> np.ndarray:
         """Return native player-center coordinates with shape ``(lanes, 2)``."""
         self._ensure_open()
-        result = self._require_result()
+        result = self._require_observation_result()
         if result.player_positions is None:
             raise ControlRuntimeError("ML player positions were not enabled")
         return result.player_positions
@@ -223,11 +279,21 @@ class NativeBatchEnvironment:
     def close(self) -> None:
         self._closed = True
         self._last_result = None
+        self._last_ml_result = None
 
     def _require_result(self) -> NativeBatchResult:
         if self._last_result is None:
             raise ControlRuntimeError("call reset_batch() before observing state")
         return self._last_result
+
+    def _require_observation_result(self) -> NativeBatchResult | NativeMlBatchResult:
+        if self._last_ml_result is not None:
+            return self._last_ml_result
+        if self._last_result is not None:
+            return self._last_result
+        raise ControlRuntimeError(
+            "call reset_batch() or reset_ml_batch() before observing state"
+        )
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -358,6 +424,20 @@ def _result_from_payload(payload: MappingLike) -> NativeBatchResult:
         pixels=_optional_array(payload, "pixels"),
         board=_optional_array(payload, "board"),
         snapshot_bytes=snapshots,
+    )
+
+
+def _ml_result_from_payload(payload: MappingLike) -> NativeMlBatchResult:
+    return NativeMlBatchResult(
+        lane_ids=_array(payload, "lane_ids"),
+        frames=_array(payload, "frames"),
+        frames_advanced=_array(payload, "frames_advanced"),
+        rewards=_array(payload, "rewards"),
+        done=_array(payload, "done"),
+        seeds=_array(payload, "seeds"),
+        modes=_array(payload, "modes"),
+        ml_observation=_array(payload, "ml_observation"),
+        player_positions=_array(payload, "player_positions"),
     )
 
 

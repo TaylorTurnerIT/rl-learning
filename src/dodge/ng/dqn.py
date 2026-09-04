@@ -21,6 +21,7 @@ from dodge.dataset import ACTION_CHOICES
 from dodge.native.batch import (
     NativeBatchEnvironment,
     NativeBatchResult,
+    NativeMlBatchResult,
     _decode_snapshot,
     _raw_state_from_snapshot,
 )
@@ -533,7 +534,9 @@ def _observations_from_snapshots(
     )
 
 
-def _native_ml_state(result: NativeBatchResult) -> tuple[np.ndarray, np.ndarray]:
+def _native_ml_state(
+    result: NativeBatchResult | NativeMlBatchResult,
+) -> tuple[np.ndarray, np.ndarray]:
     """Validate and return the native ML features and player positions."""
     observations = result.ml_observation
     positions = result.player_positions
@@ -674,7 +677,7 @@ def _collect_macro_transition(
                 float(y),
                 target_cells[lane],
             )
-        result = environment.step_batch(native_actions)
+        result = environment.step_ml_batch(native_actions)
         result_observations, result_positions = _native_ml_state(result)
         native_steps += lane_count
         reset_lanes: set[int] = set()
@@ -708,7 +711,7 @@ def _collect_macro_transition(
             for _lane in ordered_reset_lanes:
                 seed, seed_cursor = _next_training_seed(training_seeds, seed_cursor)
                 replacement_seeds.append(seed)
-            reset = environment.reset_lanes(
+            reset = environment.reset_ml_lanes(
                 np.asarray(ordered_reset_lanes, dtype=np.uint32),
                 np.asarray(replacement_seeds, dtype=np.uint32),
             )
@@ -811,7 +814,7 @@ def _evaluate_batch(
     current_observations: np.ndarray
     current_positions: np.ndarray
     try:
-        result = environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
+        result = environment.reset_ml_batch(np.asarray(seeds, dtype=np.uint32))
         current_observations, current_positions = _native_ml_state(result)
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
@@ -847,7 +850,7 @@ def _evaluate_batch(
                         float(y),
                         target_cells[local],
                     )
-                result = environment.step_batch(native_actions)
+                result = environment.step_ml_batch(native_actions)
                 result_observations, result_positions = _native_ml_state(result)
                 current_observations[:] = result_observations
                 current_positions[:] = result_positions
@@ -875,7 +878,7 @@ def _evaluate_batch(
                 all_done = [lane for lane, done in enumerate(result.done) if bool(done)]
                 reset_lanes = sorted(set(completed) | set(all_done))
                 if reset_lanes:
-                    reset = environment.reset_lanes(
+                    reset = environment.reset_ml_lanes(
                         np.asarray(reset_lanes, dtype=np.uint32),
                         np.zeros(len(reset_lanes), dtype=np.uint32),
                     )
@@ -1133,7 +1136,7 @@ def train_waypoint_dqn(
     current_observations: np.ndarray
     current_positions: np.ndarray
     try:
-        result = environment.reset_batch(np.asarray(initial_seeds, dtype=np.uint32))
+        result = environment.reset_ml_batch(np.asarray(initial_seeds, dtype=np.uint32))
         current_observations, current_positions = _native_ml_state(result)
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()

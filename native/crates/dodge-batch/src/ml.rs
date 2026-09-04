@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use dodge_core::FullState;
+use dodge_core::{EnemyState, FullState, NativeGame, PatternState, PlayerState};
 
 pub const PLAYER_FEATURE_COUNT: usize = 5;
 pub const ENTITY_SLOT_COUNT: usize = 16;
@@ -34,22 +34,84 @@ pub fn encode_waypoint_observation(
     state: &FullState,
     grid_spacing: u32,
 ) -> Option<[f32; ML_OBSERVATION_SIZE]> {
+    encode_waypoint_observation_from_source(state, grid_spacing)
+}
+
+/// Encode the waypoint DQN observation directly from a live native game.
+///
+/// This shares the exact feature encoder used for canonical snapshots while
+/// avoiding a `FullState` clone and its physical framebuffer allocation.
+pub fn encode_waypoint_observation_from_game(
+    game: &NativeGame,
+    grid_spacing: u32,
+) -> Option<[f32; ML_OBSERVATION_SIZE]> {
+    encode_waypoint_observation_from_source(game, grid_spacing)
+}
+
+trait ObservationSource {
+    fn player_state(&self) -> PlayerState;
+    fn enemies(&self) -> &[EnemyState];
+    fn patterns(&self) -> &[PatternState];
+    fn active_pattern_index(&self) -> Option<usize>;
+}
+
+impl ObservationSource for FullState {
+    fn player_state(&self) -> PlayerState {
+        self.player
+    }
+
+    fn enemies(&self) -> &[EnemyState] {
+        self.enemies.as_slice()
+    }
+
+    fn patterns(&self) -> &[PatternState] {
+        self.patterns.as_slice()
+    }
+
+    fn active_pattern_index(&self) -> Option<usize> {
+        self.active_pattern
+    }
+}
+
+impl ObservationSource for NativeGame {
+    fn player_state(&self) -> PlayerState {
+        self.player()
+    }
+
+    fn enemies(&self) -> &[EnemyState] {
+        self.enemies()
+    }
+
+    fn patterns(&self) -> &[PatternState] {
+        self.patterns()
+    }
+
+    fn active_pattern_index(&self) -> Option<usize> {
+        self.active_pattern_index()
+    }
+}
+
+fn encode_waypoint_observation_from_source<S: ObservationSource>(
+    state: &S,
+    grid_spacing: u32,
+) -> Option<[f32; ML_OBSERVATION_SIZE]> {
     if grid_spacing == 0 {
         return None;
     }
 
+    let player_state = state.player_state();
     let player = Entity {
-        x: state.player.x.to_double(),
-        y: state.player.y.to_double(),
-        vx: state.player.vx.to_double(),
-        vy: state.player.vy.to_double(),
-        width: state.player.size.to_double(),
-        height: state.player.size.to_double(),
+        x: player_state.x.to_double(),
+        y: player_state.y.to_double(),
+        vx: player_state.vx.to_double(),
+        vy: player_state.vy.to_double(),
+        width: player_state.size.to_double(),
+        height: player_state.size.to_double(),
         stage: 0.0,
     };
     let mut enemies = Vec::new();
     let mut aoes = Vec::new();
-    for enemy in &state.enemies {
+    for enemy in state.enemies() {
         let size = enemy.size.to_double();
         let width = if enemy.personality >= 2 { 8.0 } else { size };
         let entity = Entity {
@@ -67,8 +129,8 @@ pub fn encode_waypoint_observation(
             enemies.push(entity);
         }
     }
-    if let Some(pattern_index) = state.active_pattern
-        && let Some(pattern) = state.patterns.get(pattern_index)
+    if let Some(pattern_index) = state.active_pattern_index()
+        && let Some(pattern) = state.patterns().get(pattern_index)
     {
         aoes.extend(pattern.rects.iter().map(pattern_entity));
     }

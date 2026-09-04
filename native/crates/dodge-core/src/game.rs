@@ -77,6 +77,30 @@ pub struct FrameResult {
     pub snapshot: Snapshot,
 }
 
+/// Result of one native simulation frame without render or snapshot capture.
+///
+/// This boundary is intentionally smaller than `FrameResult`: ML callers use
+/// the logical game state and do not need the canonical framebuffer payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MlFrameResult {
+    pub frame: u32,
+    pub mode: Mode,
+    pub done: bool,
+    pub reward: PicoFixed,
+}
+
+struct FrameBoundary {
+    reward: PicoFixed,
+    events: Vec<FrameEvent>,
+    audio: Vec<AudioEvent>,
+    snapshot: Option<Snapshot>,
+}
+
+struct FrameCapture {
+    framebuffer: IndexedFramebuffer,
+    render_state: crate::RenderState,
+}
+
 /// Source-visible side effects emitted at one completed frame boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameEvent {
@@ -237,6 +261,16 @@ impl NativeGame {
     }
 
     pub fn reset(&mut self) -> Snapshot {
+        self.reset_state();
+        self.snapshot()
+    }
+
+    /// Reset the logical game state without creating a render snapshot.
+    pub fn reset_ml(&mut self) {
+        self.reset_state();
+    }
+
+    fn reset_state(&mut self) {
         self.lifecycle = LifecycleState::new();
         self.input = InputState::new();
         self.rng.seed(self.config.seed);
@@ -278,7 +312,6 @@ impl NativeGame {
         self.transition_render_y = -128;
         self.transition_from = Mode::Menu;
         self.frame_audio.clear();
-        self.snapshot()
     }
 
     /// Rebuild a native instance at the exact logical and render boundary held
@@ -363,6 +396,45 @@ impl NativeGame {
         input_mask: u8,
         post_frame_mask: u8,
     ) -> Result<FrameResult, CoreError> {
+        let boundary = self.advance_frame_internal(input_mask, post_frame_mask, true)?;
+        let FrameBoundary {
+            reward,
+            events,
+            audio,
+            snapshot,
+        } = boundary;
+        let Some(snapshot) = snapshot else {
+            return Err(CoreError::InvalidSnapshotValue);
+        };
+        Ok(self.result_with_snapshot(reward, events, audio, snapshot))
+    }
+
+    /// Advance one frame while omitting render and snapshot materialization.
+    ///
+    /// The simulation, camera RNG, draw-side-effect RNG, and particle updates
+    /// remain shared with the canonical path. The physical framebuffer is not
+    /// updated because this boundary is only valid for ML consumers that do
+    /// not request pixels, hashes, or snapshots.
+    pub fn advance_frame_ml(
+        &mut self,
+        input_mask: u8,
+        post_frame_mask: u8,
+    ) -> Result<MlFrameResult, CoreError> {
+        let boundary = self.advance_frame_internal(input_mask, post_frame_mask, false)?;
+        Ok(MlFrameResult {
+            frame: self.lifecycle.frame,
+            mode: self.lifecycle.mode,
+            done: self.lifecycle.dead,
+            reward: boundary.reward,
+        })
+    }
+
+    fn advance_frame_internal(
+        &mut self,
+        input_mask: u8,
+        post_frame_mask: u8,
+        capture_render: bool,
+    ) -> Result<FrameBoundary, CoreError> {
         InputState::validate_mask(input_mask)?;
         InputState::validate_mask(post_frame_mask)?;
         self.frame_audio.clear();
@@ -464,8 +536,16 @@ impl NativeGame {
             PicoFixed::ZERO
         };
         self.update_camera();
-        let render_state = self.render_current_frame();
-        let draw_framebuffer = self.screen.project(&render_state);
+        let capture = if capture_render {
+            let render_state = self.render_current_frame();
+            let framebuffer = self.screen.project(&render_state);
+            Some(FrameCapture {
+                framebuffer,
+                render_state,
+            })
+        } else {
+            None
+        };
         self.apply_draw_side_effects(mode_before);
         // The cartridge exits from the update loop immediately after death,
         // before it can advance to the next command. Preserve the terminal
@@ -477,11 +557,11 @@ impl NativeGame {
             post_frame_mask
         };
         self.input.finalize_frame(observed_post_mask);
-        let result = self.result_with_snapshot(
-            reward,
-            events,
-            self.frame_audio.clone(),
-            Snapshot::with_framebuffer_from_game(self, draw_framebuffer, render_state),
+        let snapshot = capture.map(
+            |FrameCapture {
+                 framebuffer,
+                 render_state,
+             }| Snapshot::with_framebuffer_from_game(self, framebuffer, render_state),
         );
         // Pemsa can schedule a second visible draw on the transition boundary
         // after the canonical capture callback has observed the first draw.
@@ -493,7 +573,16 @@ impl NativeGame {
         {
             self.add_player_trail();
         }
-        Ok(result)
+        Ok(FrameBoundary {
+            reward,
+            events,
+            audio: if capture_render {
+                self.frame_audio.clone()
+            } else {
+                Vec::new()
+            },
+            snapshot,
+        })
     }
 
     pub fn step(&mut self, action: Action, frames: u32) -> Result<FrameResult, CoreError> {
@@ -503,6 +592,25 @@ impl NativeGame {
         let mut result = self.result(PicoFixed::ZERO, Vec::new());
         for _ in 0..frames {
             result = self.advance_frame(action.mask())?;
+            if result.done {
+                break;
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn step_ml(&mut self, action: Action, frames: u32) -> Result<MlFrameResult, CoreError> {
+        if frames == 0 {
+            return Err(CoreError::InvalidFrameCount(frames));
+        }
+        let mut result = MlFrameResult {
+            frame: self.lifecycle.frame,
+            mode: self.lifecycle.mode,
+            done: self.lifecycle.dead,
+            reward: PicoFixed::ZERO,
+        };
+        for _ in 0..frames {
+            result = self.advance_frame_ml(action.mask(), action.mask())?;
             if result.done {
                 break;
             }
@@ -536,6 +644,14 @@ impl NativeGame {
 
     pub fn patterns(&self) -> &[PatternState] {
         self.patterns.as_slice()
+    }
+
+    pub const fn active_pattern_index(&self) -> Option<usize> {
+        self.active_pattern
+    }
+
+    pub const fn seed(&self) -> u32 {
+        self.config.seed
     }
 
     pub const fn score(&self) -> PicoFixed {
@@ -2284,6 +2400,42 @@ mod tests {
                 assert_eq!(result.snapshot, current);
                 assert_eq!(result.snapshot.canonical_bytes(), current.canonical_bytes());
             }
+        }
+    }
+
+    #[test]
+    fn ml_frame_path_matches_canonical_logical_trace_without_physical_screen() {
+        let mut canonical = NativeGame::new(NativeConfig::new(42));
+        let mut ml = NativeGame::new(NativeConfig::new(42));
+
+        for frame in 0..180 {
+            let input = if frame == 0 {
+                BUTTON_X_MASK
+            } else {
+                Action::ALL
+                    .get(frame % Action::ALL.len())
+                    .copied()
+                    .unwrap_or_else(|| unreachable!("action table index is bounded"))
+                    .mask()
+            };
+            let canonical_result = canonical.advance_frame(input);
+            let ml_result = ml.advance_frame_ml(input, input);
+            assert_eq!(
+                canonical_result
+                    .as_ref()
+                    .map(|result| { (result.frame, result.mode, result.done, result.reward) }),
+                ml_result.as_ref().map(|result| (
+                    result.frame,
+                    result.mode,
+                    result.done,
+                    result.reward
+                ))
+            );
+
+            let expected = canonical.full_state();
+            let mut actual = ml.full_state();
+            actual.physical_screen = expected.physical_screen.clone();
+            assert_eq!(actual, expected, "logical state diverged at frame {frame}");
         }
     }
 
