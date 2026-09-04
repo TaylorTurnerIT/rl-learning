@@ -252,7 +252,9 @@ def _parser() -> argparse.ArgumentParser:
         "--native-execution", choices=("serial", "parallel"), default="parallel"
     )
     parser.add_argument(
-        "--observation-mode", choices=("board", "pixels"), default="board"
+        "--observation-mode",
+        choices=("board", "board_full", "pixels"),
+        default="board",
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(

@@ -42,6 +42,20 @@ def test_baseline_config_routes_pixel_observation_contract() -> None:
     assert ppo_config.backend == "native"
 
 
+def test_baseline_config_routes_offscreen_board_contract() -> None:
+    manifest = SeedManifest.fresh_default()
+    config = BaselineConfig(
+        observation_mode="board_full",
+        native_lanes=8,
+        rollout_steps=32,
+    )
+
+    ppo_config = config.ppo_config(manifest)
+
+    assert ppo_config.observation_mode == "board_full"
+    assert ppo_config.backend == "native"
+
+
 def test_run_baseline_passes_locked_split_to_ppo(monkeypatch, tmp_path: Path) -> None:
     manifest = SeedManifest.fresh_default()
     manifest_path = tmp_path / "manifest.json"

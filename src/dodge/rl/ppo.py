@@ -49,7 +49,7 @@ TRAINING_SEEDS = tuple(
 
 PPOBackend = Literal["python", "native"]
 NativeExecution = Literal["serial", "parallel"]
-NativeObservationMode = Literal["board", "pixels"]
+NativeObservationMode = Literal["board", "board_full", "pixels"]
 PixelArchitecture = Literal["fast", "small", "current"]
 
 
@@ -138,14 +138,18 @@ class PPOConfig:
             raise ValueError("native lane count must be positive")
         if self.native_execution not in {"serial", "parallel"}:
             raise ValueError("native execution must be 'serial' or 'parallel'")
-        if self.observation_mode not in {"board", "pixels"}:
-            raise ValueError("observation mode must be 'board' or 'pixels'")
+        if self.observation_mode not in {"board", "board_full", "pixels"}:
+            raise ValueError(
+                "observation mode must be 'board', 'board_full', or 'pixels'"
+            )
         if not 1 <= self.pixel_stack <= 8:
             raise ValueError("pixel stack must be between 1 and 8")
         if self.pixel_architecture not in {"fast", "small", "current"}:
             raise ValueError("pixel architecture must be 'fast', 'small', or 'current'")
         if self.observation_mode == "pixels" and self.backend != "native":
             raise ValueError("pixel PPO requires the native backend")
+        if self.observation_mode == "board_full" and self.backend != "native":
+            raise ValueError("board_full PPO requires the native backend")
         if self.training_seed_manifest is not None and not isinstance(
             self.training_seed_manifest, str
         ):
@@ -1148,7 +1152,8 @@ class NativePPOTrainer(PPOTrainer):
             execution=self.config.native_execution,
             full_state=False,
             pixels=self.config.observation_mode == "pixels",
-            board=self.config.observation_mode == "board",
+            board=self.config.observation_mode != "pixels",
+            include_offscreen_board=self.config.observation_mode == "board_full",
         )
 
     def _ensure_lanes(self) -> None:
@@ -1189,7 +1194,7 @@ class NativePPOTrainer(PPOTrainer):
             _native_pixels(result) if self.config.observation_mode == "pixels" else None
         )
         reset_boards = (
-            _native_board(result) if self.config.observation_mode == "board" else None
+            _native_board(result) if self.config.observation_mode != "pixels" else None
         )
         for position, lane_value in enumerate(result.lane_ids.tolist()):
             lane = int(lane_value)
@@ -1407,7 +1412,8 @@ def _evaluate_native_policy(
         execution=config.native_execution,
         full_state=False,
         pixels=config.observation_mode == "pixels",
-        board=config.observation_mode == "board",
+        board=config.observation_mode != "pixels",
+        include_offscreen_board=config.observation_mode == "board_full",
     )
     try:
         result = environment.reset_batch(np.asarray(seeds, dtype=np.uint32))
@@ -1822,7 +1828,9 @@ def main(argv: list[str] | None = None) -> int:
         "--native-execution", choices=("serial", "parallel"), default="parallel"
     )
     parser.add_argument(
-        "--observation-mode", choices=("board", "pixels"), default="board"
+        "--observation-mode",
+        choices=("board", "board_full", "pixels"),
+        default="board",
     )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(

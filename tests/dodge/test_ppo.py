@@ -143,6 +143,8 @@ def test_pixel_stack_preserves_temporal_order_and_repeats_reset_frame() -> None:
 def test_pixel_config_requires_native_backend() -> None:
     with pytest.raises(ValueError, match="native backend"):
         _config(observation_mode="pixels").validate()
+    with pytest.raises(ValueError, match="native backend"):
+        _config(observation_mode="board_full").validate()
 
     config = _config(
         backend="native",
@@ -151,6 +153,11 @@ def test_pixel_config_requires_native_backend() -> None:
         pixel_stack=4,
     )
     config.validate()
+    _config(
+        backend="native",
+        observation_mode="board_full",
+        native_lanes=2,
+    ).validate()
 
 
 def test_v21_actor_warm_start_copies_policy_but_not_value_weights() -> None:

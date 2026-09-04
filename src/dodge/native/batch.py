@@ -63,6 +63,7 @@ class NativeBatchEnvironment:
         difficulty: int = 2,
         patterns_enabled: bool = True,
         powerups_enabled: bool = True,
+        include_offscreen_board: bool = False,
     ) -> None:
         if not 3 <= step_frames <= 5:
             raise ValueError("step_frames must be between 3 and 5")
@@ -86,12 +87,14 @@ class NativeBatchEnvironment:
             difficulty,
             patterns_enabled,
             powerups_enabled,
+            include_offscreen_board,
         )
         self.step_frames = step_frames
         self.execution = execution
         self.full_state_enabled = full_state
         self.pixels_enabled = pixels
         self.board_enabled = board
+        self.include_offscreen_board = include_offscreen_board
         self._last_result: NativeBatchResult | None = None
         self._closed = False
 

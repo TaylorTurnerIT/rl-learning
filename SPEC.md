@@ -43,6 +43,7 @@ I13|`src/dodge/ng/dagger.py` owns learner-visited training-state collection, fre
 I14|`src/dodge/rl/ppo.py` owns native pixel PPO, exact pixel frame stacking, reset-safe stack lifecycle, pixel checkpoints, and pixel evaluation.
 I15|`src/dodge/ng/relevance.py` owns multi-horizon decision-relevance audits, policy regret/action dynamics, gate output, and visual checkpoint references.
 I16|`src/dodge/rl/ppo.py` owns lane-independent GAE for the interleaved native batch rollout and records the configured baseline target in NG provenance.
+I17|Native board encoders and PPO observation-mode routing own the opt-in off-screen-preserving `board_full` representation; the Python reference encoder mirrors it for parity tests.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -84,6 +85,7 @@ V30|Gate marks rollout uninformative when no decisive state exists or all-action
 V31|Audit selection inputs use training seeds only; holdout audit optional report-only and cannot set pass/selection fields.
 V32|Native PPO computes GAE independently along each lane's time axis; interleaved lane transitions cannot contribute future return or advantage across lane boundaries.
 V33|A focused baseline run declares target completion only when its configured training evaluation reaches 800 survival frames; shorter runs remain diagnostic progress regardless of holdout performance.
+V34|Opt-in `board_full` pins entirely off-screen canonical hazards to the nearest 19x16 edge cells, leaves legacy `board` unchanged, and agrees across native serial/parallel and Python reference encoders.
 
 §T
 id|status|task|cites
@@ -109,6 +111,8 @@ T19|x|Compare board and pixel controls by sample efficiency, wall-clock throughp
 T20|~|Collect fresh training-only indexed-pixel teacher examples and train a pixel CNN behavior-cloning checkpoint suitable for actor-only PPO warm starts.|V18,V20,V25,V27,G6,G7,I9,I14
 T21|x|Implement frozen-manifest decision-relevance gate: canonical multi-horizon all-action audit, policy regret/action dynamics, hazard timeline, training-only gate, JSON/Markdown/plot artifacts, CLI/tests.|V16,V28,V29,V30,V31,I7,I15
 T22|x|Repair native PPO lane-wise GAE, expose the 800-frame focused-baseline target in NG provenance, and add regression coverage before rerunning board PPO.|V32,V33,G8,C14,I3,I16
+T23|~|Run the focused board-PPO baseline under the 800-frame target, audit checkpoints with T21 on training seeds, and iterate baseline-only until the target is reached or the blocker is diagnosed.|V30,V31,V33,G4,G8,C14
+T24|~|Add an isolated `board_full` observation mode that preserves off-screen hazards at board edges, proves native/Python parity, and reruns the focused baseline with the same PPO protocol.|V34,C5,G8,I17
 
 §B
 id|date|cause|fix
@@ -129,3 +133,5 @@ B14|2026-09-03|Matplotlib boxplot API in current environment rejects legacy `lab
 B15|2026-09-03|T21 custom-horizon fixtures omitted newly required near-term gate horizon.|Set gate horizon explicitly in custom-horizon tests; no new invariant.
 B16|2026-09-03|Full-suite rerun reproduced B11's concurrent Pemsa/Xvfb hidden-window timeout in three legacy NEAT tests.|Rerun live Pemsa tests in isolation; no T21 source workaround.
 B17|2026-09-03|Native PPO flattened time-major transitions from independent lanes before GAE, so advantages crossed lane boundaries and mixed unrelated episodes.|Compute GAE on `[time,lane]` tensors before flattening; enforce V32 with a multi-lane boundary regression test.
+B18|2026-09-04|The legacy 19x16 board and pixels dropped enemies entirely while their canonical positions remained outside the screen, leaving the baseline blind to the first incoming hazard.|Add an opt-in off-screen-preserving board observation and enforce V34 with native/Python parity and legacy-unchanged tests.
+B19|2026-09-04|The native workspace Clippy gate found pre-existing unchecked indexing in counterfactual scoring and its regression assertion.|Use iterator/get access at the native boundary; no new behavior invariant is required.

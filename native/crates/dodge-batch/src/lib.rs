@@ -37,6 +37,7 @@ pub struct ObservationFlags {
     pub full_state: bool,
     pub pixels: bool,
     pub board: bool,
+    pub include_offscreen_board: bool,
 }
 
 impl ObservationFlags {
@@ -45,6 +46,7 @@ impl ObservationFlags {
             full_state: true,
             pixels: true,
             board: true,
+            include_offscreen_board: false,
         }
     }
 
@@ -53,6 +55,7 @@ impl ObservationFlags {
             full_state: false,
             pixels: false,
             board: true,
+            include_offscreen_board: false,
         }
     }
 
@@ -61,6 +64,7 @@ impl ObservationFlags {
             full_state: true,
             pixels: true,
             board: false,
+            include_offscreen_board: false,
         }
     }
 }
@@ -379,9 +383,9 @@ impl BatchEnvironment {
             let snapshot = Snapshot::from_canonical_bytes(bytes)?;
             let initial_survival = snapshot.logical_state().survival_frames;
             let base_game = NativeGame::restore(&snapshot)?;
-            Action::ALL.into_iter().enumerate().try_fold(
-                [0.0; ACTION_COUNT],
-                |mut scores, (index, action)| {
+            {
+                let mut scores = [0.0; ACTION_COUNT];
+                for (score, action) in scores.iter_mut().zip(Action::ALL) {
                     let mut game = base_game.clone();
                     for _ in 0..lookahead_steps {
                         let frame_result = game.step(action, self.config.step_frames)?;
@@ -389,10 +393,10 @@ impl BatchEnvironment {
                             break;
                         }
                     }
-                    scores[index] = game.survival_frames().saturating_sub(initial_survival) as f32;
-                    Ok(scores)
-                },
-            )
+                    *score = game.survival_frames().saturating_sub(initial_survival) as f32;
+                }
+                Ok(scores)
+            }
         };
 
         match self.config.execution {
@@ -599,9 +603,9 @@ fn observation_from_snapshot(
         full_state: flags.full_state.then(|| logical_state.clone()),
         render_state: flags.full_state.then(|| snapshot.render_state().clone()),
         pixels: flags.pixels.then(|| *snapshot.pixels()),
-        board: flags
-            .board
-            .then(|| Board19x16::from_full_state(logical_state)),
+        board: flags.board.then(|| {
+            Board19x16::from_full_state_with_offscreen(logical_state, flags.include_offscreen_board)
+        }),
         canonical_snapshot: flags.full_state.then(|| snapshot.canonical_bytes()),
     }
 }
@@ -822,8 +826,11 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("counterfactual scoring should repeat"));
         assert_eq!(first, second);
         assert_eq!(first.len(), 1);
-        assert_eq!(first[0].len(), Action::ALL.len());
-        assert!(first[0].iter().all(|score| score.is_finite()));
+        let first_scores = first
+            .first()
+            .unwrap_or_else(|| unreachable!("one score row should be present"));
+        assert_eq!(first_scores.len(), Action::ALL.len());
+        assert!(first_scores.iter().all(|score| score.is_finite()));
 
         let after = environment
             .step(&[Action::Left])

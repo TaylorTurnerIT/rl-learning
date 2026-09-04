@@ -84,7 +84,7 @@ def raw_state_from_json(encoded: str) -> RawState:
     return RawState(frame, player, enemies, aoes)
 
 
-def encode_board(state: RawState) -> np.ndarray:
+def encode_board(state: RawState, *, include_offscreen: bool = False) -> np.ndarray:
     """Rasterize the complete raw board state into CNN-friendly channels."""
     board = np.zeros(BOARD_SHAPE, dtype=np.float32)
     velocity_sums = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
@@ -109,6 +109,7 @@ def encode_board(state: RawState) -> np.ndarray:
         height_channel=PLAYER_HEIGHT,
         stage_channel=None,
         velocity_slot=0,
+        include_offscreen=include_offscreen,
     )
     for entity in state.enemies:
         _paint_entity(
@@ -130,6 +131,7 @@ def encode_board(state: RawState) -> np.ndarray:
             height_channel=ENEMY_HEIGHT,
             stage_channel=ENEMY_STAGE,
             velocity_slot=2,
+            include_offscreen=include_offscreen,
         )
     for entity in state.aoes:
         _paint_entity(
@@ -151,6 +153,7 @@ def encode_board(state: RawState) -> np.ndarray:
             height_channel=AOE_HEIGHT,
             stage_channel=AOE_STAGE,
             velocity_slot=4,
+            include_offscreen=include_offscreen,
         )
 
     for channel, slot in (
@@ -190,8 +193,9 @@ def _paint_entity(
     height_channel: int,
     stage_channel: int | None,
     velocity_slot: int,
+    include_offscreen: bool,
 ) -> None:
-    bounds = _cell_bounds(x, y, width, height)
+    bounds = _cell_bounds(x, y, width, height, include_offscreen=include_offscreen)
     if bounds is None:
         return
     top, bottom, left, right = bounds
@@ -222,20 +226,41 @@ def _paint_entity(
 
 
 def _cell_bounds(
-    x: float, y: float, width: float, height: float
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    include_offscreen: bool = False,
 ) -> tuple[int, int, int, int] | None:
     scale = BOARD_SIZE / SCREEN_SIZE
     left = math.floor((x - width / 2) * scale)
     right = math.floor((x + width / 2) * scale)
     top = math.floor((y - height / 2) * scale)
     bottom = math.floor((y + height / 2) * scale)
-    if right < 0 or left >= BOARD_SIZE or bottom < 0 or top >= BOARD_SIZE:
+    if not include_offscreen and (
+        right < 0 or left >= BOARD_SIZE or bottom < 0 or top >= BOARD_SIZE
+    ):
         return None
+    if right < 0:
+        left = right = 0
+    elif left >= BOARD_SIZE:
+        left = right = BOARD_SIZE - 1
+    else:
+        left = max(0, left)
+        right = min(BOARD_SIZE - 1, right)
+    if bottom < 0:
+        top = bottom = 0
+    elif top >= BOARD_SIZE:
+        top = bottom = BOARD_SIZE - 1
+    else:
+        top = max(0, top)
+        bottom = min(BOARD_SIZE - 1, bottom)
     return (
-        max(0, top),
-        min(BOARD_SIZE - 1, bottom),
-        max(0, left),
-        min(BOARD_SIZE - 1, right),
+        top,
+        bottom,
+        left,
+        right,
     )
 
 

@@ -23,7 +23,7 @@ pub struct NativeBatchEnv {
 #[pymethods]
 impl NativeBatchEnv {
     #[new]
-    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true))]
+    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true, include_offscreen_board=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         step_frames: u32,
@@ -34,6 +34,7 @@ impl NativeBatchEnv {
         difficulty: u8,
         patterns_enabled: bool,
         powerups_enabled: bool,
+        include_offscreen_board: bool,
     ) -> PyResult<Self> {
         let execution = parse_execution(execution)?;
         let mut config = BatchConfig::new(step_frames);
@@ -44,6 +45,7 @@ impl NativeBatchEnv {
             full_state,
             pixels,
             board,
+            include_offscreen_board,
         };
         config.execution = execution;
         let inner = BatchEnvironment::new(config).map_err(batch_error)?;
@@ -77,6 +79,10 @@ impl NativeBatchEnv {
         flags.set_item("full_state", self.flags.full_state)?;
         flags.set_item("pixels", self.flags.pixels)?;
         flags.set_item("board", self.flags.board)?;
+        flags.set_item(
+            "include_offscreen_board",
+            self.flags.include_offscreen_board,
+        )?;
         Ok(flags)
     }
 

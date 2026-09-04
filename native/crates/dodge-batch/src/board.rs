@@ -42,6 +42,10 @@ pub struct Board19x16 {
 
 impl Board19x16 {
     pub fn from_full_state(state: &FullState) -> Self {
+        Self::from_full_state_with_offscreen(state, false)
+    }
+
+    pub fn from_full_state_with_offscreen(state: &FullState, include_offscreen: bool) -> Self {
         let mut board = vec![0.0; BOARD_VALUES];
         let mut velocity_sums = vec![0.0; VELOCITY_VALUES];
         let mut velocity_counts = vec![0_u32; VELOCITY_VALUES];
@@ -64,6 +68,7 @@ impl Board19x16 {
             None,
             0,
             None,
+            include_offscreen,
         );
         for enemy in &state.enemies {
             if enemy.personality == -1 {
@@ -86,6 +91,7 @@ impl Board19x16 {
                     Some(AOE_STAGE),
                     4,
                     Some(AOE_EXPLOSION),
+                    include_offscreen,
                 );
             } else {
                 let size = if enemy.personality >= 2 {
@@ -112,6 +118,7 @@ impl Board19x16 {
                     Some(ENEMY_STAGE),
                     2,
                     None,
+                    include_offscreen,
                 );
             }
         }
@@ -119,7 +126,13 @@ impl Board19x16 {
             && let Some(pattern) = state.patterns.get(pattern_index)
         {
             for rect in &pattern.rects {
-                paint_pattern(&mut board, &mut velocity_sums, &mut velocity_counts, rect);
+                paint_pattern(
+                    &mut board,
+                    &mut velocity_sums,
+                    &mut velocity_counts,
+                    rect,
+                    include_offscreen,
+                );
             }
         }
         write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, PLAYER_VX, 0);
@@ -158,6 +171,7 @@ fn paint_pattern(
     velocity_sums: &mut [f32],
     velocity_counts: &mut [u32],
     rect: &PatternRect,
+    include_offscreen: bool,
 ) {
     paint_entity(
         board,
@@ -178,6 +192,7 @@ fn paint_pattern(
         Some(AOE_STAGE),
         4,
         Some(AOE_PATTERN),
+        include_offscreen,
     );
 }
 
@@ -201,8 +216,10 @@ fn paint_entity(
     stage_channel: Option<usize>,
     velocity_slot: usize,
     kind_channel: Option<usize>,
+    include_offscreen: bool,
 ) {
-    let Some((top, bottom, left, right)) = cell_bounds(x, y, width, height) else {
+    let Some((top, bottom, left, right)) = cell_bounds(x, y, width, height, include_offscreen)
+    else {
         return;
     };
     let normalized_width = width.to_f32() / SCREEN_SIZE;
@@ -239,6 +256,7 @@ fn cell_bounds(
     y: PicoFixed,
     width: PicoFixed,
     height: PicoFixed,
+    include_offscreen: bool,
 ) -> Option<(usize, usize, usize, usize)> {
     let scale = BOARD_SIZE as f32 / SCREEN_SIZE;
     let left = ((x.to_f32() - width.to_f32() / 2.0) * scale).floor();
@@ -249,15 +267,32 @@ fn cell_bounds(
     let right = right as i32;
     let top = top as i32;
     let bottom = bottom as i32;
-    if right < 0 || left >= BOARD_SIZE as i32 || bottom < 0 || top >= BOARD_SIZE as i32 {
+    if !include_offscreen
+        && (right < 0 || left >= BOARD_SIZE as i32 || bottom < 0 || top >= BOARD_SIZE as i32)
+    {
         return None;
     }
-    Some((
-        top.max(0) as usize,
-        bottom.min(BOARD_SIZE as i32 - 1) as usize,
-        left.max(0) as usize,
-        right.min(BOARD_SIZE as i32 - 1) as usize,
-    ))
+    let (left, right) = if right < 0 {
+        (0, 0)
+    } else if left >= BOARD_SIZE as i32 {
+        (BOARD_SIZE - 1, BOARD_SIZE - 1)
+    } else {
+        (
+            left.max(0) as usize,
+            right.min(BOARD_SIZE as i32 - 1) as usize,
+        )
+    };
+    let (top, bottom) = if bottom < 0 {
+        (0, 0)
+    } else if top >= BOARD_SIZE as i32 {
+        (BOARD_SIZE - 1, BOARD_SIZE - 1)
+    } else {
+        (
+            top.max(0) as usize,
+            bottom.min(BOARD_SIZE as i32 - 1) as usize,
+        )
+    };
+    Some((top, bottom, left, right))
 }
 
 fn set_presence(board: &mut [f32], channel: usize, cell: usize) {
@@ -318,8 +353,8 @@ fn write_velocity_channel(
 
 #[cfg(test)]
 mod tests {
-    use super::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_WIDTH, Board19x16};
-    use dodge_core::{NativeConfig, NativeGame};
+    use super::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_WIDTH, Board19x16, cell_bounds};
+    use dodge_core::{NativeConfig, NativeGame, PicoFixed};
 
     #[test]
     fn native_ready_state_matches_board_shape_and_finite_contract() {
@@ -341,5 +376,30 @@ mod tests {
         assert_eq!(Board19x16::flat_index(18, 15, 15), Some(4_863));
         assert_eq!(Board19x16::flat_index(19, 0, 0), None);
         assert!(board.value(0, 0, 0).is_some());
+    }
+
+    #[test]
+    fn offscreen_entities_are_optional_and_pin_to_the_approaching_edge() {
+        let offscreen_left = PicoFixed::from_int(-10);
+        let offscreen_right = PicoFixed::from_int(138);
+        let visible = PicoFixed::from_int(64);
+        let size = PicoFixed::from_int(8);
+
+        assert_eq!(
+            cell_bounds(offscreen_left, visible, size, size, false),
+            None
+        );
+        assert_eq!(
+            cell_bounds(offscreen_left, visible, size, size, true),
+            Some((7, 8, 0, 0))
+        );
+        assert_eq!(
+            cell_bounds(offscreen_right, visible, size, size, true),
+            Some((7, 8, 15, 15))
+        );
+        assert_eq!(
+            cell_bounds(offscreen_left, offscreen_right, size, size, true),
+            Some((15, 15, 0, 0))
+        );
     }
 }

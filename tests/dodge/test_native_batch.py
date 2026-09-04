@@ -3,7 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from dodge.imitation.board import encode_board
 from dodge.native.batch import NativeBatchEnvironment, NativeDodgeEnv
+from dodge.neat.state import EntityState, PlayerState, RawState
 
 pytest.importorskip("dodge_native")
 
@@ -71,8 +73,100 @@ def test_native_batch_can_omit_optional_buffers_without_changing_state_hashes() 
     compact.close()
 
 
-def test_single_lane_compatibility_adapter_preserves_observation_and_restart_contract(
-) -> None:
+def test_board_full_preserves_offscreen_hazards_and_legacy_board_does_not() -> None:
+    legacy = NativeBatchEnvironment(
+        step_frames=4,
+        full_state=True,
+        board=True,
+    )
+    board_full = NativeBatchEnvironment(
+        step_frames=4,
+        full_state=True,
+        board=True,
+        include_offscreen_board=True,
+    )
+    legacy.reset_batch([30100])
+    board_full.reset_batch([30100])
+
+    found_offscreen = False
+    for _ in range(20):
+        legacy_step = legacy.step_batch([0])
+        board_full.step_batch([0])
+        state = board_full.observe_full_state()[0]
+        found_offscreen = any(
+            enemy.x + enemy.size / 2 < 0
+            or enemy.x - enemy.size / 2 >= 128
+            or enemy.y + enemy.size / 2 < 0
+            or enemy.y - enemy.size / 2 >= 128
+            for enemy in state.enemies
+        )
+        if found_offscreen:
+            break
+        if bool(legacy_step.done[0]):
+            break
+
+    assert found_offscreen
+    assert legacy.last_result.board is not None
+    assert board_full.last_result.board is not None
+    legacy_enemy_cells = legacy.last_result.board[0, 5].sum()
+    full_enemy_cells = board_full.last_result.board[0, 5].sum()
+    assert full_enemy_cells > legacy_enemy_cells
+    assert not np.array_equal(legacy.last_result.board, board_full.last_result.board)
+    assert board_full.include_offscreen_board is True
+
+    legacy.close()
+    board_full.close()
+
+
+def test_board_full_matches_python_reference_encoder_for_native_state() -> None:
+    environment = NativeBatchEnvironment(
+        step_frames=4,
+        full_state=True,
+        board=True,
+        include_offscreen_board=True,
+    )
+    environment.reset_batch([30100])
+    for _ in range(11):
+        environment.step_batch([0])
+
+    snapshot = environment.observe_full_state()[0]
+    assert all(enemy.personality == 0 for enemy in snapshot.enemies)
+    fixed_scale = 1 / 65_536
+    player_x, player_y, player_vx, player_vy, player_size = snapshot.player
+    reference = RawState(
+        frame=snapshot.frame,
+        player=PlayerState(
+            player_x * fixed_scale,
+            player_y * fixed_scale,
+            player_vx * fixed_scale,
+            player_vy * fixed_scale,
+            player_size * fixed_scale,
+        ),
+        enemies=tuple(
+            EntityState(
+                enemy.x * fixed_scale,
+                enemy.y * fixed_scale,
+                enemy.vx * fixed_scale,
+                enemy.vy * fixed_scale,
+                enemy.size * fixed_scale,
+                enemy.size * fixed_scale,
+                "enemy",
+                0,
+            )
+            for enemy in snapshot.enemies
+        ),
+        aoes=(),
+    )
+
+    assert environment.last_result.board is not None
+    np.testing.assert_array_equal(
+        environment.last_result.board[0],
+        encode_board(reference, include_offscreen=True),
+    )
+    environment.close()
+
+
+def test_single_lane_compatibility_adapter_preserves_restart_contract() -> None:
     environment = NativeDodgeEnv(step_frames=4)
     observation = environment.reset(seed=42)
     assert observation.raw_state.frame == 13
@@ -97,6 +191,7 @@ def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
         "full_state": True,
         "pixels": True,
         "board": True,
+        "include_offscreen_board": True,
     }
     serial = NativeBatchEnvironment(execution="serial", **kwargs)
     parallel = NativeBatchEnvironment(execution="parallel", **kwargs)

@@ -4,12 +4,18 @@ import json
 import sqlite3
 import struct
 
+import numpy as np
 import pytest
 import torch
 
 from dodge.control import ControlInputError
 from dodge.dataset import ACTION_CHOICES, CollectorConfig, _initialize_database
-from dodge.imitation.board import BOARD_CHANNEL_NAMES, BOARD_SHAPE, encode_board
+from dodge.imitation.board import (
+    BOARD_CHANNEL_NAMES,
+    BOARD_SHAPE,
+    _cell_bounds,
+    encode_board,
+)
 from dodge.imitation.data import ACTION_INDEX, load_demonstrations, split_demonstrations
 from dodge.imitation.model import BehaviorCloningCNN, predict_action
 from dodge.imitation.plot import plot_training_history
@@ -62,6 +68,27 @@ def test_board_encoder_keeps_entities_in_spatial_channels() -> None:
     assert board[BOARD_CHANNEL_NAMES.index("aoe_presence")].sum() > 0
     assert board[BOARD_CHANNEL_NAMES.index("aoe_explosion")].sum() > 0
     assert board[BOARD_CHANNEL_NAMES.index("aoe_pattern")].sum() > 0
+
+
+def test_board_full_reference_pins_offscreen_entities_without_changing_default() -> (
+    None
+):
+    state = RawState(
+        frame=0,
+        player=PlayerState(64, 64, 0, 0, 4),
+        enemies=(EntityState(-10, 64, 1, 0, 8, 8, "enemy", 1),),
+        aoes=(),
+    )
+
+    legacy = encode_board(state)
+    explicit_legacy = encode_board(state, include_offscreen=False)
+    full = encode_board(state, include_offscreen=True)
+
+    np.testing.assert_array_equal(legacy, explicit_legacy)
+    assert legacy[BOARD_CHANNEL_NAMES.index("enemy_presence")].sum() == 0
+    assert full[BOARD_CHANNEL_NAMES.index("enemy_presence"), 7:9, 0].sum() == 2
+    assert _cell_bounds(-10, 64, 8, 8) is None
+    assert _cell_bounds(-10, 64, 8, 8, include_offscreen=True) == (7, 8, 0, 0)
 
 
 def test_v57_loader_reads_only_learned_rows(tmp_path) -> None:

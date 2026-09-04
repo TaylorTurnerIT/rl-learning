@@ -30,7 +30,7 @@ GAME_MODE = "game"
 
 Partition = Literal["training", "holdout"]
 Execution = Literal["serial", "parallel"]
-ObservationMode = Literal["board", "pixels", "none"]
+ObservationMode = Literal["board", "board_full", "pixels", "none"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,11 +297,11 @@ def _load_policy(config: RelevanceConfig) -> _Policy:
             architecture=architecture,
         )
         info = _PolicyInfo(f"checkpoint:{config.checkpoint}", "pixels", stack_size)
-    elif mode == "board":
+    elif mode in {"board", "board_full"}:
         weight = state_dict.get("features.projection.0.weight")
         hidden_size = int(weight.shape[0]) if hasattr(weight, "shape") else 256
         model = DodgeActorCriticCNN(hidden_size=hidden_size)
-        info = _PolicyInfo(f"checkpoint:{config.checkpoint}", "board")
+        info = _PolicyInfo(f"checkpoint:{config.checkpoint}", mode)
     else:
         raise ValueError("relevance checkpoint observation mode is invalid")
     try:
@@ -404,13 +404,14 @@ def _collect_batch(
 ) -> tuple[dict[int, _PathMetrics], list[_Sample]]:
     paths = {int(seed): _PathMetrics(int(seed)) for seed in seeds}
     samples: list[_Sample] = []
-    board_enabled = policy.info.observation_mode == "board"
+    board_enabled = policy.info.observation_mode in {"board", "board_full"}
     with NativeBatchEnvironment(
         step_frames=config.step_frames,
         execution=config.native_execution,
         full_state=True,
         pixels=True,
         board=board_enabled,
+        include_offscreen_board=policy.info.observation_mode == "board_full",
         difficulty=config.difficulty,
         patterns_enabled=config.patterns_enabled,
         powerups_enabled=config.powerups_enabled,
