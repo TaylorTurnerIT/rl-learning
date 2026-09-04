@@ -141,7 +141,7 @@ T24|~|Add an isolated `board_full` observation mode that preserves off-screen ha
 T25|~|Expose explicit average/max board pooling, preserve legacy defaults, and run the `board_full` max-pooling baseline under the same 800-frame gate.|V35,G8,I18
 T26|~|Add coordinate-preserving `board_full_coords` observation mode, prove native/Python parity, and run the baseline max-pooling trial under the 800-frame relevance gate.|V36,C5,G8,I19
 T27|x|Implement waypoint grid/target codec, deterministic bounded steering, transition contract, and native-physics regression tests.|V37,V38,V39,I20,C15,C16,C17
-T28|~|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,V44,V45,G9,C2,C4,I20
+T28|x|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,V44,V45,G9,C2,C4,I20
 T29|.|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,I21,C18
 T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevance gate; report training/inner/holdout trends and throughput.|V42,G9,G8,C19,I21
 T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19

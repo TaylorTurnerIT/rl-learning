@@ -361,8 +361,6 @@ def _evaluate_waypoint_batch(
                 )
                 actions[lane_index] = decision.native_action_index
                 hold_remaining[lane_index] -= 1
-                if decision.target_reached:
-                    hold_remaining[lane_index] = 0
             result = environment.step_batch(actions)
             current_snapshots = list(result.snapshot_bytes)
             completed: list[int] = [
