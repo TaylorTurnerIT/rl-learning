@@ -160,6 +160,11 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native dodge-ng-dagger "$@"
     '';
+    dodge-ng-waypoint-feasibility.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-waypoint-feasibility "$@"
+    '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

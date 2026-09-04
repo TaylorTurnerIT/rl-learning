@@ -10,7 +10,9 @@ from dodge.ng.waypoint import (
     PLAYER_CENTER_MAX,
     PLAYER_CENTER_MIN,
     WaypointController,
+    WaypointFeasibilityConfig,
     WaypointGrid,
+    evaluate_waypoint_oracle,
 )
 
 pytest.importorskip("dodge_native")
@@ -133,3 +135,21 @@ def test_waypoint_inputs_fail_closed() -> None:
         WaypointGrid(16).neighbor_cell((0, 0), 9)
     with pytest.raises(ValueError, match="below half spacing"):
         WaypointController(WaypointGrid(8), tolerance=4)
+
+
+def test_v44_waypoint_oracle_decodes_native_snapshots() -> None:
+    result = evaluate_waypoint_oracle(
+        [13, 27],
+        16,
+        config=WaypointFeasibilityConfig(
+            max_episode_steps=2,
+            lookahead_steps=1,
+            hold_decisions=1,
+            native_lanes=2,
+        ),
+    )
+
+    assert result["spacing"] == 16
+    assert result["grid_shape"] == [9, 9]
+    assert result["point_count"] == 81
+    assert result["summary"]["count"] == 2

@@ -48,6 +48,7 @@ dodge-ng-teacher = "dodge.ng.teacher:main"
 dodge-ng-bc = "dodge.ng.bc:main"
 dodge-ng-compare = "dodge.ng.compare:main"
 dodge-ng-dagger = "dodge.ng.dagger:main"
+dodge-ng-waypoint-feasibility = "dodge.ng.waypoint:main"
 
 [build-system]
 requires = ["hatchling"]
