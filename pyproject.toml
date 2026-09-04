@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.4.6",
     "pydantic>=2.0.0",
     "torch>=2.7",
+    "websockets>=15.0",
 ]
 
 [project.optional-dependencies]
@@ -50,10 +51,15 @@ dodge-ng-compare = "dodge.ng.compare:main"
 dodge-ng-dagger = "dodge.ng.dagger:main"
 dodge-ng-waypoint-feasibility = "dodge.ng.waypoint:main"
 dodge-ng-dqn = "dodge.ng.dqn:main"
+dodge-ng-replay = "dodge.ng.replay:main"
+dodge-ng-dashboard = "dodge.ng.dashboard:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/dodge/ng/dashboard.html" = "dodge/ng/dashboard.html"
 
 [tool.ruff]
 line-length = 88

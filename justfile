@@ -175,6 +175,10 @@ dodge-ng-dqn *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-dqn {{ options }}
 
 [group("dodge")]
+dodge-ng-dashboard *options:
+    @devenv -q shell -- dodge-ng-dashboard {{ options }}
+
+[group("dodge")]
 dodge-marimo:
     devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 

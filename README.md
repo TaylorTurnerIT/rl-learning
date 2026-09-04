@@ -119,3 +119,15 @@ Resume an interrupted run by increasing the target update count:
 ```bash
 just dodge-ppo-train --resume --run-dir history/dodge/ppo/production --updates 2000
 ```
+
+### DQN dashboard
+
+Start the dashboard in another terminal:
+
+```bash
+just dodge-ng-dashboard
+```
+
+It selects the latest run; pass `--run-dir` to choose one explicitly. Open the
+printed URL for live progress, controls, and checkpoint replays. Telemetry is
+best-effort and never waits on the dashboard.

@@ -6,6 +6,7 @@ import argparse
 import json
 import random
 import sys
+import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -33,6 +34,7 @@ from dodge.neat.state import (
 )
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import summarize_evaluation
+from dodge.ng.telemetry import DashboardTelemetry
 from dodge.ng.waypoint import WaypointController, WaypointGrid
 
 WAYPOINT_OBSERVATION_SIZE: Final[int] = OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION + 4
@@ -633,6 +635,38 @@ def _next_training_seed(
     return training_seeds[cursor % len(training_seeds)], cursor + 1
 
 
+def _dashboard_status(
+    config: DQNConfig,
+    manifest: SeedManifest,
+    *,
+    state: str,
+    step: int,
+    total_native_steps: int,
+    replay_size: int,
+    best_inner: dict[str, object] | None,
+    record: dict[str, object] | None = None,
+    final_training: dict[str, object] | None = None,
+    final_holdout: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "state": state,
+        "step": step,
+        "total_steps": config.total_steps,
+        "native_steps": total_native_steps,
+        "replay_size": replay_size,
+        "best_inner": dict(best_inner) if best_inner is not None else None,
+        "config": config.to_json(),
+        "manifest_sha256": manifest.sha256,
+        "training_seeds": list(manifest.training_seeds),
+        "record": dict(record) if record is not None else None,
+    }
+    if final_training is not None:
+        payload["final_training"] = final_training["summary"]
+    if final_holdout is not None:
+        payload["final_holdout"] = final_holdout["summary"]
+    return payload
+
+
 def _collect_macro_transition(
     environment: NativeBatchEnvironment,
     current_observations: np.ndarray,
@@ -1119,6 +1153,18 @@ def train_waypoint_dqn(
             accumulator,
             rng,
         )
+    telemetry = DashboardTelemetry(run_directory)
+    telemetry.publish(
+        _dashboard_status(
+            config,
+            manifest,
+            state="starting",
+            step=step,
+            total_native_steps=total_native_steps,
+            replay_size=replay.size,
+            best_inner=best_inner,
+        )
+    )
     model.train()
     environment = NativeBatchEnvironment(
         step_frames=config.step_frames,
@@ -1135,12 +1181,47 @@ def train_waypoint_dqn(
     episode_steps = np.zeros(config.native_lanes, dtype=np.int64)
     current_observations: np.ndarray
     current_positions: np.ndarray
+    paused = False
+    stopped = False
     try:
         result = environment.reset_ml_batch(np.asarray(initial_seeds, dtype=np.uint32))
         current_observations, current_positions = _native_ml_state(result)
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
         while step < config.total_steps:
+            command = telemetry.consume_control()
+            if command == "pause":
+                paused = True
+            elif command == "resume":
+                paused = False
+            elif command == "stop":
+                stopped = True
+                telemetry.publish(
+                    _dashboard_status(
+                        config,
+                        manifest,
+                        state="stopping",
+                        step=step,
+                        total_native_steps=total_native_steps,
+                        replay_size=replay.size,
+                        best_inner=best_inner,
+                    )
+                )
+                break
+            if paused:
+                telemetry.publish(
+                    _dashboard_status(
+                        config,
+                        manifest,
+                        state="paused",
+                        step=step,
+                        total_native_steps=total_native_steps,
+                        replay_size=replay.size,
+                        best_inner=best_inner,
+                    )
+                )
+                time.sleep(0.1)
+                continue
             (
                 current_observations,
                 current_positions,
@@ -1190,6 +1271,18 @@ def train_waypoint_dqn(
                 **learning,
             }
             if step % config.eval_every == 0 or step == config.total_steps:
+                telemetry.publish(
+                    _dashboard_status(
+                        config,
+                        manifest,
+                        state="evaluating",
+                        step=step,
+                        total_native_steps=total_native_steps,
+                        replay_size=replay.size,
+                        best_inner=best_inner,
+                        record=record,
+                    )
+                )
                 inner = evaluate_waypoint_dqn(
                     model,
                     manifest.training_seeds[:10],
@@ -1225,6 +1318,18 @@ def train_waypoint_dqn(
                     )
                 model.train()
             metrics.append(record)
+            telemetry.publish(
+                _dashboard_status(
+                    config,
+                    manifest,
+                    state="running",
+                    step=step,
+                    total_native_steps=total_native_steps,
+                    replay_size=replay.size,
+                    best_inner=best_inner,
+                    record=record,
+                )
+            )
             if step % config.checkpoint_every == 0 or step == config.total_steps:
                 _save_checkpoint(
                     checkpoint,
@@ -1245,8 +1350,36 @@ def train_waypoint_dqn(
                         metrics=metrics,
                     ),
                 )
+    except Exception as error:
+        telemetry.publish(
+            {
+                **_dashboard_status(
+                    config,
+                    manifest,
+                    state="failed",
+                    step=step,
+                    total_native_steps=total_native_steps,
+                    replay_size=replay.size,
+                    best_inner=best_inner,
+                ),
+                "error": f"{type(error).__name__}: {error}",
+            }
+        )
+        telemetry.close()
+        raise
     finally:
         environment.close()
+    telemetry.publish(
+        _dashboard_status(
+            config,
+            manifest,
+            state="finalizing",
+            step=step,
+            total_native_steps=total_native_steps,
+            replay_size=replay.size,
+            best_inner=best_inner,
+        )
+    )
     final_model = model
     selected_model = "final"
     if best_model_state is not None:
@@ -1293,6 +1426,7 @@ def train_waypoint_dqn(
                 "actions": list(ACTION_CHOICES),
                 "updates_completed": step,
                 "native_steps": total_native_steps,
+                "stopped_early": stopped,
                 "best_inner": best_inner,
                 "selected_model": selected_model,
                 "final_validation": final_inner,
@@ -1341,7 +1475,22 @@ def train_waypoint_dqn(
     )
     report = _build_report(run_directory / "run.json", manifest)
     (run_directory / "REPORT.md").write_text(report, encoding="utf-8")
-    return json.loads((run_directory / "run.json").read_text())
+    result = json.loads((run_directory / "run.json").read_text())
+    telemetry.publish(
+        _dashboard_status(
+            config,
+            manifest,
+            state="stopped" if stopped else "completed",
+            step=step,
+            total_native_steps=total_native_steps,
+            replay_size=replay.size,
+            best_inner=best_inner,
+            final_training=final_training,
+            final_holdout=final_holdout,
+        )
+    )
+    telemetry.close()
+    return result
 
 
 def _build_report(path: Path, manifest: SeedManifest) -> str:

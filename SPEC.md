@@ -35,6 +35,8 @@ C18|Waypoint oracle feasibility may use canonical full state; learned DQN input 
 C19|Waypoint/DQN training, inner selection, and HPO use training seeds only; holdout remains final report-only under same 800-frame gate.
 C20|Hazard-field control predicts future risk at declared horizons; instantaneous occupancy alone cannot define gradient labels or pass method comparison.
 C21|Native ML observation batches may omit canonical snapshots; legacy full-state, board, pixel, and snapshot APIs remain unchanged.
+C22|Dashboard connects through run-directory files/WebSocket; trainer never waits on dashboard clients.
+C23|Replay capture runs from saved checkpoint in separate process; DQN hot path stays render-free ML path.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -61,6 +63,10 @@ I21|`src/dodge/ng/dqn.py` owns waypoint DQN observations, replay, target updates
 I22|`src/dodge/ng/hazard.py` owns future-horizon hazard labels, hazard-field prediction, gradient/waypoint control, and matched comparison artifacts.
 I23|NG waypoint commands are `dodge-ng-waypoint-feasibility` and `dodge-ng-dqn`; hazard-field command is `dodge-ng-hazard`.
 I24|`native/crates/dodge-batch/src/ml.rs` owns native waypoint ML feature extraction; `NativeBatchEnv` optionally returns `ml_observation` with shape `(N,225)` and player coordinates.
+I25|`src/dodge/ng/telemetry.py` owns bounded latest-status publication and file control mailbox.
+I26|`src/dodge/ng/dashboard.py` owns HTTP/WebSocket dashboard, controls, run inspection, and replay launch.
+I27|`src/dodge/ng/replay.py` owns deterministic checkpoint-to-pixel replay artifacts.
+I28|NG dashboard command is `dodge-ng-dashboard`.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -124,6 +130,12 @@ V52|Native frame capture may avoid redundant intermediate snapshot construction 
 V53|The explicit ML-only native path shares the canonical simulation update and preserves logical state, RNG, frame/mode, reward, terminal flags, player positions, and feature vectors for identical seed/action traces while omitting render, hashes, and snapshots by contract.
 V54|Fast ML batch results contain ordered finite `float32` `(N,225)` observations and `(N,2)` player positions plus `uint32` frames/seeds, `float32` rewards, and boolean terminal flags.
 V55|Python batch payload parsers return their declared full or ML result type; fast ML results expose no snapshot-only fields.
+V56|Telemetry publication to absent/slow/disconnected dashboard never blocks DQN collection or learning; stale updates may be dropped.
+V57|Status/control/replay metadata writes use atomic file replacement; dashboard never reads partial artifacts.
+V58|Dashboard controls accept only `pause`, `resume`, `stop`; command delivery remains optional and trainer continues without dashboard.
+V59|Replay uses saved checkpoint and seed in independent native environment; live training lanes remain unchanged.
+V60|Replay pixel frames use fixed 128x128 palette-index contract and metadata identifies checkpoint/config/seed/frame cadence.
+V61|Dashboard path resolution stays inside selected run directory; arbitrary file serving forbidden.
 
 §T
 id|status|task|cites
@@ -165,6 +177,7 @@ T35|x|Migrate waypoint DQN collection/evaluation to native ML observations, reta
 T36|x|Cache immutable waypoint geometry, add allocation-free scalar steering for the DQN hot path, and profile before/after under the same native-ML run.|V51,I20,G11
 T37|x|Remove redundant native per-frame snapshot construction while preserving exact frame-result parity, then profile the matched DQN workload again.|V52,I20,G11
 T38|x|Add a shared simulation ML-only frame path, expose fast batch reset/step results through PyO3/Python, migrate DQN to it, and verify canonical trace parity before profiling.|V53,V54,I20,G11,I24
+T39|x|Add non-blocking DQN telemetry/control mailbox, minimal WebSocket dashboard, checkpoint replay worker, and tests.|V56,V57,V58,V59,V60,V61,I25,I26,I27,I28
 
 §B
 id|date|cause|fix
@@ -210,3 +223,4 @@ B39|2026-09-04|New native parity fixtures used direct action-table indexing, vio
 B40|2026-09-04|Native parity fixture formatting drifted from rustfmt output.|Run rustfmt before format verification; no behavior invariant added.
 B41|2026-09-04|Canonical snapshot construction moved across transition trail mutation during ML-path refactor, then closure formatting drifted.|Construct full snapshot at original post-input/pre-trail boundary and run rustfmt; V52.
 B42|2026-09-04|New Python ML boundary added two lines beyond repository Ruff width.|Wrap adapter and regression assertions before lint verification; no behavior invariant added.
+B43|2026-09-04|Full-suite PPO tests hit the existing 512 MiB runtime preflight on `/tmp` with about 299 MiB free; the same suite passed on `/home/taylor`.|Use a spacious pytest base directory for verification; no T39 code or invariant change.

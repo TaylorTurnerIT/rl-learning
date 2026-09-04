@@ -170,6 +170,16 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native dodge-ng-dqn "$@"
     '';
+    dodge-ng-replay.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-replay "$@"
+    '';
+    dodge-ng-dashboard.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-dashboard "$@"
+    '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"

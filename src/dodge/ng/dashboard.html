@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DQN</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #111318; color: #e7e9ee; font: 14px system-ui, sans-serif; margin: 20px; }
+    main { max-width: 760px; margin: auto; }
+    header, .controls, .replay-controls { align-items: center; display: flex; gap: 8px; }
+    header { justify-content: space-between; margin-bottom: 14px; }
+    #state { color: #9ba3b5; }
+    .stats { display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); }
+    .stat { background: #1a1d24; border: 1px solid #292e39; padding: 10px; }
+    .label { color: #8f98aa; display: block; font-size: 11px; margin-bottom: 5px; }
+    output { font-size: 18px; }
+    button, input, select { background: #1a1d24; border: 1px solid #3a4250; color: inherit; padding: 6px 8px; }
+    button { cursor: pointer; }
+    button:hover { border-color: #7f8da8; }
+    .controls { margin: 14px 0; }
+    .replay { border-top: 1px solid #292e39; margin-top: 18px; padding-top: 18px; }
+    .replay-controls { margin-top: 8px; }
+    canvas { background: #000; image-rendering: pixelated; margin-top: 12px; width: min(512px, 100%); }
+    #frame { flex: 1; }
+    @media (max-width: 620px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+  <main>
+    <header><strong>DQN</strong><span id="state">offline</span></header>
+    <section class="stats">
+      <div class="stat"><span class="label">Step</span><output id="step">—</output></div>
+      <div class="stat"><span class="label">Best</span><output id="best">—</output></div>
+      <div class="stat"><span class="label">Train</span><output id="train">—</output></div>
+      <div class="stat"><span class="label">Holdout</span><output id="holdout">—</output></div>
+      <div class="stat"><span class="label">Replay</span><output id="replay-size">—</output></div>
+      <div class="stat"><span class="label">Loss</span><output id="loss">—</output></div>
+      <div class="stat"><span class="label">Q</span><output id="q">—</output></div>
+      <div class="stat"><span class="label">ε</span><output id="epsilon">—</output></div>
+    </section>
+    <section class="controls">
+      <button data-control="pause">Pause</button>
+      <button data-control="resume">Resume</button>
+      <button data-control="stop">Stop</button>
+    </section>
+    <section class="replay">
+      <div class="replay-controls">
+        <select id="replays"><option value="">No replays</option></select>
+        <input id="seed" type="number" min="0" max="32767" placeholder="seed">
+        <button id="record">Record best</button>
+      </div>
+      <canvas id="canvas" width="128" height="128"></canvas>
+      <div class="replay-controls">
+        <button id="play">Play</button>
+        <input id="frame" type="range" min="0" max="0" value="0">
+        <output id="frame-label">—</output>
+      </div>
+    </section>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const websocketPort = params.get("ws") || String(Number(location.port || 80) + 1);
+    const websocketScheme = location.protocol === "https:" ? "wss" : "ws";
+    const socketUrl = `${websocketScheme}://${location.hostname}:${websocketPort}`;
+    const palette = [
+      "#000000", "#1d2b53", "#7e2553", "#008751", "#ab5236", "#5f574f",
+      "#c2c3c7", "#fff1e8", "#ff004d", "#ffa300", "#ffec27", "#00e436",
+      "#29adff", "#83769c", "#ff77a8", "#ffccaa",
+    ];
+    const canvas = document.querySelector("#canvas");
+    const context = canvas.getContext("2d");
+    const socketState = document.querySelector("#state");
+    const replaySelect = document.querySelector("#replays");
+    const seedInput = document.querySelector("#seed");
+    const frameInput = document.querySelector("#frame");
+    const frameLabel = document.querySelector("#frame-label");
+    let socket;
+    let replay;
+    let replayItems = [];
+    let replayTimer;
+
+    function number(value, digits = 1) {
+      return value == null || Number.isNaN(Number(value)) ? "—" : Number(value).toFixed(digits);
+    }
+
+    function send(message) {
+      if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    }
+
+    function update(message) {
+      const status = message.status || {};
+      const record = status.record || {};
+      socketState.textContent = status.state || "offline";
+      document.querySelector("#step").textContent = `${status.step ?? 0}/${status.total_steps ?? 0}`;
+      document.querySelector("#best").textContent = number(status.best_inner?.mean_survival_frames);
+      document.querySelector("#train").textContent = number(status.final_training?.mean_survival_frames);
+      document.querySelector("#holdout").textContent = number(status.final_holdout?.mean_survival_frames);
+      document.querySelector("#replay-size").textContent = status.replay_size ?? "—";
+      document.querySelector("#loss").textContent = number(record.loss, 4);
+      document.querySelector("#q").textContent = number(record.q_mean);
+      document.querySelector("#epsilon").textContent = number(record.epsilon, 3);
+      if (!seedInput.value && status.training_seeds?.length) seedInput.value = status.training_seeds[0];
+      updateReplays(message.replays || []);
+    }
+
+    function updateReplays(replays) {
+      const selected = replaySelect.value;
+      replayItems = replays;
+      replaySelect.replaceChildren();
+      if (!replays.length) {
+        replaySelect.add(new Option("No replays", ""));
+        return;
+      }
+      for (const item of replays) {
+        const label = `seed ${item.seed} · step ${item.checkpoint_step} · ${item.frame_count}f`;
+        replaySelect.add(new Option(label, item.url));
+      }
+      replaySelect.value = replays.some(item => item.url === selected) ? selected : replays[0].url;
+      if (replaySelect.value !== selected) loadReplay(replays[0]);
+    }
+
+    async function loadReplay(item) {
+      if (!item) return;
+      const response = await fetch(item.url, { cache: "no-store" });
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      replay = { item, bytes };
+      frameInput.max = Math.max(0, item.frame_count - 1);
+      frameInput.value = 0;
+      drawFrame();
+    }
+
+    function drawFrame() {
+      if (!replay) return;
+      const index = Number(frameInput.value);
+      const size = replay.item.frame_bytes;
+      const offset = index * size;
+      const pixels = replay.bytes.subarray(offset, offset + size);
+      const image = context.createImageData(128, 128);
+      for (let i = 0; i < pixels.length; i += 1) {
+        const color = palette[pixels[i]] || palette[0];
+        const value = parseInt(color.slice(1), 16);
+        image.data[i * 4] = (value >> 16) & 255;
+        image.data[i * 4 + 1] = (value >> 8) & 255;
+        image.data[i * 4 + 2] = value & 255;
+        image.data[i * 4 + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+      frameLabel.textContent = `${index + 1}/${replay.item.frame_count}`;
+    }
+
+    function togglePlay() {
+      if (replayTimer) {
+        clearInterval(replayTimer);
+        replayTimer = undefined;
+        document.querySelector("#play").textContent = "Play";
+        return;
+      }
+      if (!replay) return;
+      const interval = Math.max(16, Math.round(1000 * replay.item.step_frames / 60));
+      replayTimer = setInterval(() => {
+        if (Number(frameInput.value) >= Number(frameInput.max)) frameInput.value = 0;
+        else frameInput.value = Number(frameInput.value) + 1;
+        drawFrame();
+      }, interval);
+      document.querySelector("#play").textContent = "Pause";
+    }
+
+    function connect() {
+      socket = new WebSocket(socketUrl);
+      socket.onopen = () => { socketState.textContent = "connected"; };
+      socket.onmessage = event => {
+        const message = JSON.parse(event.data);
+        if (message.type === "state") update(message);
+        if (message.type === "error") socketState.textContent = message.message;
+      };
+      socket.onclose = () => {
+        socketState.textContent = "offline";
+        setTimeout(connect, 1000);
+      };
+    }
+
+    document.querySelectorAll("[data-control]").forEach(button => {
+      button.addEventListener("click", () => send({ type: "control", command: button.dataset.control }));
+    });
+    document.querySelector("#record").addEventListener("click", () => {
+      const message = { type: "replay" };
+      if (seedInput.value) message.seed = Number(seedInput.value);
+      send(message);
+    });
+    replaySelect.addEventListener("change", () => {
+      const item = replayItems.find(entry => entry.url === replaySelect.value);
+      if (item) loadReplay(item);
+    });
+    frameInput.addEventListener("input", drawFrame);
+    document.querySelector("#play").addEventListener("click", togglePlay);
+    connect();
+  </script>
+</html>
