@@ -120,6 +120,7 @@ V48|`ml_observation` returns finite `(N,225)` `float32` rows; enabling it does n
 V49|DQN hot collection uses native ML observations and native player coordinates without full Python snapshot decoding; the reference encoder remains callable for parity tests.
 V50|800 frames remains a relevance gate only; DQN training/evaluation horizons may exceed 800 and report uncapped survival until terminal or an explicit safety limit.
 V51|Waypoint grid geometry is constructed once per grid; allocation-free scalar steering emits the same native action as full `WaypointDecision` steering across positions, targets, tolerances, and action choices.
+V52|Native frame capture may avoid redundant intermediate snapshot construction only when it preserves the exact render-boundary framebuffer, render state, logical state, hashes, and canonical bytes.
 
 §T
 id|status|task|cites
@@ -159,6 +160,7 @@ T33|.|Run matched waypoint/DQN versus hazard-field comparison and freeze next me
 T34|x|Add native `ml.rs` waypoint feature encoding, optional batch/PyO3 `ml_observation` and player-coordinate outputs, and canonical Python parity tests.|V47,V48,I24,C21
 T35|x|Migrate waypoint DQN collection/evaluation to native ML observations, retain a reference path for debugging, remove the 800-frame horizon cap, and benchmark the hot path.|V49,V50,G11,I21,I24
 T36|x|Cache immutable waypoint geometry, add allocation-free scalar steering for the DQN hot path, and profile before/after under the same native-ML run.|V51,I20,G11
+T37|x|Remove redundant native per-frame snapshot construction while preserving exact frame-result parity, then profile the matched DQN workload again.|V52,I20,G11
 
 §B
 id|date|cause|fix
@@ -191,3 +193,9 @@ B26|2026-09-03|Fast snapshot reader regression test added private imports out of
 B27|2026-09-04|Native ML encoder assigned an `f64` stage calculation directly into its `f32` feature buffer.|Cast every native feature at the output boundary and keep the native ML lint/build gate mandatory.
 B28|2026-09-04|Native ML encoder initially used dynamic array indexing and a derived partial order that violated the native safety lint gate.|Use checked feature writes and an explicit total float ordering before native verification.
 B29|2026-09-04|Waypoint optimization regression test exceeded the repository's 88-column Ruff gate.|Wrap new hot-path assertions before verification; no behavior invariant added.
+B30|2026-09-04|Native verification was invoked from a shell without the project's Cargo toolchain on PATH.|External toolchain boundary; rerun through the repository development environment with no behavior invariant added.
+B31|2026-09-04|The native Cargo gate was invoked from the Python project root, which has no Cargo manifest.|Use the native workspace directory or explicit manifest path; no behavior invariant added.
+B32|2026-09-04|The native frame-capture change was not yet rustfmt-normalized when the formatting gate ran.|Run the repository formatter before the native verification gate; no behavior invariant added.
+B33|2026-09-04|The workspace native test build reached the PyO3 linker without Python C symbols in the active environment.|External PyO3/Python linker boundary; isolate core and batch verification, then restore the configured Python link environment with no behavior invariant added.
+B34|2026-09-04|The new frame-capture regression fixture included input mask 64, outside the core button domain.|Use only valid button masks in the capture sequence; no behavior invariant added.
+B35|2026-09-04|Rebuilding the editable PyO3 extension exposed a 10-argument constructor while the Python adapter supplies 12 arguments.|Keep the installed native extension constructor synchronized with the Python adapter before runtime verification; no frame-capture invariant added.

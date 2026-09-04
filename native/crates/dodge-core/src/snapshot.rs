@@ -313,7 +313,7 @@ impl IndexedFramebuffer {
         }
     }
 
-    fn project(&self, state: &RenderState) -> Self {
+    pub(crate) fn project(&self, state: &RenderState) -> Self {
         let camera_x = camera_offset(state.camera_x);
         let camera_y = camera_offset(state.camera_y);
         let mut projected = Self::blank();

@@ -464,8 +464,8 @@ impl NativeGame {
             PicoFixed::ZERO
         };
         self.update_camera();
-        self.render_current_frame();
-        let draw_snapshot = self.snapshot();
+        let render_state = self.render_current_frame();
+        let draw_framebuffer = self.screen.project(&render_state);
         self.apply_draw_side_effects(mode_before);
         // The cartridge exits from the update loop immediately after death,
         // before it can advance to the next command. Preserve the terminal
@@ -481,11 +481,7 @@ impl NativeGame {
             reward,
             events,
             self.frame_audio.clone(),
-            Snapshot::with_framebuffer_from_game(
-                self,
-                draw_snapshot.framebuffer().clone(),
-                draw_snapshot.render_state().clone(),
-            ),
+            Snapshot::with_framebuffer_from_game(self, draw_framebuffer, render_state),
         );
         // Pemsa can schedule a second visible draw on the transition boundary
         // after the canonical capture callback has observed the first draw.
@@ -832,7 +828,7 @@ impl NativeGame {
         }
     }
 
-    fn render_current_frame(&mut self) {
+    fn render_current_frame(&mut self) -> crate::RenderState {
         let state = self.full_state();
         let mut render = crate::RenderState::new(state.transition_render_y);
         render.camera_x = state.camera_x;
@@ -840,6 +836,7 @@ impl NativeGame {
         render.screen_palette[12] = state.settings.theme_background;
         render.screen_palette[1] = state.settings.theme_shadow;
         crate::snapshot::render_full_state_into(&state, &render, &mut self.screen);
+        render
     }
 
     fn update_particles(&mut self) {
@@ -2272,6 +2269,22 @@ mod tests {
             result.as_ref().map(|value| value.previous_input_mask),
             Ok(0)
         );
+    }
+
+    #[test]
+    fn frame_result_snapshot_matches_current_capture_boundary() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        let inputs = [BUTTON_X_MASK, BUTTON_X_MASK, 0, 1, 4, 16, 32, 0, 0, 0];
+
+        for input in inputs {
+            let result = game.advance_frame(input);
+            assert!(result.is_ok());
+            if let Ok(result) = result {
+                let current = game.snapshot();
+                assert_eq!(result.snapshot, current);
+                assert_eq!(result.snapshot.canonical_bytes(), current.canonical_bytes());
+            }
+        }
     }
 
     #[test]
