@@ -365,14 +365,15 @@ def _evaluate_waypoint_batch(
                     hold_remaining[lane_index] = 0
             result = environment.step_batch(actions)
             current_snapshots = list(result.snapshot_bytes)
-            completed: list[int] = []
+            completed: list[int] = [
+                lane for lane, done in enumerate(result.done) if bool(done)
+            ]
             for lane in active_indices:
                 lane_index = int(lane)
                 survival[lane_index] += int(round(result.rewards[lane_index]))
                 if bool(result.done[lane_index]):
                     active[lane_index] = False
                     terminated[lane_index] = True
-                    completed.append(lane_index)
             if completed:
                 reset = environment.reset_lanes(
                     np.asarray(completed, dtype=np.uint32),

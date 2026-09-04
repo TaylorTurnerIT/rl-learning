@@ -153,3 +153,18 @@ def test_v44_waypoint_oracle_decodes_native_snapshots() -> None:
     assert result["grid_shape"] == [9, 9]
     assert result["point_count"] == 81
     assert result["summary"]["count"] == 2
+
+
+def test_v45_waypoint_oracle_resets_inactive_done_lanes() -> None:
+    result = evaluate_waypoint_oracle(
+        [30100, 30118],
+        16,
+        config=WaypointFeasibilityConfig(
+            max_episode_steps=80,
+            lookahead_steps=1,
+            hold_decisions=1,
+            native_lanes=2,
+        ),
+    )
+
+    assert result["summary"]["count"] == 2
