@@ -7,6 +7,8 @@ import pytest
 import torch
 
 from dodge.dataset import ACTION_CHOICES
+from dodge.native.batch import NativeBatchEnvironment, _decode_snapshot
+from dodge.native.differential import NativeDifferentialError
 from dodge.neat.state import PlayerState, RawState
 from dodge.ng.dqn import (
     WAYPOINT_OBSERVATION_SIZE,
@@ -16,6 +18,7 @@ from dodge.ng.dqn import (
     ReplayBuffer,
     _checkpoint_payload,
     _load_checkpoint,
+    _player_position,
     encode_waypoint_observation,
 )
 from dodge.ng.manifest import SeedManifest
@@ -55,6 +58,26 @@ def test_waypoint_observation_declares_structured_state_and_grid_cell() -> None:
     assert np.isfinite(observation).all()
     assert observation[-4:-2].tolist() == [0.5, 0.5]
     assert observation[-2:].tolist() == [0.0, 0.0]
+
+
+def test_fast_player_position_reader_matches_full_snapshot_decoder() -> None:
+    with NativeBatchEnvironment(
+        step_frames=4,
+        execution="serial",
+        full_state=True,
+        board=False,
+    ) as environment:
+        result = environment.reset_batch([30_200])
+        snapshot = result.snapshot_bytes[0]
+        assert snapshot is not None
+        full_player = _decode_snapshot(snapshot).player
+        fast_position = _player_position(snapshot)
+
+    assert fast_position == pytest.approx(
+        (full_player[0] / 65_536, full_player[1] / 65_536)
+    )
+    with pytest.raises(NativeDifferentialError, match="too short"):
+        _player_position(b"DGSN")
 
 
 def test_dueling_waypoint_dqn_returns_one_value_per_native_action() -> None:

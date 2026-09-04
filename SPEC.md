@@ -111,6 +111,7 @@ V42|DQN selection/evaluation preserves exact 70/30 split and 800-frame gate; hol
 V43|Hazard-field labels encode future collision risk at each declared horizon; controller considers only reachable candidate moves and records label/controller provenance.
 V44|Waypoint runners decode canonical snapshot bytes before typed-state conversion; invalid or missing snapshots fail closed.
 V45|Waypoint batch evaluation resets every native-done lane before next step, including inactive dummy lanes; measured lane survival remains unchanged by dummy resets.
+V46|Fast waypoint steering reads player coordinates from validated canonical snapshot prefix; coordinates equal full decode and invalid prefix fails closed.
 
 §T
 id|status|task|cites
@@ -142,7 +143,7 @@ T25|~|Expose explicit average/max board pooling, preserve legacy defaults, and r
 T26|~|Add coordinate-preserving `board_full_coords` observation mode, prove native/Python parity, and run the baseline max-pooling trial under the 800-frame relevance gate.|V36,C5,G8,I19
 T27|x|Implement waypoint grid/target codec, deterministic bounded steering, transition contract, and native-physics regression tests.|V37,V38,V39,I20,C15,C16,C17
 T28|x|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,V44,V45,G9,C2,C4,I20
-T29|x|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,I21,C18
+T29|x|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,V46,I21,C18
 T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevance gate; report training/inner/holdout trends and throughput.|V42,G9,G8,C19,I21
 T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
 T32|.|Implement future-horizon hazard labels, hazard-field model, reachable gradient/waypoint controller, and method-specific tests.|V43,G10,I22,C20
@@ -174,3 +175,5 @@ B21|2026-09-03|Waypoint feasibility retained canonical snapshot bytes but passed
 B22|2026-09-03|Waypoint feasibility reset measured done lanes but left inactive dummy lanes unreset, allowing a dummy lane to die and block later batch steps.|Reset every native-done lane before next step; enforce V45 with completed-lane regression.
 B23|2026-09-03|First waypoint DQN lint gate found unused import and line-width drift before behavioral verification.|Format DQN module and rerun targeted lint before next verification gate.
 B24|2026-09-03|DQN formatter left long metadata literals and report strings outside line limit.|Wrap remaining literals and rerun targeted lint before behavioral verification.
+B25|2026-09-03|Waypoint DQN decoded full canonical entity/pattern graphs to read player coordinates on every held steering frame, making long training impractical.|Read validated fixed snapshot prefix for player position; enforce V46 with full-decoder parity and malformed-prefix tests.
+B26|2026-09-03|Fast snapshot reader regression test added private imports out of Ruff order.|Sort test imports and rerun targeted lint before behavioral verification.

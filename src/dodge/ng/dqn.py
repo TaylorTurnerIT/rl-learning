@@ -23,6 +23,7 @@ from dodge.native.batch import (
     _decode_snapshot,
     _raw_state_from_snapshot,
 )
+from dodge.native.differential import decode_native_player_position
 from dodge.neat.state import (
     OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION,
     RawState,
@@ -513,9 +514,7 @@ def _snapshot_at(snapshots: list[bytes | None], lane: int) -> bytes:
 
 
 def _player_position(snapshot: bytes) -> tuple[float, float]:
-    player = _decode_snapshot(snapshot).player
-    fixed_scale = 1 / 65_536
-    return player[0] * fixed_scale, player[1] * fixed_scale
+    return decode_native_player_position(snapshot)
 
 
 def _observations_from_snapshots(

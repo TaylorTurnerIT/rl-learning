@@ -18,6 +18,8 @@ FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT
 FIXED_SCALE = 1 << 16
 SNAPSHOT_MAGIC = b"DGSN"
 SNAPSHOT_WIRE_VERSION = 7
+SNAPSHOT_PLAYER_OFFSET = 191
+SNAPSHOT_PLAYER_END = SNAPSHOT_PLAYER_OFFSET + (2 * 4)
 MAX_ENEMIES = 4_096
 
 NATIVE_MODES = {
@@ -450,6 +452,20 @@ def decode_native_snapshot(snapshot_hex: str) -> NativeSnapshot:
         render_state=render_state,
         pixels=pixels,
     )
+
+
+def decode_native_player_position(snapshot: bytes) -> tuple[float, float]:
+    """Read player coordinates without materializing the full snapshot graph."""
+    if not isinstance(snapshot, bytes):
+        raise NativeDifferentialError("native snapshot must be bytes")
+    if len(snapshot) < SNAPSHOT_PLAYER_END:
+        raise NativeDifferentialError("native snapshot is too short for player state")
+    if snapshot[:4] != SNAPSHOT_MAGIC:
+        raise NativeDifferentialError("native snapshot magic mismatch")
+    if struct.unpack_from("<I", snapshot, 4)[0] != SNAPSHOT_WIRE_VERSION:
+        raise NativeDifferentialError("native snapshot wire version mismatch")
+    x, y = struct.unpack_from("<ii", snapshot, SNAPSHOT_PLAYER_OFFSET)
+    return x / FIXED_SCALE, y / FIXED_SCALE
 
 
 def compare_native_to_oracle(
