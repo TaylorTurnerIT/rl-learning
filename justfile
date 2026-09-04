@@ -170,6 +170,11 @@ dodge-ng-waypoint-feasibility *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-waypoint-feasibility {{ options }}
 
 [group("dodge")]
+dodge-ng-dqn *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-dqn {{ options }}
+
+[group("dodge")]
 dodge-marimo:
     devenv -q shell -- uv run --group gpu marimo edit notebooks/dodge_behavior_cloning.py
 

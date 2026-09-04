@@ -184,6 +184,28 @@ class WaypointController:
             target,
         )
 
+    def steer_position(
+        self,
+        x: float,
+        y: float,
+        target_cell: tuple[int, int],
+        waypoint_action_index: int = 0,
+    ) -> WaypointDecision:
+        """Steer from numeric player coordinates without decoding hazards."""
+        current_cell = self.grid.nearest_cell(x, y)
+        target = self.grid.point(target_cell)
+        horizontal = _sign(target[0] - x, self.tolerance)
+        vertical = _sign(target[1] - y, self.tolerance)
+        native_action = _DELTA_TO_ACTION[(horizontal, vertical)]
+        return WaypointDecision(
+            waypoint_action_index=waypoint_action_index,
+            current_cell=current_cell,
+            target_cell=target_cell,
+            target=target,
+            target_reached=horizontal == 0 and vertical == 0,
+            native_action=native_action,
+        )
+
     def _decision(
         self,
         state: RawState,

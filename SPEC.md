@@ -142,7 +142,7 @@ T25|~|Expose explicit average/max board pooling, preserve legacy defaults, and r
 T26|~|Add coordinate-preserving `board_full_coords` observation mode, prove native/Python parity, and run the baseline max-pooling trial under the 800-frame relevance gate.|V36,C5,G8,I19
 T27|x|Implement waypoint grid/target codec, deterministic bounded steering, transition contract, and native-physics regression tests.|V37,V38,V39,I20,C15,C16,C17
 T28|x|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,V44,V45,G9,C2,C4,I20
-T29|.|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,I21,C18
+T29|x|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,I21,C18
 T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevance gate; report training/inner/holdout trends and throughput.|V42,G9,G8,C19,I21
 T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
 T32|.|Implement future-horizon hazard labels, hazard-field model, reachable gradient/waypoint controller, and method-specific tests.|V43,G10,I22,C20
@@ -172,3 +172,5 @@ B19|2026-09-04|The native workspace Clippy gate found pre-existing unchecked ind
 B20|2026-09-04|The relevance gate could pass while `board_full` still collapsed every off-screen hazard onto an edge cell, so the CNN saw hazard presence but not time-to-arrival; max pooling then learned a vertical edge policy and plateaued below 800.|Add coordinate-preserving `board_full_coords` and require native/Python parity before another baseline campaign.
 B21|2026-09-03|Waypoint feasibility retained canonical snapshot bytes but passed them directly to typed-state conversion, causing an attribute failure before evaluation.|Decode bytes at runner boundary; enforce V44 with native oracle regression.
 B22|2026-09-03|Waypoint feasibility reset measured done lanes but left inactive dummy lanes unreset, allowing a dummy lane to die and block later batch steps.|Reset every native-done lane before next step; enforce V45 with completed-lane regression.
+B23|2026-09-03|First waypoint DQN lint gate found unused import and line-width drift before behavioral verification.|Format DQN module and rerun targeted lint before next verification gate.
+B24|2026-09-03|DQN formatter left long metadata literals and report strings outside line limit.|Wrap remaining literals and rerun targeted lint before behavioral verification.
