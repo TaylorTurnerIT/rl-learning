@@ -103,6 +103,16 @@ def test_actor_critic_returns_nine_logits_and_one_value() -> None:
     assert all(parameter.grad is None for parameter in model.parameters())
 
 
+def test_board_spatial_pool_is_explicit() -> None:
+    average = DodgeActorCriticCNN(hidden_size=16, spatial_pool="average")
+    maximum = DodgeActorCriticCNN(hidden_size=16, spatial_pool="max")
+
+    assert isinstance(average.features.convolution[8], torch.nn.AdaptiveAvgPool2d)
+    assert isinstance(maximum.features.convolution[8], torch.nn.AdaptiveMaxPool2d)
+    with pytest.raises(ValueError, match="board spatial pool"):
+        DodgeActorCriticCNN(hidden_size=16, spatial_pool="invalid")  # type: ignore[arg-type]
+
+
 def test_pixel_actor_critic_returns_nine_logits_and_one_value() -> None:
     model = PixelActorCriticCNN(stack_size=4, hidden_size=16)
 
@@ -156,6 +166,12 @@ def test_pixel_config_requires_native_backend() -> None:
     _config(
         backend="native",
         observation_mode="board_full",
+        native_lanes=2,
+    ).validate()
+    _config(
+        backend="native",
+        observation_mode="board_full",
+        board_spatial_pool="max",
         native_lanes=2,
     ).validate()
 

@@ -17,6 +17,7 @@ from dodge.ng.bc import load_bc_actor_state
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import build_report
 from dodge.rl.ppo import (
+    BoardSpatialPool,
     NativeExecution,
     NativeObservationMode,
     PixelArchitecture,
@@ -59,6 +60,7 @@ class BaselineConfig:
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
+    board_spatial_pool: BoardSpatialPool = "average"
     pixel_stack: int = 4
     pixel_architecture: PixelArchitecture = "small"
     initial_bc_checkpoint: Path | None = None
@@ -102,6 +104,7 @@ class BaselineConfig:
             native_lanes=self.native_lanes,
             native_execution=self.native_execution,
             observation_mode=self.observation_mode,
+            board_spatial_pool=self.board_spatial_pool,
             pixel_stack=self.pixel_stack,
             pixel_architecture=self.pixel_architecture,
             training_seeds=manifest.training_seeds,
@@ -256,6 +259,11 @@ def _parser() -> argparse.ArgumentParser:
         choices=("board", "board_full", "pixels"),
         default="board",
     )
+    parser.add_argument(
+        "--board-spatial-pool",
+        choices=("average", "max"),
+        default="average",
+    )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(
         "--pixel-architecture",
@@ -301,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
         observation_mode=arguments.observation_mode,
+        board_spatial_pool=arguments.board_spatial_pool,
         pixel_stack=arguments.pixel_stack,
         pixel_architecture=arguments.pixel_architecture,
         initial_bc_checkpoint=arguments.initial_bc_checkpoint,

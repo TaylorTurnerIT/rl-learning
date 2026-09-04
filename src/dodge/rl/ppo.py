@@ -50,6 +50,7 @@ TRAINING_SEEDS = tuple(
 PPOBackend = Literal["python", "native"]
 NativeExecution = Literal["serial", "parallel"]
 NativeObservationMode = Literal["board", "board_full", "pixels"]
+BoardSpatialPool = Literal["average", "max"]
 PixelArchitecture = Literal["fast", "small", "current"]
 
 
@@ -92,6 +93,7 @@ class PPOConfig:
     native_lanes: int = 32
     native_execution: NativeExecution = "parallel"
     observation_mode: NativeObservationMode = "board"
+    board_spatial_pool: BoardSpatialPool = "average"
     pixel_stack: int = 4
     pixel_architecture: PixelArchitecture = "small"
     training_seeds: tuple[int, ...] = ()
@@ -150,6 +152,8 @@ class PPOConfig:
             raise ValueError("pixel PPO requires the native backend")
         if self.observation_mode == "board_full" and self.backend != "native":
             raise ValueError("board_full PPO requires the native backend")
+        if self.board_spatial_pool not in {"average", "max"}:
+            raise ValueError("board spatial pool must be 'average' or 'max'")
         if self.training_seed_manifest is not None and not isinstance(
             self.training_seed_manifest, str
         ):
@@ -181,10 +185,19 @@ class PPOConfig:
 class BoardFeatureEncoder(nn.Module):
     """Extract spatial features from the complete raw Dodge board."""
 
-    def __init__(self, hidden_size: int = 256) -> None:
+    def __init__(
+        self, hidden_size: int = 256, spatial_pool: BoardSpatialPool = "average"
+    ) -> None:
         super().__init__()
         if hidden_size < 1:
             raise ValueError("hidden size must be positive")
+        if spatial_pool not in {"average", "max"}:
+            raise ValueError("board spatial pool must be 'average' or 'max'")
+        pool = (
+            nn.AdaptiveMaxPool2d((2, 2))
+            if spatial_pool == "max"
+            else nn.AdaptiveAvgPool2d((2, 2))
+        )
         self.convolution = nn.Sequential(
             nn.Conv2d(BOARD_CHANNELS, 32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -194,7 +207,7 @@ class BoardFeatureEncoder(nn.Module):
             nn.MaxPool2d(kernel_size=2),
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((2, 2)),
+            pool,
             nn.Flatten(),
         )
         self.projection = nn.Sequential(
@@ -210,9 +223,11 @@ class BoardFeatureEncoder(nn.Module):
 class DodgeActorCriticCNN(nn.Module):
     """CNN policy plus value function for direct survival optimization."""
 
-    def __init__(self, hidden_size: int = 256) -> None:
+    def __init__(
+        self, hidden_size: int = 256, spatial_pool: BoardSpatialPool = "average"
+    ) -> None:
         super().__init__()
-        self.features = BoardFeatureEncoder(hidden_size)
+        self.features = BoardFeatureEncoder(hidden_size, spatial_pool)
         self.policy_head = nn.Linear(hidden_size, len(ACTION_CHOICES))
         self.value_head = nn.Linear(hidden_size, 1)
         self._initialize_weights()
@@ -440,7 +455,7 @@ def _model_for_config(config: PPOConfig) -> nn.Module:
             stack_size=config.pixel_stack,
             architecture=config.pixel_architecture,
         )
-    return DodgeActorCriticCNN()
+    return DodgeActorCriticCNN(spatial_pool=config.board_spatial_pool)
 
 
 def _model_type_for_config(config: PPOConfig) -> str:
@@ -876,6 +891,7 @@ class PPOTrainer:
             "version": PPO_CHECKPOINT_VERSION,
             "model_type": _model_type_for_config(self.config),
             "observation_mode": self.config.observation_mode,
+            "board_spatial_pool": self.config.board_spatial_pool,
             "observation_shape": list(observation_shape),
             "board_shape": list(BOARD_SHAPE) if not pixels_mode else None,
             "pixel_shape": list(observation_shape) if pixels_mode else None,
@@ -1303,6 +1319,7 @@ def _validate_resume_config(stored: Mapping[str, object], current: PPOConfig) ->
         "native_lanes": 32,
         "native_execution": "parallel",
         "observation_mode": "board",
+        "board_spatial_pool": "average",
         "pixel_stack": 4,
         "pixel_architecture": "small",
         "training_seeds": [],
@@ -1640,6 +1657,7 @@ def _write_run_record(
         "kind": "dodge_ppo_run",
         "model_type": _model_type_for_config(config),
         "observation_mode": config.observation_mode,
+        "board_spatial_pool": config.board_spatial_pool,
         "observation_shape": list(observation_shape),
         "board_shape": list(BOARD_SHAPE) if not pixels_mode else None,
         "pixel_shape": list(observation_shape) if pixels_mode else None,
@@ -1832,6 +1850,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=("board", "board_full", "pixels"),
         default="board",
     )
+    parser.add_argument(
+        "--board-spatial-pool",
+        choices=("average", "max"),
+        default="average",
+    )
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
     parser.add_argument(
         "--pixel-architecture", choices=("fast", "small", "current"), default="small"
@@ -1863,6 +1886,7 @@ def main(argv: list[str] | None = None) -> int:
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
         observation_mode=arguments.observation_mode,
+        board_spatial_pool=arguments.board_spatial_pool,
         pixel_stack=arguments.pixel_stack,
         pixel_architecture=arguments.pixel_architecture,
     )

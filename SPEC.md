@@ -44,6 +44,7 @@ I14|`src/dodge/rl/ppo.py` owns native pixel PPO, exact pixel frame stacking, res
 I15|`src/dodge/ng/relevance.py` owns multi-horizon decision-relevance audits, policy regret/action dynamics, gate output, and visual checkpoint references.
 I16|`src/dodge/rl/ppo.py` owns lane-independent GAE for the interleaved native batch rollout and records the configured baseline target in NG provenance.
 I17|Native board encoders and PPO observation-mode routing own the opt-in off-screen-preserving `board_full` representation; the Python reference encoder mirrors it for parity tests.
+I18|`src/dodge/rl/ppo.py` owns explicit board spatial-pooling configuration and reconstructs the selected pooling mode for PPO checkpoints and relevance audits.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -86,6 +87,7 @@ V31|Audit selection inputs use training seeds only; holdout audit optional repor
 V32|Native PPO computes GAE independently along each lane's time axis; interleaved lane transitions cannot contribute future return or advantage across lane boundaries.
 V33|A focused baseline run declares target completion only when its configured training evaluation reaches 800 survival frames; shorter runs remain diagnostic progress regardless of holdout performance.
 V34|Opt-in `board_full` pins entirely off-screen canonical hazards to the nearest 19x16 edge cells, leaves legacy `board` unchanged, and agrees across native serial/parallel and Python reference encoders.
+V35|Board pooling is explicit in PPO configuration/checkpoint provenance; average pooling remains the default and max pooling is an isolated board-trial option that preserves sparse hazard evidence without changing observation shape.
 
 §T
 id|status|task|cites
@@ -113,6 +115,7 @@ T21|x|Implement frozen-manifest decision-relevance gate: canonical multi-horizon
 T22|x|Repair native PPO lane-wise GAE, expose the 800-frame focused-baseline target in NG provenance, and add regression coverage before rerunning board PPO.|V32,V33,G8,C14,I3,I16
 T23|~|Run the focused board-PPO baseline under the 800-frame target, audit checkpoints with T21 on training seeds, and iterate baseline-only until the target is reached or the blocker is diagnosed.|V30,V31,V33,G4,G8,C14
 T24|~|Add an isolated `board_full` observation mode that preserves off-screen hazards at board edges, proves native/Python parity, and reruns the focused baseline with the same PPO protocol.|V34,C5,G8,I17
+T25|~|Expose explicit average/max board pooling, preserve legacy defaults, and run the `board_full` max-pooling baseline under the same 800-frame gate.|V35,G8,I18
 
 §B
 id|date|cause|fix

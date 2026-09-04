@@ -300,7 +300,13 @@ def _load_policy(config: RelevanceConfig) -> _Policy:
     elif mode in {"board", "board_full"}:
         weight = state_dict.get("features.projection.0.weight")
         hidden_size = int(weight.shape[0]) if hasattr(weight, "shape") else 256
-        model = DodgeActorCriticCNN(hidden_size=hidden_size)
+        spatial_pool = stored_config.get("board_spatial_pool", "average")
+        if spatial_pool not in {"average", "max"}:
+            raise ValueError("relevance board spatial pool is invalid")
+        model = DodgeActorCriticCNN(
+            hidden_size=hidden_size,
+            spatial_pool=spatial_pool,
+        )
         info = _PolicyInfo(f"checkpoint:{config.checkpoint}", mode)
     else:
         raise ValueError("relevance checkpoint observation mode is invalid")
