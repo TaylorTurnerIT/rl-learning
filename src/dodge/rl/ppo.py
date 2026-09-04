@@ -512,13 +512,13 @@ def compute_gae(
     gae_lambda: float,
 ) -> tuple[Tensor, Tensor]:
     tensors = (rewards, values, next_values, terminated, episode_ends)
-    if any(tensor.ndim != 1 for tensor in tensors):
-        raise ValueError("GAE inputs must be one-dimensional")
-    if len({len(tensor) for tensor in tensors}) != 1:
-        raise ValueError("GAE inputs must have equal lengths")
+    if any(tensor.ndim < 1 for tensor in tensors):
+        raise ValueError("GAE inputs must have at least one dimension")
+    if len({tuple(tensor.shape) for tensor in tensors}) != 1:
+        raise ValueError("GAE inputs must have equal shapes")
     advantages = torch.zeros_like(rewards)
-    running = torch.zeros((), dtype=rewards.dtype, device=rewards.device)
-    for index in range(len(rewards) - 1, -1, -1):
+    running = torch.zeros_like(rewards[0])
+    for index in range(rewards.shape[0] - 1, -1, -1):
         nonterminal = 1.0 - terminated[index].to(rewards.dtype)
         delta = (
             rewards[index] + gamma * nonterminal * next_values[index] - values[index]
@@ -1009,18 +1009,18 @@ class NativePPOTrainer(PPOTrainer):
             self._load_checkpoint(checkpoint)
 
     def collect_rollout(self) -> tuple[RolloutBatch, tuple[EpisodeSummary, ...]]:
-        observations: list[Tensor] = []
-        actions: list[int] = []
-        old_log_probs: list[float] = []
-        values: list[float] = []
-        rewards: list[float] = []
-        next_values: list[float] = []
-        terminated: list[bool] = []
-        episode_ends: list[bool] = []
+        observation_rows: list[Tensor] = []
+        action_rows: list[Tensor] = []
+        old_log_prob_rows: list[Tensor] = []
+        value_rows: list[Tensor] = []
+        reward_rows: list[Tensor] = []
+        next_value_rows: list[Tensor] = []
+        terminated_rows: list[Tensor] = []
+        episode_end_rows: list[Tensor] = []
         episodes: list[EpisodeSummary] = []
         restarts = 0
         self.model.eval()
-        while len(rewards) < self.config.rollout_steps:
+        while len(reward_rows) * self.config.native_lanes < self.config.rollout_steps:
             self._ensure_lanes()
             current_observations = self._current_observations()
             if current_observations is None:
@@ -1048,6 +1048,10 @@ class NativePPOTrainer(PPOTrainer):
             next_tensor = torch.from_numpy(next_observations)
             with torch.inference_mode():
                 _, next_value_tensor = self.model(next_tensor.to(self.device))
+            step_next_values = next_value_tensor.detach().cpu().clone()
+            step_rewards: list[float] = []
+            step_terminated: list[bool] = []
+            step_episode_ends: list[bool] = []
             ended_lanes: list[int] = []
             for lane in range(len(self._lane_seeds)):
                 action_index = int(action_indices[lane])
@@ -1068,15 +1072,10 @@ class NativePPOTrainer(PPOTrainer):
                 bootstrap_value = (
                     0.0 if actual_terminal else float(next_value_tensor[lane].item())
                 )
-
-                observations.append(current_tensor[lane].clone())
-                actions.append(action_index)
-                old_log_probs.append(float(log_prob_tensor[lane].item()))
-                values.append(float(value_tensor[lane].item()))
-                rewards.append(shaped_reward)
-                next_values.append(bootstrap_value)
-                terminated.append(actual_terminal)
-                episode_ends.append(episode_end)
+                step_next_values[lane] = bootstrap_value
+                step_rewards.append(shaped_reward)
+                step_terminated.append(actual_terminal)
+                step_episode_ends.append(episode_end)
                 if episode_end:
                     episodes.append(
                         EpisodeSummary(
@@ -1090,38 +1089,47 @@ class NativePPOTrainer(PPOTrainer):
                     self.episodes_completed += 1
                     ended_lanes.append(lane)
 
+            observation_rows.append(current_tensor.clone())
+            action_rows.append(torch.from_numpy(action_indices.astype(np.int64)))
+            old_log_prob_rows.append(log_prob_tensor.detach().cpu().clone())
+            value_rows.append(value_tensor.detach().cpu().clone())
+            reward_rows.append(torch.tensor(step_rewards, dtype=torch.float32))
+            next_value_rows.append(step_next_values)
+            terminated_rows.append(torch.tensor(step_terminated, dtype=torch.bool))
+            episode_end_rows.append(torch.tensor(step_episode_ends, dtype=torch.bool))
+
             self.global_step += len(self._lane_seeds)
             self._set_current_observations(next_observations)
             if ended_lanes:
                 self._reset_lanes(ended_lanes)
 
         self.model.train()
-        reward_tensor = torch.tensor(rewards, dtype=torch.float32)
-        value_tensor = torch.tensor(values, dtype=torch.float32)
-        next_value_tensor = torch.tensor(next_values, dtype=torch.float32)
-        terminated_tensor = torch.tensor(terminated, dtype=torch.bool)
-        episode_end_tensor = torch.tensor(episode_ends, dtype=torch.bool)
+        reward_matrix = torch.stack(reward_rows)
+        value_matrix = torch.stack(value_rows)
+        next_value_matrix = torch.stack(next_value_rows)
+        terminated_matrix = torch.stack(terminated_rows)
+        episode_end_matrix = torch.stack(episode_end_rows)
         advantages, returns = compute_gae(
-            reward_tensor,
-            value_tensor,
-            next_value_tensor,
-            terminated_tensor,
-            episode_end_tensor,
+            reward_matrix,
+            value_matrix,
+            next_value_matrix,
+            terminated_matrix,
+            episode_end_matrix,
             gamma=self.config.gamma,
             gae_lambda=self.config.gae_lambda,
         )
         return (
             RolloutBatch(
-                observations=torch.stack(observations),
-                actions=torch.tensor(actions, dtype=torch.long),
-                old_log_probs=torch.tensor(old_log_probs, dtype=torch.float32),
-                values=value_tensor,
-                rewards=reward_tensor,
-                next_values=next_value_tensor,
-                terminated=terminated_tensor,
-                episode_ends=episode_end_tensor,
-                advantages=advantages,
-                returns=returns,
+                observations=torch.cat(observation_rows, dim=0),
+                actions=torch.cat(action_rows, dim=0),
+                old_log_probs=torch.cat(old_log_prob_rows, dim=0),
+                values=value_matrix.reshape(-1),
+                rewards=reward_matrix.reshape(-1),
+                next_values=next_value_matrix.reshape(-1),
+                terminated=terminated_matrix.reshape(-1),
+                episode_ends=episode_end_matrix.reshape(-1),
+                advantages=advantages.reshape(-1),
+                returns=returns.reshape(-1),
             ),
             tuple(episodes),
         )

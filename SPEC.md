@@ -8,6 +8,7 @@ G4|Close the board-PPO gate by separating action-credit/evaluator limits from le
 G5|Use a fresh native counterfactual planner to provide board-action supervision, then test whether BC and BC-to-PPO improve closed-loop learning on unseen NG seeds.
 G6|Give each later learner the same frozen manifest, native interaction budget, and training-side selection boundary so improvements and failures transfer across methods.
 G7|Train an exact-raster pixel CNN with temporal context and measure visual learning cost against the board reference.
+G8|Treat 800 native survival frames as the first true-learning threshold for the focused baseline campaign; do not call shorter survival progress learned.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -23,6 +24,7 @@ C10|Teacher scores simulate every action from the same canonical snapshot with o
 C11|A teacher dataset is fresh NG data with manifest/config/provenance metadata; legacy databases, checkpoints, and prior experiment artifacts are never inputs.
 C12|The first pixel control receives only native indexed pixels with shape `(N,4,128,128)`, normalizes palette indexes by `15`, and uses no augmentation or derived board channels.
 C13|Pixel PPO uses the same frozen NG manifest, nine-action contract, native frame schedule, and training-side selection boundary as board PPO; holdout remains report-only.
+C14|The focused baseline target is 800 survival frames, equal to 200 native decisions at `step_frames=4`; target completion is evaluated on the training split and holdout is report-only.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -40,6 +42,7 @@ I12|`src/dodge/ng/compare.py` owns matched PPO selected-checkpoint evaluation, s
 I13|`src/dodge/ng/dagger.py` owns learner-visited training-state collection, fresh counterfactual labels, dataset aggregation, and round BC retraining.
 I14|`src/dodge/rl/ppo.py` owns native pixel PPO, exact pixel frame stacking, reset-safe stack lifecycle, pixel checkpoints, and pixel evaluation.
 I15|`src/dodge/ng/relevance.py` owns multi-horizon decision-relevance audits, policy regret/action dynamics, gate output, and visual checkpoint references.
+I16|`src/dodge/rl/ppo.py` owns lane-independent GAE for the interleaved native batch rollout and records the configured baseline target in NG provenance.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -79,6 +82,8 @@ V28|Decision-relevance audit replays canonical snapshots with common-random-numb
 V29|Audit reports first enemy/active-pattern/near-collision/decisive frames, per-horizon action margins, policy regret, action-change rate, and maximum action run.
 V30|Gate marks rollout uninformative when no decisive state exists or all-action margin ≤ configured threshold; uninformative scores cannot advance learner selection.
 V31|Audit selection inputs use training seeds only; holdout audit optional report-only and cannot set pass/selection fields.
+V32|Native PPO computes GAE independently along each lane's time axis; interleaved lane transitions cannot contribute future return or advantage across lane boundaries.
+V33|A focused baseline run declares target completion only when its configured training evaluation reaches 800 survival frames; shorter runs remain diagnostic progress regardless of holdout performance.
 
 §T
 id|status|task|cites
@@ -103,6 +108,7 @@ T18|x|Run a matched native pixel-PPO control on the frozen training split, selec
 T19|x|Compare board and pixel controls by sample efficiency, wall-clock throughput, split gap, lower tail, and representative visual failures.|V7,V18,V25,V27,G6,G7
 T20|~|Collect fresh training-only indexed-pixel teacher examples and train a pixel CNN behavior-cloning checkpoint suitable for actor-only PPO warm starts.|V18,V20,V25,V27,G6,G7,I9,I14
 T21|x|Implement frozen-manifest decision-relevance gate: canonical multi-horizon all-action audit, policy regret/action dynamics, hazard timeline, training-only gate, JSON/Markdown/plot artifacts, CLI/tests.|V16,V28,V29,V30,V31,I7,I15
+T22|x|Repair native PPO lane-wise GAE, expose the 800-frame focused-baseline target in NG provenance, and add regression coverage before rerunning board PPO.|V32,V33,G8,C14,I3,I16
 
 §B
 id|date|cause|fix
@@ -122,3 +128,4 @@ B13|2026-09-03|T21 first lint gate found type-erased result access, unused impor
 B14|2026-09-03|Matplotlib boxplot API in current environment rejects legacy `labels=` keyword.|Use current `tick_labels=` plotting API and retain plot-generation coverage.
 B15|2026-09-03|T21 custom-horizon fixtures omitted newly required near-term gate horizon.|Set gate horizon explicitly in custom-horizon tests; no new invariant.
 B16|2026-09-03|Full-suite rerun reproduced B11's concurrent Pemsa/Xvfb hidden-window timeout in three legacy NEAT tests.|Rerun live Pemsa tests in isolation; no T21 source workaround.
+B17|2026-09-03|Native PPO flattened time-major transitions from independent lanes before GAE, so advantages crossed lane boundaries and mixed unrelated episodes.|Compute GAE on `[time,lane]` tensors before flattening; enforce V32 with a multi-lane boundary regression test.

@@ -26,6 +26,7 @@ from dodge.rl.ppo import (
 
 DEFAULT_RUN_DIRECTORY = PROJECT_ROOT / "history" / "dodge" / "ng" / "baseline-p1"
 DEFAULT_BASELINE_SEED = 2_026_0903
+DEFAULT_TARGET_SURVIVAL_FRAMES = 800
 INNER_VALIDATION_COUNT = 10
 
 
@@ -49,6 +50,7 @@ class BaselineConfig:
     stability_bonus_cap: float = 1.0
     step_frames: int = 4
     max_episode_steps: int = 2_000
+    target_survival_frames: int = DEFAULT_TARGET_SURVIVAL_FRAMES
     environment_restarts: int = 3
     checkpoint_every: int = 25
     eval_every: int = 25
@@ -61,6 +63,10 @@ class BaselineConfig:
     pixel_architecture: PixelArchitecture = "small"
     initial_bc_checkpoint: Path | None = None
 
+    def validate(self) -> None:
+        if self.target_survival_frames < 1:
+            raise ValueError("target survival frames must be positive")
+
     def to_json(self) -> dict[str, object]:
         value = asdict(self)
         value["manifest_path"] = str(self.manifest_path)
@@ -70,6 +76,7 @@ class BaselineConfig:
         return value
 
     def ppo_config(self, manifest: SeedManifest) -> PPOConfig:
+        self.validate()
         return PPOConfig(
             updates=self.updates,
             rollout_steps=self.rollout_steps,
@@ -156,6 +163,7 @@ def run_baseline(config: BaselineConfig) -> dict[str, object]:
         "holdout_seeds": list(manifest.holdout_seeds),
         "legacy_inputs": "none",
         "baseline_config": config.to_json(),
+        "target": _target_summary(config, record),
         "initialization": initialization,
     }
     _write_json(config.run_directory / "ng-run.json", ng_record)
@@ -171,6 +179,28 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _target_summary(
+    config: BaselineConfig, record: dict[str, object]
+) -> dict[str, object]:
+    final_training = record.get("final_training_evaluation")
+    training_mean: float | None = None
+    if isinstance(final_training, dict):
+        value = final_training.get("mean_survival_frames")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            training_mean = float(value)
+    return {
+        "metric": "final_training_evaluation.mean_survival_frames",
+        "target_survival_frames": config.target_survival_frames,
+        "target_decision_steps": (
+            config.target_survival_frames + config.step_frames - 1
+        )
+        // config.step_frames,
+        "training_mean_survival_frames": training_mean,
+        "reached": training_mean is not None
+        and training_mean >= config.target_survival_frames,
+    }
 
 
 def _positive_int(value: str) -> int:
@@ -207,6 +237,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--stability-bonus-cap", type=float, default=1.0)
     parser.add_argument("--step-frames", type=int, default=4)
     parser.add_argument("--max-episode-steps", type=_positive_int, default=2_000)
+    parser.add_argument(
+        "--target-survival-frames",
+        type=_positive_int,
+        default=DEFAULT_TARGET_SURVIVAL_FRAMES,
+    )
     parser.add_argument("--environment-restarts", type=_nonnegative_int, default=3)
     parser.add_argument("--checkpoint-every", type=_positive_int, default=25)
     parser.add_argument("--eval-every", type=_nonnegative_int, default=25)
@@ -255,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         stability_bonus_cap=arguments.stability_bonus_cap,
         step_frames=arguments.step_frames,
         max_episode_steps=arguments.max_episode_steps,
+        target_survival_frames=arguments.target_survival_frames,
         environment_restarts=arguments.environment_restarts,
         checkpoint_every=arguments.checkpoint_every,
         eval_every=arguments.eval_every,

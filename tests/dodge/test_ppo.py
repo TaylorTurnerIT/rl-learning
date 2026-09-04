@@ -257,6 +257,59 @@ def test_v33_gae_resets_at_episode_boundaries_and_bootstraps_truncation() -> Non
     assert returns.tolist() == pytest.approx(advantages.tolist())
 
 
+def test_v32_batched_gae_does_not_cross_native_lane_boundaries() -> None:
+    rewards = torch.tensor(
+        [
+            [1.0, 10.0],
+            [1.0, 10.0],
+            [1.0, 10.0],
+        ]
+    )
+    values = torch.zeros_like(rewards)
+    next_values = torch.zeros_like(rewards)
+    terminated = torch.tensor(
+        [
+            [False, False],
+            [False, True],
+            [True, False],
+        ]
+    )
+    episode_ends = terminated.clone()
+
+    batched_advantages, batched_returns = compute_gae(
+        rewards,
+        values,
+        next_values,
+        terminated,
+        episode_ends,
+        gamma=0.9,
+        gae_lambda=0.5,
+    )
+    lane_zero_advantages, lane_zero_returns = compute_gae(
+        rewards[:, 0],
+        values[:, 0],
+        next_values[:, 0],
+        terminated[:, 0],
+        episode_ends[:, 0],
+        gamma=0.9,
+        gae_lambda=0.5,
+    )
+    lane_one_advantages, lane_one_returns = compute_gae(
+        rewards[:, 1],
+        values[:, 1],
+        next_values[:, 1],
+        terminated[:, 1],
+        episode_ends[:, 1],
+        gamma=0.9,
+        gae_lambda=0.5,
+    )
+
+    torch.testing.assert_close(batched_advantages[:, 0], lane_zero_advantages)
+    torch.testing.assert_close(batched_advantages[:, 1], lane_one_advantages)
+    torch.testing.assert_close(batched_returns[:, 0], lane_zero_returns)
+    torch.testing.assert_close(batched_returns[:, 1], lane_one_returns)
+
+
 def test_ppo_trainer_collects_real_shaped_rollout_and_updates() -> None:
     trainer = PPOTrainer(_config(), environment_factory=FakePPOEnvironment)
     try:

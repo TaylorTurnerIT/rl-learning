@@ -79,6 +79,9 @@ def test_run_baseline_passes_locked_split_to_ppo(monkeypatch, tmp_path: Path) ->
     assert kwargs["evaluation_seeds"] == manifest.holdout_seeds
     stored = json.loads((run_directory / "ng-run.json").read_text())
     assert stored["legacy_inputs"] == "none"
+    assert stored["target"]["target_survival_frames"] == 800
+    assert stored["target"]["target_decision_steps"] == 200
+    assert stored["target"]["reached"] is False
     assert result["report"] == {"run_directory": str(run_directory)}
 
 
