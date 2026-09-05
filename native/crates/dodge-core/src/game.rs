@@ -1325,7 +1325,11 @@ impl NativeGame {
                 next_x = next_x.sub(ENEMY_HALF_STEP.mul_fixed(self.freeze_rate));
                 next_y = next_y.sub(ENEMY_HALF_STEP.mul_fixed(self.freeze_rate));
             }
-            if size >= original.max_size && original.personality == -1 {
+            // The cartridge tests the pre-growth local `s` here.  Testing the
+            // mutated size would flip an expanding kamikaze to shrinking on
+            // the exact frame it reaches max size, moving it and reducing it
+            // one frame too early.
+            if source_size >= original.max_size && original.personality == -1 {
                 isizing = false;
             }
             if original.personality == -1 && !isizing {
@@ -1356,7 +1360,7 @@ impl NativeGame {
 
             if original.is_dying {
                 self.enemies.remove(index);
-                self.resolve_enemy_death(current, x, y);
+                self.resolve_enemy_death(current, x, y, source_size);
                 continue;
             }
             if let Some(slot) = self.enemies.get_mut(index) {
@@ -1378,7 +1382,9 @@ impl NativeGame {
                 }
             }
 
-            self.apply_pattern_enemy_collision(index, &mut vx, &mut vy, x, y, source_size);
+            if original.personality != -1 {
+                self.apply_pattern_enemy_collision(index, &mut vx, &mut vy, x, y, source_size);
+            }
             self.apply_pattern_crush(index, x, y, source_size);
 
             let Some(current_enemy) = self.enemies.get(index).copied() else {
@@ -1571,9 +1577,14 @@ impl NativeGame {
         enemy: EnemyState,
         shatter_x: PicoFixed,
         shatter_y: PicoFixed,
+        source_size: PicoFixed,
     ) {
         if enemy.personality == 1 {
-            self.add_kamikaze(enemy);
+            // The cartridge's `kamikaze(_e)` reads `_e.x` and `_e.s`, while
+            // the update locals still contain the pre-growth values. `enemy`
+            // has already received this frame's growth and movement, so use
+            // the source position/size explicitly here.
+            self.add_kamikaze_at(shatter_x, shatter_y, source_size);
         } else {
             self.shatter(shatter_x, shatter_y);
         }
@@ -1603,9 +1614,13 @@ impl NativeGame {
     }
 
     fn add_kamikaze(&mut self, enemy: EnemyState) {
+        self.add_kamikaze_at(enemy.x, enemy.y, enemy.size);
+    }
+
+    fn add_kamikaze_at(&mut self, x: PicoFixed, y: PicoFixed, size: PicoFixed) {
         self.enemies.push(EnemyState {
-            x: enemy.x.add(enemy.size.mul_fixed(PicoFixed::from_f32(0.5))),
-            y: enemy.y.add(enemy.size.mul_fixed(PicoFixed::from_f32(0.5))),
+            x: x.add(size.mul_fixed(PicoFixed::from_f32(0.5))),
+            y: y.add(size.mul_fixed(PicoFixed::from_f32(0.5))),
             vx: PicoFixed::ZERO,
             vy: PicoFixed::ZERO,
             size: PicoFixed::ZERO,
@@ -2791,6 +2806,125 @@ mod tests {
             game.enemies.first().map(|enemy| enemy.x),
             Some(PicoFixed::from_f32(30.5))
         );
+    }
+
+    #[test]
+    fn v163_kamikaze_reaches_max_size_before_switching_to_shrink() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        game.enemies.push(EnemyState {
+            size: PicoFixed::from_int(29),
+            max_size: PicoFixed::from_int(30),
+            personality: -1,
+            life: None,
+            x: PicoFixed::from_int(50),
+            y: PicoFixed::from_int(50),
+            ..EnemyState::normal(
+                PicoFixed::from_int(50),
+                PicoFixed::from_int(50),
+                PicoFixed::from_int(30),
+            )
+        });
+
+        game.update_enemies();
+
+        let Some(explosion) = game.enemies.first() else {
+            return;
+        };
+        assert_eq!(explosion.size, PicoFixed::from_int(30));
+        assert!(explosion.isizing);
+        assert_eq!(explosion.x, PicoFixed::from_f32(49.5));
+        assert_eq!(explosion.y, PicoFixed::from_f32(49.5));
+    }
+
+    #[test]
+    fn v164_dying_personality_one_uses_pre_growth_kamikaze_source() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        game.enemies.push(EnemyState {
+            personality: 1,
+            size: PicoFixed::from_int(3),
+            max_size: PicoFixed::from_int(5),
+            is_dying: true,
+            x: PicoFixed::from_int(20),
+            y: PicoFixed::from_int(30),
+            ..EnemyState::normal(
+                PicoFixed::from_int(20),
+                PicoFixed::from_int(30),
+                PicoFixed::from_int(3),
+            )
+        });
+
+        game.update_enemies();
+
+        let Some(explosion) = game.enemies.first() else {
+            panic!("dying personality-1 enemy did not spawn a kamikaze");
+        };
+        // The appended kamikaze is visited later in this same update, so its
+        // first visible state has grown by one pixel and shifted by 0.5.
+        assert_eq!(explosion.personality, -1);
+        assert_eq!(explosion.size, PicoFixed::ONE);
+        assert_eq!(explosion.x, PicoFixed::from_f32(21.0));
+        assert_eq!(explosion.y, PicoFixed::from_f32(31.0));
+    }
+
+    #[test]
+    fn v165_kamikaze_does_not_bounce_from_pattern_rectangles() {
+        let mut game = NativeGame::new(NativeConfig::default());
+        game.patterns = vec![crate::PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::ONE,
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 0,
+            bounce_cap: false,
+            spawn_enabled: false,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
+            counter: 0,
+            timer: PicoFixed::ZERO,
+            rects: vec![crate::PatternRect {
+                x: PicoFixed::from_int(80),
+                y: PicoFixed::from_int(16),
+                width: PicoFixed::from_int(20),
+                height: PicoFixed::from_int(20),
+                speed: PicoFixed::from_int(12),
+                dx: PicoFixed::ZERO,
+                dy: PicoFixed::ZERO,
+                targets: Vec::new(),
+                target_index: 0,
+                wait: PicoFixed::ZERO,
+                shown: true,
+                sh: PicoFixed::from_int(2),
+                warnings: Vec::new(),
+                collision_done: false,
+                finished: false,
+            }],
+        }];
+        game.active_pattern = Some(0);
+        game.enemies.push(EnemyState {
+            personality: -1,
+            size: PicoFixed::from_int(20),
+            max_size: PicoFixed::from_int(30),
+            x: PicoFixed::from_int(80),
+            y: PicoFixed::from_int(-4),
+            ..EnemyState::normal(
+                PicoFixed::from_int(80),
+                PicoFixed::from_int(-4),
+                PicoFixed::from_int(20),
+            )
+        });
+
+        game.update_enemies();
+
+        let Some(explosion) = game.enemies.first() else {
+            panic!("kamikaze disappeared during pattern update");
+        };
+        assert_eq!(explosion.vx, PicoFixed::ZERO);
+        assert_eq!(explosion.vy, PicoFixed::ZERO);
+        assert_eq!(explosion.size, PicoFixed::from_int(21));
+        assert_eq!(explosion.x, PicoFixed::from_f32(79.5));
+        assert_eq!(explosion.y, PicoFixed::from_f32(-4.5));
     }
 
     #[test]

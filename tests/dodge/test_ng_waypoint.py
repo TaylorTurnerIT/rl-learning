@@ -94,6 +94,35 @@ def test_waypoint_controller_maps_relative_targets_to_native_actions() -> None:
     assert wall.target_reached is True
 
 
+def test_waypoint_grid_can_ban_corner_targets_without_teleporting() -> None:
+    grid = WaypointGrid(32, ban_corner_nodes=True)
+
+    current, target, point = grid.target_for_action(
+        34, 34, ACTION_CHOICES.index("up_left")
+    )
+
+    assert current == (1, 1)
+    assert target == current
+    assert point == (34.0, 34.0)
+    assert grid.is_corner((0, 0))
+    assert not grid.is_corner((1, 1))
+
+
+def test_arrival_latching_holds_neutral_until_the_next_waypoint_decision() -> None:
+    controller = WaypointController(
+        WaypointGrid(32),
+        tolerance=2.0,
+        arrival_latching=True,
+    )
+
+    correcting = controller.steer_position(31.0, 66.0, (1, 2), arrived=False)
+    latched = controller.steer_position(31.0, 66.0, (1, 2), arrived=True)
+
+    assert correcting.native_action == "right"
+    assert latched.native_action == "neutral"
+    assert latched.target_reached is True
+
+
 @pytest.mark.parametrize("tolerance", [0.0, 2.0, 7.5])
 def test_waypoint_hot_path_matches_full_decision_for_all_targets_and_actions(
     tolerance: float,
@@ -128,13 +157,14 @@ def test_waypoint_target_cell_hot_path_matches_full_target_contract() -> None:
     grid = WaypointGrid(16)
     for x, y in ((2.0, 2.0), (50.0, 66.0), (124.0, 124.0)):
         for action_index in range(len(ACTION_CHOICES)):
-            assert grid.target_cell_for_action(
-                x, y, action_index
-            ) == grid.target_for_action(
-                x,
-                y,
-                action_index,
-            )[1]
+            assert (
+                grid.target_cell_for_action(x, y, action_index)
+                == grid.target_for_action(
+                    x,
+                    y,
+                    action_index,
+                )[1]
+            )
 
 
 def test_waypoint_controller_native_actions_preserve_game_hashes() -> None:

@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import signal
 import sys
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal
@@ -41,6 +42,8 @@ WAYPOINT_OBSERVATION_SIZE: Final[int] = OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTI
 WAYPOINT_DQN_VERSION: Final[int] = 2
 RELEVANCE_GATE_FRAMES: Final[int] = 800
 WaypointExecution = Literal["serial", "parallel"]
+ResetMode = Literal["native-startup", "legacy"]
+RESET_MODES: tuple[ResetMode, ...] = ("native-startup", "legacy")
 
 
 def encode_waypoint_observation(state: RawState, grid: WaypointGrid) -> np.ndarray:
@@ -112,6 +115,7 @@ class DQNConfig:
     batch_size: int = 256
     replay_capacity: int = 100_000
     learning_rate: float = 1e-4
+    weight_decay: float = 0.0
     gamma: float = 0.99
     n_step: int = 3
     warmup_steps: int = 2_000
@@ -120,10 +124,19 @@ class DQNConfig:
     hidden_size: int = 256
     grid_spacing: int = 32
     hold_decisions: int = 8
+    steering_tolerance: float = 2.0
+    arrival_latching: bool = False
+    ban_corner_nodes: bool = False
+    corner_node_penalty: float = 0.0
     step_frames: int = 4
     max_episode_steps: int = 2_000
     native_lanes: int = 32
     native_execution: WaypointExecution = "parallel"
+    reset_mode: ResetMode = "native-startup"
+    training_lives: int = 1
+    life_loss_penalty: float = 0.0
+    epsilon_decay_steps: int = 0
+    epsilon_final: float = 0.05
     checkpoint_every: int = 2_000
     eval_every: int = 2_000
     seed: int = 2_026_0903
@@ -151,21 +164,70 @@ class DQNConfig:
             raise ValueError("DQN batch size must not exceed replay capacity")
         if self.learning_rate <= 0:
             raise ValueError("DQN learning rate must be positive")
+        if self.weight_decay < 0:
+            raise ValueError("DQN weight decay must not be negative")
         if not 0 < self.gamma <= 1:
             raise ValueError("DQN gamma must be between 0 and 1")
         if not 3 <= self.step_frames <= 5:
             raise ValueError("step frames must be between 3 and 5")
         if self.grid_spacing < 1:
             raise ValueError("DQN grid spacing must be positive")
+        if not np.isfinite(self.steering_tolerance) or self.steering_tolerance < 0:
+            raise ValueError("DQN steering tolerance must be finite and non-negative")
+        if self.steering_tolerance >= self.grid_spacing / 2:
+            raise ValueError("DQN steering tolerance must be below half grid spacing")
+        if not isinstance(self.arrival_latching, bool):
+            raise ValueError("DQN arrival latching must be a boolean")
+        if not isinstance(self.ban_corner_nodes, bool):
+            raise ValueError("DQN corner-node policy must be a boolean")
+        if not np.isfinite(self.corner_node_penalty) or self.corner_node_penalty > 0:
+            raise ValueError("DQN corner-node penalty must be finite and non-positive")
         if self.n_step > 2**8 - 1:
             raise ValueError("DQN n-step horizon must fit replay storage")
         if self.native_execution not in {"serial", "parallel"}:
             raise ValueError("native execution must be serial or parallel")
+        if self.reset_mode not in RESET_MODES:
+            raise ValueError("DQN reset mode must be native-startup or legacy")
+        if (
+            isinstance(self.training_lives, bool)
+            or not isinstance(self.training_lives, int)
+            or self.training_lives < 1
+        ):
+            raise ValueError("DQN training lives must be a positive integer")
+        if not np.isfinite(self.life_loss_penalty) or self.life_loss_penalty > 0:
+            raise ValueError("DQN life-loss penalty must be finite and non-positive")
+        if self.epsilon_decay_steps < 0:
+            raise ValueError("DQN epsilon decay steps must not be negative")
+        if not 0 <= self.epsilon_final < 1:
+            raise ValueError("DQN final epsilon must be in [0, 1)")
         if self.device not in {"cpu", "cuda", "auto"}:
             raise ValueError("DQN device must be cpu, cuda, or auto")
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
+
+
+def config_from_json(payload: Mapping[str, object]) -> DQNConfig:
+    """Load a checkpoint config while preserving defaults for old checkpoints."""
+    normalized = dict(payload)
+    normalized.setdefault("steering_tolerance", 2.0)
+    normalized.setdefault("arrival_latching", False)
+    normalized.setdefault("ban_corner_nodes", False)
+    normalized.setdefault("corner_node_penalty", 0.0)
+    return DQNConfig(**normalized)  # type: ignore[arg-type]
+
+
+def waypoint_controller_for_config(config: DQNConfig) -> WaypointController:
+    """Create the one controller contract shared by train, eval, and replay."""
+    grid = WaypointGrid(
+        config.grid_spacing,
+        ban_corner_nodes=config.ban_corner_nodes,
+    )
+    return WaypointController(
+        grid,
+        tolerance=config.steering_tolerance,
+        arrival_latching=config.arrival_latching,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,10 +626,31 @@ def _native_ml_state(
     return observations, positions
 
 
+def _reset_ml_batch(
+    environment: NativeBatchEnvironment,
+    seeds: np.ndarray,
+    config: DQNConfig,
+) -> NativeMlBatchResult:
+    if config.reset_mode == "legacy":
+        return environment.reset_ml_batch(seeds)
+    return environment.reset_ml_batch_with_startup(seeds)
+
+
+def _reset_ml_lanes(
+    environment: NativeBatchEnvironment,
+    lanes: np.ndarray,
+    seeds: np.ndarray,
+    config: DQNConfig,
+) -> NativeMlBatchResult:
+    if config.reset_mode == "legacy":
+        return environment.reset_ml_lanes(lanes, seeds)
+    return environment.reset_ml_lanes_with_startup(lanes, seeds)
+
+
 def _epsilon(config: DQNConfig, step: int) -> float:
-    decay_steps = max(config.total_steps // 2, 1)
+    decay_steps = config.epsilon_decay_steps or max(config.total_steps // 2, 1)
     progress = min(1.0, step / decay_steps)
-    return 1.0 + progress * (0.05 - 1.0)
+    return 1.0 + progress * (config.epsilon_final - 1.0)
 
 
 def _choose_actions(
@@ -635,6 +718,52 @@ def _next_training_seed(
     return training_seeds[cursor % len(training_seeds)], cursor + 1
 
 
+def _consume_training_life(
+    lives_remaining: np.ndarray,
+    episode_steps: np.ndarray,
+    lane: int,
+    training_lives: int,
+) -> bool:
+    """Consume one training life and return whether this was the final loss."""
+    if lives_remaining.ndim != 1 or episode_steps.ndim != 1:
+        raise ValueError("DQN life state must be one-dimensional")
+    if not 0 <= lane < len(lives_remaining) or len(episode_steps) != len(
+        lives_remaining
+    ):
+        raise ValueError("DQN life state lane is invalid")
+    if int(lives_remaining[lane]) < 1:
+        raise ValueError("DQN life state is already exhausted")
+    lives_remaining[lane] -= 1
+    final_loss = int(lives_remaining[lane]) == 0
+    if final_loss:
+        lives_remaining[lane] = training_lives
+    episode_steps[lane] = 0
+    return final_loss
+
+
+def _restore_stop_signal_handlers(previous: dict[signal.Signals, object]) -> None:
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
+
+
+def _install_stop_signal_handlers() -> tuple[list[bool], dict[signal.Signals, object]]:
+    """Install graceful stop handlers when training runs in the main thread."""
+    requested = [False]
+    previous: dict[signal.Signals, object] = {}
+
+    def request_stop(_signum: int, _frame: object) -> None:
+        requested[0] = True
+
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_stop)
+    except ValueError:
+        _restore_stop_signal_handlers(previous)
+        previous = {}
+    return requested, previous
+
+
 def _dashboard_status(
     config: DQNConfig,
     manifest: SeedManifest,
@@ -675,17 +804,37 @@ def _collect_macro_transition(
     model: DuelingWaypointDQN,
     config: DQNConfig,
     episode_steps: np.ndarray,
+    episode_seeds: np.ndarray,
+    lives_remaining: np.ndarray,
     training_seeds: tuple[int, ...],
     seed_cursor: int,
     replay_accumulator: NStepAccumulator,
     rng: np.random.Generator,
     device: torch.device,
     global_step: int,
-) -> tuple[np.ndarray, np.ndarray, int, int, dict[str, float]]:
+) -> tuple[np.ndarray, np.ndarray, int, int, dict[str, object]]:
     lane_count = len(current_observations)
+    if (
+        current_positions.shape != (lane_count, 2)
+        or episode_steps.shape != (lane_count,)
+        or episode_seeds.shape != (lane_count,)
+        or lives_remaining.shape != (lane_count,)
+    ):
+        raise ValueError("DQN lane state shapes do not match observations")
     observations = current_observations.copy()
     epsilon = _epsilon(config, global_step)
     waypoint_actions = _choose_actions(model, observations, epsilon, rng, device)
+    current_cells = [
+        controller.grid.nearest_cell(
+            float(current_positions[lane, 0]),
+            float(current_positions[lane, 1]),
+        )
+        for lane in range(lane_count)
+    ]
+    raw_target_cells = [
+        controller.grid.neighbor_cell(current_cells[lane], int(action))
+        for lane, action in enumerate(waypoint_actions)
+    ]
     target_cells = [
         controller.grid.target_cell_for_action(
             float(current_positions[lane, 0]),
@@ -694,12 +843,31 @@ def _collect_macro_transition(
         )
         for lane, action in enumerate(waypoint_actions)
     ]
+    corner_target_count = sum(
+        controller.grid.is_corner(target_cell) for target_cell in raw_target_cells
+    )
     macro_rewards = np.zeros(lane_count, dtype=np.float32)
+    if config.corner_node_penalty:
+        for lane, target_cell in enumerate(raw_target_cells):
+            if controller.grid.is_corner(target_cell):
+                macro_rewards[lane] += config.corner_node_penalty
     macro_terminated = np.zeros(lane_count, dtype=bool)
     macro_truncated = np.zeros(lane_count, dtype=bool)
     macro_next_observations = np.zeros_like(observations)
     boundary = np.zeros(lane_count, dtype=bool)
+    life_reset_lanes: set[int] = set()
+    reset_seed_overrides: dict[int, int] = {}
+    life_loss_count = 0
+    final_death_count = 0
     native_steps = 0
+    arrived = np.zeros(lane_count, dtype=bool)
+    if controller.arrival_latching:
+        for lane, target_cell in enumerate(target_cells):
+            arrived[lane] = controller.target_reached(
+                float(current_positions[lane, 0]),
+                float(current_positions[lane, 1]),
+                target_cell,
+            )
     for _ in range(config.hold_decisions):
         native_actions = np.zeros(lane_count, dtype=np.uint8)
         for lane in range(lane_count):
@@ -710,6 +878,7 @@ def _collect_macro_transition(
                 float(x),
                 float(y),
                 target_cells[lane],
+                arrived=bool(arrived[lane]),
             )
         result = environment.step_ml_batch(native_actions)
         result_observations, result_positions = _native_ml_state(result)
@@ -724,36 +893,75 @@ def _collect_macro_transition(
                     current_observations[lane] = result_observations[lane]
                     current_positions[lane] = result_positions[lane]
                     episode_steps[lane] += 1
+                    if lane in life_reset_lanes:
+                        macro_next_observations[lane] = result_observations[lane]
                 continue
             macro_rewards[lane] += float(result.rewards[lane])
             episode_steps[lane] += 1
             truncated = (
                 not actual_terminal and episode_steps[lane] >= config.max_episode_steps
             )
-            if actual_terminal or truncated:
+            if actual_terminal:
+                life_loss_count += 1
+                macro_rewards[lane] += config.life_loss_penalty
+                final_loss = _consume_training_life(
+                    lives_remaining,
+                    episode_steps,
+                    lane,
+                    config.training_lives,
+                )
+                if final_loss:
+                    final_death_count += 1
                 boundary[lane] = True
-                macro_terminated[lane] = actual_terminal
+                macro_terminated[lane] = final_loss
+                macro_next_observations[lane] = result_observations[lane]
+                reset_lanes.add(lane)
+                if not final_loss:
+                    life_reset_lanes.add(lane)
+            elif truncated:
+                boundary[lane] = True
                 macro_truncated[lane] = truncated
                 macro_next_observations[lane] = result_observations[lane]
                 reset_lanes.add(lane)
             else:
                 current_observations[lane] = result_observations[lane]
                 current_positions[lane] = result_positions[lane]
+                if controller.arrival_latching and not arrived[lane]:
+                    arrived[lane] = controller.target_reached(
+                        float(current_positions[lane, 0]),
+                        float(current_positions[lane, 1]),
+                        target_cells[lane],
+                    )
         if reset_lanes:
             replacement_seeds: list[int] = []
             ordered_reset_lanes = sorted(reset_lanes)
-            for _lane in ordered_reset_lanes:
-                seed, seed_cursor = _next_training_seed(training_seeds, seed_cursor)
+            for lane in ordered_reset_lanes:
+                if lane in reset_seed_overrides:
+                    seed = reset_seed_overrides[lane]
+                elif lane in life_reset_lanes:
+                    seed = int(episode_seeds[lane])
+                    reset_seed_overrides[lane] = seed
+                else:
+                    seed, seed_cursor = _next_training_seed(training_seeds, seed_cursor)
+                    episode_seeds[lane] = seed
+                    lives_remaining[lane] = config.training_lives
+                    reset_seed_overrides[lane] = seed
                 replacement_seeds.append(seed)
-            reset = environment.reset_ml_lanes(
+            reset = _reset_ml_lanes(
+                environment,
                 np.asarray(ordered_reset_lanes, dtype=np.uint32),
                 np.asarray(replacement_seeds, dtype=np.uint32),
+                config,
             )
             reset_observations, reset_positions = _native_ml_state(reset)
             for index, lane in enumerate(ordered_reset_lanes):
                 current_observations[lane] = reset_observations[index]
                 current_positions[lane] = reset_positions[index]
                 episode_steps[lane] = 0
+                if lane in life_reset_lanes:
+                    macro_next_observations[lane] = reset_observations[index]
+        if bool(boundary.all()):
+            break
     next_observations = np.where(
         boundary[:, None], macro_next_observations, current_observations
     )
@@ -777,6 +985,10 @@ def _collect_macro_transition(
             "epsilon": epsilon,
             "macro_reward_mean": float(macro_rewards.mean()),
             "macro_reward_max": float(macro_rewards.max()),
+            "life_loss_count": float(life_loss_count),
+            "final_death_count": float(final_death_count),
+            "lives_remaining_mean": float(lives_remaining.mean()),
+            "corner_target_count": float(corner_target_count),
         },
     )
 
@@ -791,8 +1003,15 @@ def evaluate_waypoint_dqn(
     """Greedy macro-waypoint evaluation with one episode per seed."""
     if not seeds:
         raise ValueError("DQN evaluation requires at least one seed")
-    grid = grid or WaypointGrid(config.grid_spacing)
-    controller = WaypointController(grid)
+    controller = (
+        waypoint_controller_for_config(config)
+        if grid is None
+        else WaypointController(
+            grid,
+            tolerance=config.steering_tolerance,
+            arrival_latching=config.arrival_latching,
+        )
+    )
     device = next(model.parameters()).device
     model.eval()
     survival: list[int] = []
@@ -848,7 +1067,11 @@ def _evaluate_batch(
     current_observations: np.ndarray
     current_positions: np.ndarray
     try:
-        result = environment.reset_ml_batch(np.asarray(seeds, dtype=np.uint32))
+        result = _reset_ml_batch(
+            environment,
+            np.asarray(seeds, dtype=np.uint32),
+            config,
+        )
         current_observations, current_positions = _native_ml_state(result)
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
@@ -871,6 +1094,21 @@ def _evaluate_batch(
                 )
                 for lane, action in zip(active_indices, waypoint_actions, strict=True)
             ]
+            arrived = np.asarray(
+                [
+                    controller.target_reached(
+                        float(current_positions[int(lane), 0]),
+                        float(current_positions[int(lane), 1]),
+                        target_cell,
+                    )
+                    for lane, target_cell in zip(
+                        active_indices, target_cells, strict=True
+                    )
+                ],
+                dtype=bool,
+            )
+            if not controller.arrival_latching:
+                arrived.fill(False)
             block_done = np.zeros(len(active_indices), dtype=bool)
             for _ in range(config.hold_decisions):
                 native_actions = np.zeros(lane_count, dtype=np.uint8)
@@ -883,6 +1121,7 @@ def _evaluate_batch(
                         float(x),
                         float(y),
                         target_cells[local],
+                        arrived=bool(arrived[local]),
                     )
                 result = environment.step_ml_batch(native_actions)
                 result_observations, result_positions = _native_ml_state(result)
@@ -909,12 +1148,20 @@ def _evaluate_batch(
                                 config.max_episode_steps * config.step_frames
                             )
                         completed.append(lane)
+                    elif controller.arrival_latching and not arrived[local]:
+                        arrived[local] = controller.target_reached(
+                            float(current_positions[lane, 0]),
+                            float(current_positions[lane, 1]),
+                            target_cells[local],
+                        )
                 all_done = [lane for lane, done in enumerate(result.done) if bool(done)]
                 reset_lanes = sorted(set(completed) | set(all_done))
                 if reset_lanes:
-                    reset = environment.reset_ml_lanes(
+                    reset = _reset_ml_lanes(
+                        environment,
                         np.asarray(reset_lanes, dtype=np.uint32),
                         np.zeros(len(reset_lanes), dtype=np.uint32),
+                        config,
                     )
                     reset_observations, reset_positions = _native_ml_state(reset)
                     for index, lane in enumerate(reset_lanes):
@@ -929,17 +1176,25 @@ def _evaluate_batch(
 
 
 def _checkpoint_contract(config: DQNConfig) -> dict[str, object]:
-    grid = WaypointGrid(config.grid_spacing)
+    grid = WaypointGrid(
+        config.grid_spacing,
+        ban_corner_nodes=config.ban_corner_nodes,
+    )
     return {
         "grid_spacing": config.grid_spacing,
         "grid_shape": list(grid.shape),
+        "corner_nodes": "banned" if config.ban_corner_nodes else "allowed",
+        "reset_mode": config.reset_mode,
         "controller": {
-            "tolerance": 2.0,
+            "tolerance": config.steering_tolerance,
+            "arrival_latching": config.arrival_latching,
+            "corner_node_penalty": config.corner_node_penalty,
             "steering": "sign(target_position-current_position)",
         },
         "cadence": {
             "step_frames": config.step_frames,
             "hold_decisions": config.hold_decisions,
+            "decision_interval": config.hold_decisions,
         },
         "observation_size": WAYPOINT_OBSERVATION_SIZE,
         "observation_contract": (
@@ -948,6 +1203,8 @@ def _checkpoint_contract(config: DQNConfig) -> dict[str, object]:
         "observation_source": "native_ml_with_python_reference_parity",
         "relevance_gate_frames": RELEVANCE_GATE_FRAMES,
         "max_episode_steps": config.max_episode_steps,
+        "training_lives": config.training_lives,
+        "life_loss_penalty": config.life_loss_penalty,
         "replay": {
             "capacity": config.replay_capacity,
             "n_step": config.n_step,
@@ -1018,6 +1275,68 @@ def _save_checkpoint(path: Path, payload: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _checkpoint_config_matches(saved: object, config: DQNConfig) -> bool:
+    if not isinstance(saved, dict):
+        return False
+    normalized = dict(saved)
+    if "reset_mode" not in normalized:
+        normalized["reset_mode"] = "legacy"
+    if "weight_decay" not in normalized:
+        normalized["weight_decay"] = 0.0
+    if "epsilon_decay_steps" not in normalized:
+        normalized["epsilon_decay_steps"] = 0
+    if "epsilon_final" not in normalized:
+        normalized["epsilon_final"] = 0.05
+    if "training_lives" not in normalized:
+        normalized["training_lives"] = 1
+    if "life_loss_penalty" not in normalized:
+        normalized["life_loss_penalty"] = 0.0
+    if "steering_tolerance" not in normalized:
+        normalized["steering_tolerance"] = 2.0
+    if "arrival_latching" not in normalized:
+        normalized["arrival_latching"] = False
+    if "ban_corner_nodes" not in normalized:
+        normalized["ban_corner_nodes"] = False
+    if "corner_node_penalty" not in normalized:
+        normalized["corner_node_penalty"] = 0.0
+    saved_total_steps = normalized.get("total_steps")
+    if (
+        isinstance(saved_total_steps, bool)
+        or not isinstance(saved_total_steps, int)
+        or config.total_steps < saved_total_steps
+    ):
+        return False
+    normalized["total_steps"] = config.total_steps
+    return normalized == config.to_json()
+
+
+def _checkpoint_contract_matches(saved: object, config: DQNConfig) -> bool:
+    if not isinstance(saved, dict):
+        return False
+    normalized = dict(saved)
+    if "reset_mode" not in normalized:
+        normalized["reset_mode"] = "legacy"
+    if "training_lives" not in normalized:
+        normalized["training_lives"] = 1
+    if "life_loss_penalty" not in normalized:
+        normalized["life_loss_penalty"] = 0.0
+    controller = normalized.get("controller")
+    normalized_controller = dict(controller) if isinstance(controller, dict) else {}
+    normalized_controller.setdefault("tolerance", 2.0)
+    normalized_controller.setdefault("arrival_latching", False)
+    normalized_controller.setdefault("corner_node_penalty", 0.0)
+    normalized["controller"] = normalized_controller
+    normalized.setdefault("corner_nodes", "allowed")
+    cadence = normalized.get("cadence")
+    normalized_cadence = dict(cadence) if isinstance(cadence, dict) else {}
+    if "hold_decisions" in normalized_cadence:
+        normalized_cadence.setdefault(
+            "decision_interval", normalized_cadence["hold_decisions"]
+        )
+    normalized["cadence"] = normalized_cadence
+    return normalized == _checkpoint_contract(config)
+
+
 def _load_checkpoint(
     path: Path,
     model: DuelingWaypointDQN,
@@ -1048,9 +1367,9 @@ def _load_checkpoint(
         raise ValueError("DQN checkpoint version is invalid")
     if payload.get("manifest_sha256") != manifest.sha256:
         raise ValueError("DQN checkpoint manifest does not match NG manifest")
-    if payload.get("config") != config.to_json():
+    if not _checkpoint_config_matches(payload.get("config"), config):
         raise ValueError("DQN checkpoint configuration does not match")
-    if payload.get("contract") != _checkpoint_contract(config):
+    if not _checkpoint_contract_matches(payload.get("contract"), config):
         raise ValueError("DQN checkpoint controller contract is invalid")
     try:
         model.load_state_dict(payload["model_state_dict"])
@@ -1099,24 +1418,31 @@ def _load_checkpoint(
     )
 
 
-def train_waypoint_dqn(
+def _train_waypoint_dqn_impl(
     config: DQNConfig,
     run_directory: Path,
     manifest: SeedManifest,
     *,
     resume: bool = False,
+    evaluate_holdout: bool = True,
+    evaluate_training: bool = True,
+    stop_requested: list[bool],
 ) -> dict[str, object]:
-    """Train and evaluate one waypoint DQN run."""
+    """Train and evaluate one waypoint DQN run after signal setup."""
     config.validate()
     manifest.validate()
     _seed_everything(config.seed)
     device = _resolve_device(config.device)
-    grid = WaypointGrid(config.grid_spacing)
-    controller = WaypointController(grid)
+    controller = waypoint_controller_for_config(config)
+    grid = controller.grid
     model = DuelingWaypointDQN(hidden_size=config.hidden_size).to(device)
     target_model = DuelingWaypointDQN(hidden_size=config.hidden_size).to(device)
     target_model.load_state_dict(model.state_dict())
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+    )
     replay = ReplayBuffer(config.replay_capacity, WAYPOINT_OBSERVATION_SIZE)
     accumulator = NStepAccumulator(
         config.native_lanes,
@@ -1179,12 +1505,22 @@ def train_waypoint_dqn(
     if len(initial_seeds) < config.native_lanes:
         raise ValueError("native lane count exceeds NG training seed count")
     episode_steps = np.zeros(config.native_lanes, dtype=np.int64)
+    episode_seeds = np.asarray(initial_seeds, dtype=np.uint32).copy()
+    lives_remaining = np.full(
+        config.native_lanes,
+        config.training_lives,
+        dtype=np.int64,
+    )
     current_observations: np.ndarray
     current_positions: np.ndarray
     paused = False
     stopped = False
     try:
-        result = environment.reset_ml_batch(np.asarray(initial_seeds, dtype=np.uint32))
+        result = _reset_ml_batch(
+            environment,
+            episode_seeds,
+            config,
+        )
         current_observations, current_positions = _native_ml_state(result)
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
@@ -1194,7 +1530,7 @@ def train_waypoint_dqn(
                 paused = True
             elif command == "resume":
                 paused = False
-            elif command == "stop":
+            elif command == "stop" or stop_requested[0]:
                 stopped = True
                 telemetry.publish(
                     _dashboard_status(
@@ -1236,6 +1572,8 @@ def train_waypoint_dqn(
                 model,
                 config,
                 episode_steps,
+                episode_seeds,
+                lives_remaining,
                 manifest.training_seeds,
                 seed_cursor,
                 accumulator,
@@ -1387,17 +1725,25 @@ def train_waypoint_dqn(
         final_model.load_state_dict(best_model_state)
         selected_model = "best_inner"
     final_model.eval()
-    final_training = evaluate_waypoint_dqn(
-        final_model,
-        manifest.training_seeds,
-        config,
-        grid=grid,
+    final_training = (
+        evaluate_waypoint_dqn(
+            final_model,
+            manifest.training_seeds,
+            config,
+            grid=grid,
+        )
+        if evaluate_training
+        else None
     )
-    final_holdout = evaluate_waypoint_dqn(
-        final_model,
-        manifest.holdout_seeds,
-        config,
-        grid=grid,
+    final_holdout = (
+        evaluate_waypoint_dqn(
+            final_model,
+            manifest.holdout_seeds,
+            config,
+            grid=grid,
+        )
+        if evaluate_holdout
+        else None
     )
     final_inner = evaluate_waypoint_dqn(
         final_model,
@@ -1429,6 +1775,8 @@ def train_waypoint_dqn(
                 "stopped_early": stopped,
                 "best_inner": best_inner,
                 "selected_model": selected_model,
+                "holdout_evaluated": evaluate_holdout,
+                "training_evaluated": evaluate_training,
                 "final_validation": final_inner,
                 "final_training_evaluation": final_training,
                 "final_evaluation": final_holdout,
@@ -1437,10 +1785,11 @@ def train_waypoint_dqn(
                     "safety_limit_frames": (
                         config.max_episode_steps * config.step_frames
                     ),
-                    "training_mean_reached": float(
-                        final_training["summary"]["mean_survival_frames"]
-                    )
-                    >= RELEVANCE_GATE_FRAMES,
+                    "training_mean_reached": (
+                        final_training is not None
+                        and float(final_training["summary"]["mean_survival_frames"])
+                        >= RELEVANCE_GATE_FRAMES
+                    ),
                 },
             },
         ),
@@ -1493,11 +1842,52 @@ def train_waypoint_dqn(
     return result
 
 
+def train_waypoint_dqn(
+    config: DQNConfig,
+    run_directory: Path,
+    manifest: SeedManifest,
+    *,
+    resume: bool = False,
+    evaluate_holdout: bool = True,
+    evaluate_training: bool = True,
+) -> dict[str, object]:
+    """Train and evaluate one waypoint DQN run with graceful stop handling."""
+    stop_requested, previous_signal_handlers = _install_stop_signal_handlers()
+    try:
+        return _train_waypoint_dqn_impl(
+            config,
+            run_directory,
+            manifest,
+            resume=resume,
+            evaluate_holdout=evaluate_holdout,
+            evaluate_training=evaluate_training,
+            stop_requested=stop_requested,
+        )
+    finally:
+        _restore_stop_signal_handlers(previous_signal_handlers)
+
+
 def _build_report(path: Path, manifest: SeedManifest) -> str:
     run = json.loads(path.read_text(encoding="utf-8"))
-    training = run["final_training_evaluation"]["summary"]
-    holdout = run["final_evaluation"]["summary"]
+    training = run.get("final_training_evaluation")
+    holdout = run.get("final_evaluation")
     inner = run["final_validation"]["summary"]
+    rows = [
+        _summary_row("Inner", inner),
+    ]
+    if isinstance(training, dict):
+        rows.append(_summary_row("Training", training["summary"]))
+    else:
+        rows.append("| Training | not evaluated | — | — | — | — |")
+    if isinstance(holdout, dict):
+        rows.append(_summary_row("Holdout", holdout["summary"]))
+    else:
+        rows.append("| Holdout | not evaluated | — | — | — | — |")
+    selection_note = (
+        "Holdout was evaluated after training."
+        if isinstance(holdout, dict)
+        else "Holdout was not evaluated in this training-only run."
+    )
     return "\n".join(
         [
             "# Dodge NG waypoint DQN",
@@ -1510,15 +1900,12 @@ def _build_report(path: Path, manifest: SeedManifest) -> str:
             "",
             "| Split | Mean | Median | P10 | Worst | Complete |",
             "|---|---:|---:|---:|---:|---:|",
-            _summary_row("Inner", inner),
-            _summary_row("Training", training),
-            _summary_row("Holdout", holdout),
+            *rows,
             "",
             "800-frame relevance gate: **"
             f"{'PASS' if run['target']['training_mean_reached'] else 'FAIL'}**.",
             "",
-            "Selection used inner training seeds; holdout was evaluated "
-            "after training.",
+            "Selection used inner training seeds; " + selection_note,
             "",
         ]
     )
@@ -1545,6 +1932,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--replay-capacity", type=int, default=100_000)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--n-step", type=int, default=3)
     parser.add_argument("--warmup-steps", type=int, default=2_000)
@@ -1552,7 +1940,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-update-interval", type=int, default=1_000)
     parser.add_argument("--hidden-size", type=int, default=256)
     parser.add_argument("--grid-spacing", type=int, default=32)
-    parser.add_argument("--hold-decisions", type=int, default=8)
+    parser.add_argument(
+        "--hold-decisions",
+        "--decision-interval",
+        dest="hold_decisions",
+        type=int,
+        default=8,
+        help="native decisions held per waypoint decision",
+    )
+    parser.add_argument("--steering-tolerance", type=float, default=2.0)
+    parser.add_argument("--arrival-latching", action="store_true")
+    parser.add_argument("--ban-corner-nodes", action="store_true")
+    parser.add_argument("--corner-node-penalty", type=float, default=0.0)
     parser.add_argument("--step-frames", type=int, default=4)
     parser.add_argument("--max-episode-steps", type=int, default=2_000)
     parser.add_argument("--native-lanes", type=int, default=32)
@@ -1561,16 +1960,37 @@ def main(argv: list[str] | None = None) -> int:
         choices=("serial", "parallel"),
         default="parallel",
     )
+    parser.add_argument(
+        "--reset-mode",
+        choices=RESET_MODES,
+        default="native-startup",
+        help="episode reset boundary; use legacy when resuming pre-startup checkpoints",
+    )
+    parser.add_argument("--training-lives", type=int, default=1)
+    parser.add_argument("--life-loss-penalty", type=float, default=0.0)
+    parser.add_argument("--epsilon-decay-steps", type=int, default=0)
+    parser.add_argument("--epsilon-final", type=float, default=0.05)
     parser.add_argument("--checkpoint-every", type=int, default=2_000)
     parser.add_argument("--eval-every", type=int, default=2_000)
     parser.add_argument("--seed", type=int, default=2_026_0903)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cpu")
+    parser.add_argument(
+        "--skip-holdout",
+        action="store_true",
+        help="omit holdout evaluation for training-only HPO trials",
+    )
+    parser.add_argument(
+        "--skip-training-evaluation",
+        action="store_true",
+        help="omit full training-seed evaluation for search/confirmation runs",
+    )
     arguments = parser.parse_args(argv)
     config = DQNConfig(
         total_steps=arguments.total_steps,
         batch_size=arguments.batch_size,
         replay_capacity=arguments.replay_capacity,
         learning_rate=arguments.learning_rate,
+        weight_decay=arguments.weight_decay,
         gamma=arguments.gamma,
         n_step=arguments.n_step,
         warmup_steps=arguments.warmup_steps,
@@ -1579,10 +1999,19 @@ def main(argv: list[str] | None = None) -> int:
         hidden_size=arguments.hidden_size,
         grid_spacing=arguments.grid_spacing,
         hold_decisions=arguments.hold_decisions,
+        steering_tolerance=arguments.steering_tolerance,
+        arrival_latching=arguments.arrival_latching,
+        ban_corner_nodes=arguments.ban_corner_nodes,
+        corner_node_penalty=arguments.corner_node_penalty,
         step_frames=arguments.step_frames,
         max_episode_steps=arguments.max_episode_steps,
         native_lanes=arguments.native_lanes,
         native_execution=arguments.native_execution,
+        reset_mode=arguments.reset_mode,
+        training_lives=arguments.training_lives,
+        life_loss_penalty=arguments.life_loss_penalty,
+        epsilon_decay_steps=arguments.epsilon_decay_steps,
+        epsilon_final=arguments.epsilon_final,
         checkpoint_every=arguments.checkpoint_every,
         eval_every=arguments.eval_every,
         seed=arguments.seed,
@@ -1594,6 +2023,8 @@ def main(argv: list[str] | None = None) -> int:
             arguments.run_dir,
             load_manifest(arguments.manifest),
             resume=arguments.resume,
+            evaluate_holdout=not arguments.skip_holdout,
+            evaluate_training=not arguments.skip_training_evaluation,
         )
     except (ControlRuntimeError, OSError, ValueError) as error:
         print(f"dodge-ng-dqn: {error}", file=sys.stderr)

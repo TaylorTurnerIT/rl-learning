@@ -49,6 +49,15 @@ BOARD_CHANNEL_NAMES = (
 )
 BOARD_CHANNELS = len(BOARD_CHANNEL_NAMES)
 BOARD_SHAPE = (BOARD_CHANNELS, BOARD_SIZE, BOARD_SIZE)
+FULL_BOARD_POSITION_CHANNEL_NAMES = (
+    "enemy_x",
+    "enemy_y",
+    "aoe_x",
+    "aoe_y",
+)
+FULL_BOARD_CHANNEL_NAMES = (*BOARD_CHANNEL_NAMES, *FULL_BOARD_POSITION_CHANNEL_NAMES)
+FULL_BOARD_CHANNELS = len(FULL_BOARD_CHANNEL_NAMES)
+FULL_BOARD_SHAPE = (FULL_BOARD_CHANNELS, BOARD_SIZE, BOARD_SIZE)
 
 PLAYER_PRESENCE, PLAYER_VX, PLAYER_VY, PLAYER_WIDTH, PLAYER_HEIGHT = range(5)
 (
@@ -69,6 +78,7 @@ PLAYER_PRESENCE, PLAYER_VX, PLAYER_VY, PLAYER_WIDTH, PLAYER_HEIGHT = range(5)
     AOE_EXPLOSION,
     AOE_PATTERN,
 ) = range(11, 19)
+ENEMY_X, ENEMY_Y, AOE_X, AOE_Y = range(19, 23)
 
 
 def raw_state_from_json(encoded: str) -> RawState:
@@ -84,9 +94,19 @@ def raw_state_from_json(encoded: str) -> RawState:
     return RawState(frame, player, enemies, aoes)
 
 
-def encode_board(state: RawState, *, include_offscreen: bool = False) -> np.ndarray:
+def encode_board(
+    state: RawState,
+    *,
+    include_offscreen: bool = False,
+    preserve_coordinates: bool = False,
+) -> np.ndarray:
     """Rasterize the complete raw board state into CNN-friendly channels."""
-    board = np.zeros(BOARD_SHAPE, dtype=np.float32)
+    if preserve_coordinates and not include_offscreen:
+        raise ValueError("coordinate preservation requires offscreen entities")
+    board = np.zeros(
+        FULL_BOARD_SHAPE if preserve_coordinates else BOARD_SHAPE,
+        dtype=np.float32,
+    )
     velocity_sums = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     velocity_counts = np.zeros_like(velocity_sums)
 
@@ -110,6 +130,7 @@ def encode_board(state: RawState, *, include_offscreen: bool = False) -> np.ndar
         stage_channel=None,
         velocity_slot=0,
         include_offscreen=include_offscreen,
+        position_channels=None,
     )
     for entity in state.enemies:
         _paint_entity(
@@ -132,6 +153,7 @@ def encode_board(state: RawState, *, include_offscreen: bool = False) -> np.ndar
             stage_channel=ENEMY_STAGE,
             velocity_slot=2,
             include_offscreen=include_offscreen,
+            position_channels=(ENEMY_X, ENEMY_Y) if preserve_coordinates else None,
         )
     for entity in state.aoes:
         _paint_entity(
@@ -154,6 +176,7 @@ def encode_board(state: RawState, *, include_offscreen: bool = False) -> np.ndar
             stage_channel=AOE_STAGE,
             velocity_slot=4,
             include_offscreen=include_offscreen,
+            position_channels=(AOE_X, AOE_Y) if preserve_coordinates else None,
         )
 
     for channel, slot in (
@@ -194,6 +217,7 @@ def _paint_entity(
     stage_channel: int | None,
     velocity_slot: int,
     include_offscreen: bool,
+    position_channels: tuple[int, int] | None,
 ) -> None:
     bounds = _cell_bounds(x, y, width, height, include_offscreen=include_offscreen)
     if bounds is None:
@@ -204,6 +228,8 @@ def _paint_entity(
     normalized_vx = vx / SCREEN_SIZE
     normalized_vy = vy / SCREEN_SIZE
     normalized_stage = None if stage is None else stage / 2
+    normalized_x = 0.5 + x / SCREEN_SIZE
+    normalized_y = 0.5 + y / SCREEN_SIZE
     for row in range(top, bottom + 1):
         for column in range(left, right + 1):
             board[presence_channel, row, column] = 1.0
@@ -223,6 +249,14 @@ def _paint_entity(
                 )
             if kind_channel is not None:
                 board[kind_channel, row, column] = 1.0
+            if position_channels is not None:
+                x_channel, y_channel = position_channels
+                board[x_channel, row, column] = max(
+                    board[x_channel, row, column], normalized_x
+                )
+                board[y_channel, row, column] = max(
+                    board[y_channel, row, column], normalized_y
+                )
 
 
 def _cell_bounds(

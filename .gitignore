@@ -18,4 +18,7 @@ build/
 
 # Locally saved Dodge winner replays.
 /history/dodge/
+
+# Temporary replay/regression artifacts.
+/.tmp/
 /native/target/

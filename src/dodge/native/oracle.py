@@ -7,7 +7,7 @@ import select
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from dodge.control import (
@@ -56,6 +56,8 @@ def run_oracle_trace(
     start_xvfb: XvfbStarter | None = None,
     timeout: float | None = DEFAULT_TIMEOUT,
     capture_frame_limit: int | None = None,
+    native_startup_grid_spacing: int | None = None,
+    capture_frame_indices: Sequence[int] | None = None,
 ) -> OracleTrace:
     try:
         original = source.read_text(encoding="utf-8")
@@ -69,6 +71,8 @@ def run_oracle_trace(
             wait_for_game_start=True,
             capture_pixels=True,
             capture_frame_limit=capture_frame_limit,
+            native_startup_grid_spacing=native_startup_grid_spacing,
+            capture_frame_indices=capture_frame_indices,
         )
     except OSError as error:
         raise ControlRuntimeError(f"could not read oracle input: {error}") from error
@@ -112,13 +116,13 @@ def run_oracle_trace(
     _assert_source_unchanged(source, source_manifest)
     _assert_file_unchanged(pemsa, pemsa_identity)
 
-    provenance = {
+    provenance: dict[str, object] = {
         "schema_version": 1,
         "capture_mode": CAPTURE_MODE,
         "source": source_manifest.to_json(),
         "pemsa": pemsa_identity.to_json(),
     }
-    scenario = {
+    scenario: dict[str, object] = {
         "seed": seed,
         "initial_state": "first_post_update_post_draw_frame",
         "action_schedule": command_schedule(commands),
@@ -127,6 +131,10 @@ def run_oracle_trace(
     }
     if capture_frame_limit is not None:
         scenario["capture_frame_limit"] = capture_frame_limit
+    if native_startup_grid_spacing is not None:
+        scenario["native_startup_grid_spacing"] = native_startup_grid_spacing
+    if capture_frame_indices is not None:
+        scenario["capture_frame_indices"] = list(capture_frame_indices)
     return OracleTrace(
         provenance=provenance,
         scenario=scenario,

@@ -13,6 +13,7 @@ from dodge.dataset import ACTION_CHOICES, CollectorConfig, _initialize_database
 from dodge.imitation.board import (
     BOARD_CHANNEL_NAMES,
     BOARD_SHAPE,
+    FULL_BOARD_SHAPE,
     _cell_bounds,
     encode_board,
 )
@@ -89,6 +90,25 @@ def test_board_full_reference_pins_offscreen_entities_without_changing_default()
     assert full[BOARD_CHANNEL_NAMES.index("enemy_presence"), 7:9, 0].sum() == 2
     assert _cell_bounds(-10, 64, 8, 8) is None
     assert _cell_bounds(-10, 64, 8, 8, include_offscreen=True) == (7, 8, 0, 0)
+
+
+def test_coordinate_board_preserves_offscreen_entity_position() -> None:
+    state = RawState(
+        frame=0,
+        player=PlayerState(64, 64, 0, 0, 4),
+        enemies=(EntityState(-10, -10, 1, 1, 8, 8, "enemy", 0),),
+        aoes=(),
+    )
+
+    board = encode_board(
+        state,
+        include_offscreen=True,
+        preserve_coordinates=True,
+    )
+
+    assert board.shape == FULL_BOARD_SHAPE
+    assert board[19, 0, 0] == pytest.approx(0.5 - 10 / 128)
+    assert board[20, 0, 0] == pytest.approx(0.5 - 10 / 128)
 
 
 def test_v57_loader_reads_only_learned_rows(tmp_path) -> None:

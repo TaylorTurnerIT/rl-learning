@@ -20,6 +20,9 @@
     .controls { margin: 14px 0; }
     .replay { border-top: 1px solid #292e39; margin-top: 18px; padding-top: 18px; }
     .replay-controls { margin-top: 8px; }
+    .replay-comparison { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .comparison-label { color: #8f98aa; font-size: 12px; margin-right: 4px; }
+    .replay-role[aria-pressed="true"] { border-color: #29adff; color: #fff; }
     canvas { background: #000; image-rendering: pixelated; margin-top: 12px; width: min(512px, 100%); }
     #frame { flex: 1; }
     @media (max-width: 620px) { .stats { grid-template-columns: repeat(2, 1fr); } }
@@ -35,6 +38,8 @@
       <div class="stat"><span class="label">Loss</span><output id="loss">—</output></div>
       <div class="stat"><span class="label">Q</span><output id="q">—</output></div>
       <div class="stat"><span class="label">ε</span><output id="epsilon">—</output></div>
+      <div class="stat"><span class="label">Life losses</span><output id="life-losses">—</output></div>
+      <div class="stat"><span class="label">Lives avg</span><output id="lives">—</output></div>
     </section>
     <section class="controls">
       <button data-control="pause">Pause</button>
@@ -46,6 +51,13 @@
         <select id="replays"><option value="">No replays</option></select>
         <input id="seed" type="number" min="0" max="32767" placeholder="seed">
         <button id="record">Record best</button>
+        <button id="auto-play-latest" type="button" aria-pressed="false">Auto-play latest: Off</button>
+      </div>
+      <div class="replay-comparison" id="representative-replays" hidden>
+        <span class="comparison-label">Training comparison</span>
+        <button class="replay-role" data-replay-role="best" type="button">Best</button>
+        <button class="replay-role" data-replay-role="mean" type="button">Mean</button>
+        <button class="replay-role" data-replay-role="bad" type="button">Bad</button>
       </div>
       <canvas id="canvas" width="128" height="128"></canvas>
       <div class="replay-controls">
@@ -72,10 +84,15 @@
     const seedInput = document.querySelector("#seed");
     const frameInput = document.querySelector("#frame");
     const frameLabel = document.querySelector("#frame-label");
+    const autoPlayButton = document.querySelector("#auto-play-latest");
+    const representativeControls = document.querySelector("#representative-replays");
+    const representativeButtons = [...document.querySelectorAll("[data-replay-role]")];
     let socket;
     let replay;
     let replayItems = [];
     let replayTimer;
+    let autoPlayLatest = false;
+    let autoPlayedReplayKey = "";
 
     function number(value, digits = 1) {
       return value == null || Number.isNaN(Number(value)) ? "—" : Number(value).toFixed(digits);
@@ -97,6 +114,8 @@
       document.querySelector("#loss").textContent = number(record.loss, 4);
       document.querySelector("#q").textContent = number(record.q_mean);
       document.querySelector("#epsilon").textContent = number(record.epsilon, 3);
+      document.querySelector("#life-losses").textContent = number(record.life_loss_count);
+      document.querySelector("#lives").textContent = number(record.lives_remaining_mean);
       if (!seedInput.value && status.training_seeds?.length) seedInput.value = status.training_seeds[0];
       updateReplays(message.replays || []);
     }
@@ -107,31 +126,130 @@
       replaySelect.replaceChildren();
       if (!replays.length) {
         replaySelect.add(new Option("No replays", ""));
+        updateRepresentativeControls(replays);
         return;
       }
       for (const item of replays) {
-        const label = `seed ${item.seed} · step ${item.checkpoint_step} · ${item.frame_count}f`;
+        const mode = item.reset_mode ? ` · ${item.reset_mode}` : "";
+        const role = item.replay_role ? `${roleName(item.replay_role)} · ` : "";
+        const visualFrames = item.playback_frame_count ?? item.frame_count;
+        const simulationFrames = Number(item.survival_frames);
+        const duration = Number.isFinite(simulationFrames)
+          ? `${visualFrames} visual / ${simulationFrames} sim`
+          : `${visualFrames} visual`;
+        const pixelStatus = item.pixel_regression?.status;
+        const pixels = pixelStatus === "passed"
+          ? " · pixels ✓"
+          : pixelStatus ? " · pixels !" : " · pixels ?";
+        const label = `${role}seed ${item.seed} · step ${item.checkpoint_step} · ${duration}${mode}${pixels}`;
         replaySelect.add(new Option(label, item.url));
       }
-      replaySelect.value = replays.some(item => item.url === selected) ? selected : replays[0].url;
-      if (replaySelect.value !== selected) loadReplay(replays[0]);
+      const latest = latestReplay(replays);
+      const selectedItem = replays.find(item => item.url === selected);
+      const best = representativeReplay(replays, "best");
+      const item = autoPlayLatest ? latest : (selectedItem || best || latest || replays[0]);
+      replaySelect.value = item.url;
+      updateRepresentativeControls(replays);
+      const key = replayKey(item);
+      const currentKey = replay ? replayKey(replay.item) : "";
+      if (autoPlayLatest && latest && (key !== autoPlayedReplayKey || currentKey !== key)) {
+        autoPlayedReplayKey = key;
+        loadReplay(item, { autoplay: true });
+      } else if (!replay && item) {
+        loadReplay(item);
+      } else if (replay && currentKey !== key && !autoPlayLatest) {
+        loadReplay(item);
+      }
     }
 
-    async function loadReplay(item) {
+    function representativeReplay(replays, role) {
+      return replays.find(item => item.replay_role === role);
+    }
+
+    function roleName(role) {
+      return role ? role[0].toUpperCase() + role.slice(1) : "Replay";
+    }
+
+    function updateRepresentativeControls(replays) {
+      let visible = false;
+      representativeButtons.forEach(button => {
+        const item = representativeReplay(replays, button.dataset.replayRole);
+        button.hidden = !item;
+        button.disabled = !item;
+        if (item) {
+          button.textContent = `${roleName(item.replay_role)} · seed ${item.seed} · ${item.survival_frames}f`;
+          button.setAttribute("aria-pressed", String(item.url === replaySelect.value));
+        } else {
+          button.textContent = roleName(button.dataset.replayRole);
+          button.setAttribute("aria-pressed", "false");
+        }
+        visible = visible || Boolean(item);
+      });
+      representativeControls.hidden = !visible;
+    }
+
+    function latestReplay(replays) {
+      return replays.reduce((latest, item) => {
+        if (!latest) return item;
+        const itemCreated = Number(item.created_at);
+        const latestCreated = Number(latest.created_at);
+        if (Number.isFinite(itemCreated) && Number.isFinite(latestCreated) && itemCreated !== latestCreated) {
+          return itemCreated > latestCreated ? item : latest;
+        }
+        const itemStep = Number(item.checkpoint_step) || 0;
+        const latestStep = Number(latest.checkpoint_step) || 0;
+        return itemStep >= latestStep ? item : latest;
+      }, undefined);
+    }
+
+    function replayKey(item) {
+      return `${item.url}:${item.created_at ?? ""}:${item.frame_count ?? ""}`;
+    }
+
+    async function loadReplay(item, { autoplay = false } = {}) {
       if (!item) return;
-      const response = await fetch(item.url, { cache: "no-store" });
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      replay = { item, bytes };
-      frameInput.max = Math.max(0, item.frame_count - 1);
+      stopPlayback();
+      try {
+        const response = await fetch(item.url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`replay fetch failed: ${response.status}`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const size = Number(item.frame_bytes) || (128 * 128);
+        const start = Math.max(0, Number(item.playback_start) || 0);
+        const declaredCount = Math.max(0, Number(item.playback_frame_count ?? item.frame_count) || 0);
+        const available = Math.max(0, Math.floor(bytes.length / size) - start);
+        const count = Math.min(declaredCount, available);
+        const startFrame = Number(item.playback_start_frame);
+        replay = {
+          item,
+          bytes,
+          frameBytes: size,
+          playbackStart: start,
+          playbackCount: count,
+          playbackStartFrame: Number.isFinite(startFrame) ? startFrame : null,
+        };
+      } catch (error) {
+        replay = undefined;
+        frameInput.max = 0;
+        frameInput.value = 0;
+        frameLabel.textContent = error instanceof Error ? error.message : "replay unavailable";
+        return;
+      }
+      frameInput.max = Math.max(0, replay.playbackCount - 1);
       frameInput.value = 0;
       drawFrame();
+      if (autoplay && replay.playbackCount > 0) startPlayback();
     }
 
     function drawFrame() {
-      if (!replay) return;
-      const index = Number(frameInput.value);
-      const size = replay.item.frame_bytes;
-      const offset = index * size;
+      if (!replay || replay.playbackCount < 1) {
+        context.clearRect(0, 0, 128, 128);
+        frameLabel.textContent = "—";
+        return;
+      }
+      const index = Math.min(replay.playbackCount - 1, Math.max(0, Number(frameInput.value)));
+      frameInput.value = index;
+      const offset = (replay.playbackStart + index) * replay.frameBytes;
+      const size = replay.frameBytes;
       const pixels = replay.bytes.subarray(offset, offset + size);
       const image = context.createImageData(128, 128);
       for (let i = 0; i < pixels.length; i += 1) {
@@ -143,24 +261,48 @@
         image.data[i * 4 + 3] = 255;
       }
       context.putImageData(image, 0, 0);
-      frameLabel.textContent = `${index + 1}/${replay.item.frame_count}`;
+      const stepFrames = Number(replay.item.step_frames || 1);
+      const lastFrame = Number(replay.item.last_frame);
+      const gameFrame = replay.playbackStartFrame == null
+        ? (Number.isFinite(lastFrame)
+          ? lastFrame - (replay.playbackCount - 1 - index) * stepFrames
+          : (index + 1) * stepFrames)
+        : replay.playbackStartFrame + (index + 1) * stepFrames;
+      const end = Number.isFinite(lastFrame) ? `/${lastFrame}` : "";
+      const survivalFrames = Number(replay.item.survival_frames);
+      const survival = Number.isFinite(survivalFrames) ? ` · survival ${survivalFrames}` : "";
+      frameLabel.textContent = `visual ${index + 1}/${replay.playbackCount} · game ${gameFrame}${end}${survival}`;
     }
 
-    function togglePlay() {
+    function stopPlayback() {
       if (replayTimer) {
         clearInterval(replayTimer);
         replayTimer = undefined;
         document.querySelector("#play").textContent = "Play";
-        return;
       }
+    }
+
+    function startPlayback() {
       if (!replay) return;
-      const interval = Math.max(16, Math.round(1000 * replay.item.step_frames / 60));
+      if (replay.playbackCount < 1) return;
+      stopPlayback();
+      const interval = Math.max(16, Math.round(1000 * Number(replay.item.step_frames || 1) / 60));
       replayTimer = setInterval(() => {
         if (Number(frameInput.value) >= Number(frameInput.max)) frameInput.value = 0;
         else frameInput.value = Number(frameInput.value) + 1;
         drawFrame();
       }, interval);
       document.querySelector("#play").textContent = "Pause";
+    }
+
+    function togglePlay() {
+      if (replayTimer) stopPlayback();
+      else startPlayback();
+    }
+
+    function updateAutoPlayButton() {
+      autoPlayButton.textContent = `Auto-play latest: ${autoPlayLatest ? "On" : "Off"}`;
+      autoPlayButton.setAttribute("aria-pressed", String(autoPlayLatest));
     }
 
     function connect() {
@@ -187,7 +329,27 @@
     });
     replaySelect.addEventListener("change", () => {
       const item = replayItems.find(entry => entry.url === replaySelect.value);
-      if (item) loadReplay(item);
+      if (item) {
+        updateRepresentativeControls(replayItems);
+        loadReplay(item);
+      }
+    });
+    representativeButtons.forEach(button => {
+      button.addEventListener("click", () => {
+        const item = representativeReplay(replayItems, button.dataset.replayRole);
+        if (!item) return;
+        replaySelect.value = item.url;
+        updateRepresentativeControls(replayItems);
+        loadReplay(item);
+      });
+    });
+    autoPlayButton.addEventListener("click", () => {
+      autoPlayLatest = !autoPlayLatest;
+      updateAutoPlayButton();
+      if (autoPlayLatest) {
+        autoPlayedReplayKey = "";
+        updateReplays(replayItems);
+      }
     });
     frameInput.addEventListener("input", drawFrame);
     document.querySelector("#play").addEventListener("click", togglePlay);

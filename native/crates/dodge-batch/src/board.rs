@@ -4,7 +4,9 @@ pub const BOARD_SIZE: usize = 16;
 pub const BOARD_WIDTH: usize = BOARD_SIZE;
 pub const BOARD_HEIGHT: usize = BOARD_SIZE;
 pub const BOARD_CHANNELS: usize = 19;
+pub const FULL_BOARD_CHANNELS: usize = 23;
 pub const BOARD_VALUES: usize = BOARD_CHANNELS * BOARD_HEIGHT * BOARD_WIDTH;
+pub const FULL_BOARD_VALUES: usize = FULL_BOARD_CHANNELS * BOARD_HEIGHT * BOARD_WIDTH;
 const CELL_VALUES: usize = BOARD_HEIGHT * BOARD_WIDTH;
 const VELOCITY_VALUES: usize = 6 * CELL_VALUES;
 const SCREEN_SIZE: f32 = 128.0;
@@ -28,6 +30,10 @@ pub const AOE_HEIGHT: usize = 15;
 pub const AOE_STAGE: usize = 16;
 pub const AOE_EXPLOSION: usize = 17;
 pub const AOE_PATTERN: usize = 18;
+pub const ENEMY_X: usize = 19;
+pub const ENEMY_Y: usize = 20;
+pub const AOE_X: usize = 21;
+pub const AOE_Y: usize = 22;
 
 /// Channel-major `(19, 16, 16)` semantic board, flattened in C order.
 ///
@@ -38,15 +44,33 @@ pub const AOE_PATTERN: usize = 18;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Board19x16 {
     values: Vec<f32>,
+    channels: usize,
 }
 
 impl Board19x16 {
     pub fn from_full_state(state: &FullState) -> Self {
-        Self::from_full_state_with_offscreen(state, false)
+        Self::from_full_state_with_options(state, false, false)
     }
 
     pub fn from_full_state_with_offscreen(state: &FullState, include_offscreen: bool) -> Self {
-        let mut board = vec![0.0; BOARD_VALUES];
+        Self::from_full_state_with_options(state, include_offscreen, false)
+    }
+
+    pub fn from_full_state_with_coordinates(state: &FullState) -> Self {
+        Self::from_full_state_with_options(state, true, true)
+    }
+
+    fn from_full_state_with_options(
+        state: &FullState,
+        include_offscreen: bool,
+        preserve_coordinates: bool,
+    ) -> Self {
+        let channels = if preserve_coordinates {
+            FULL_BOARD_CHANNELS
+        } else {
+            BOARD_CHANNELS
+        };
+        let mut board = vec![0.0; channels * BOARD_HEIGHT * BOARD_WIDTH];
         let mut velocity_sums = vec![0.0; VELOCITY_VALUES];
         let mut velocity_counts = vec![0_u32; VELOCITY_VALUES];
         paint_entity(
@@ -69,6 +93,7 @@ impl Board19x16 {
             0,
             None,
             include_offscreen,
+            None,
         );
         for enemy in &state.enemies {
             if enemy.personality == -1 {
@@ -92,6 +117,7 @@ impl Board19x16 {
                     4,
                     Some(AOE_EXPLOSION),
                     include_offscreen,
+                    preserve_coordinates.then_some((AOE_X, AOE_Y)),
                 );
             } else {
                 let size = if enemy.personality >= 2 {
@@ -119,6 +145,7 @@ impl Board19x16 {
                     2,
                     None,
                     include_offscreen,
+                    preserve_coordinates.then_some((ENEMY_X, ENEMY_Y)),
                 );
             }
         }
@@ -132,6 +159,7 @@ impl Board19x16 {
                     &mut velocity_counts,
                     rect,
                     include_offscreen,
+                    preserve_coordinates.then_some((AOE_X, AOE_Y)),
                 );
             }
         }
@@ -141,7 +169,10 @@ impl Board19x16 {
         write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, ENEMY_VY, 3);
         write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, AOE_VX, 4);
         write_velocity_channel(&mut board, &velocity_sums, &velocity_counts, AOE_VY, 5);
-        Self { values: board }
+        Self {
+            values: board,
+            channels,
+        }
     }
 
     pub fn as_slice(&self) -> &[f32] {
@@ -162,7 +193,7 @@ impl Board19x16 {
     }
 
     pub fn shape(&self) -> (usize, usize, usize) {
-        (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH)
+        (self.channels, BOARD_HEIGHT, BOARD_WIDTH)
     }
 }
 
@@ -172,6 +203,7 @@ fn paint_pattern(
     velocity_counts: &mut [u32],
     rect: &PatternRect,
     include_offscreen: bool,
+    position_channels: Option<(usize, usize)>,
 ) {
     paint_entity(
         board,
@@ -193,6 +225,7 @@ fn paint_pattern(
         4,
         Some(AOE_PATTERN),
         include_offscreen,
+        position_channels,
     );
 }
 
@@ -217,6 +250,7 @@ fn paint_entity(
     velocity_slot: usize,
     kind_channel: Option<usize>,
     include_offscreen: bool,
+    position_channels: Option<(usize, usize)>,
 ) {
     let Some((top, bottom, left, right)) = cell_bounds(x, y, width, height, include_offscreen)
     else {
@@ -227,6 +261,8 @@ fn paint_entity(
     let normalized_vx = vx.to_f32() / SCREEN_SIZE;
     let normalized_vy = vy.to_f32() / SCREEN_SIZE;
     let normalized_stage = stage.map(|value| value.to_f32() / 2.0);
+    let normalized_x = 0.5 + x.to_f32() / SCREEN_SIZE;
+    let normalized_y = 0.5 + y.to_f32() / SCREEN_SIZE;
     for row in top..=bottom {
         for column in left..=right {
             let cell = row * BOARD_WIDTH + column;
@@ -246,6 +282,10 @@ fn paint_entity(
             }
             if let Some(channel) = kind_channel {
                 set_presence(board, channel, cell);
+            }
+            if let Some((x_channel, y_channel)) = position_channels {
+                update_max(board, x_channel, cell, normalized_x);
+                update_max(board, y_channel, cell, normalized_y);
             }
         }
     }

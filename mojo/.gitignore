@@ -1,0 +1,3 @@
+/ffi/target/
+/.torchinductor/
+/.mojo_cache/

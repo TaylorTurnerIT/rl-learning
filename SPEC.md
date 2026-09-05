@@ -12,6 +12,7 @@ G8|Treat 800 native survival frames as the first true-learning threshold for the
 G9|Test whether waypoint-discretized movement plus DQN improves action credit, sample efficiency, and 800-frame learning over direct nine-action PPO.
 G10|Retain predictive hazard-field/gradient control as matched later method; separate hazard prediction from movement control and compare under same NG protocol.
 G11|Move waypoint ML observation extraction into the native batch runtime; preserve Python reference parity and expose uncapped survival beyond the 800-frame gate.
+G12|Make every saved NG replay an original-cartridge pixel-regression sample; expose movement/corner safety controls for measured waypoint ablations.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -37,6 +38,11 @@ C20|Hazard-field control predicts future risk at declared horizons; instantaneou
 C21|Native ML observation batches may omit canonical snapshots; legacy full-state, board, pixel, and snapshot APIs remain unchanged.
 C22|Dashboard connects through run-directory files/WebSocket; trainer never waits on dashboard clients.
 C23|Replay capture runs from saved checkpoint in separate process; DQN hot path stays render-free ML path.
+C24|Training lives are a DQN collection wrapper only: evaluation remains one-life, and the native game contract is unchanged.
+C25|The overnight campaign inherits the selected HPO parameters, changes only declared lives/batch/budget controls, and uses training-only interim evaluation.
+C26|Stopping may happen through the dashboard mailbox, SIGINT, or SIGTERM; the trainer must finish the current safe boundary and write a resumable latest checkpoint.
+C27|Replay regression runs original `src/dodge/game/dodge.p8` through Pemsa/Xvfb under same seed, startup boundary, action trace, and frame cadence; unavailable or mismatched oracle cannot pass.
+C28|Movement interventions remain opt-in, native-physics/action-space preserving, checkpoint-provenanced, and comparable against legacy defaults.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -67,6 +73,9 @@ I25|`src/dodge/ng/telemetry.py` owns bounded latest-status publication and file 
 I26|`src/dodge/ng/dashboard.py` owns HTTP/WebSocket dashboard, controls, run inspection, and replay launch.
 I27|`src/dodge/ng/replay.py` owns deterministic checkpoint-to-pixel replay artifacts.
 I28|NG dashboard command is `dodge-ng-dashboard`.
+I29|`src/dodge/ng/overnight.py` owns the reproducible long-run DQN preset, HPO parameter inheritance, CLI overrides, and training-only evaluation defaults.
+I30|`src/dodge/ng/pixel_regression.py` owns replay action traces, original-cartridge execution, exact indexed-pixel comparison, and regression metadata.
+I31|`src/dodge/ng/waypoint.py` and `DQNConfig` expose grid spacing, decision interval, arrival tolerance/latching, corner policy, and optional corner safety penalty.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -136,6 +145,20 @@ V58|Dashboard controls accept only `pause`, `resume`, `stop`; command delivery r
 V59|Replay uses saved checkpoint and seed in independent native environment; live training lanes remain unchanged.
 V60|Replay pixel frames use fixed 128x128 palette-index contract and metadata identifies checkpoint/config/seed/frame cadence.
 V61|Dashboard path resolution stays inside selected run directory; arbitrary file serving forbidden.
+V62|A non-final training death adds the configured negative life-loss penalty, emits a nonterminal replay transition to the same-seed reset observation, and consumes no new training seed; the final death remains terminal and advances to a new seed.
+V63|Training lives never enter one-life evaluation: survival-frame metrics, the frozen 70/30 split, and holdout report-only boundary remain comparable to prior DQN runs.
+V64|Life counters, life-loss counts, and penalized rewards are finite, deterministic, checkpoint-provenanced, and reset consistently at non-final death, final death, and truncation.
+V65|The overnight preset records its inherited HPO values, lives, penalty, batch size, budget, manifest hash, and evaluation mode; `--resume` accepts only a matching checkpoint contract.
+V66|Dashboard stop, SIGINT, and SIGTERM request graceful termination; after the current collection/learning boundary the run writes `checkpoint-latest.pt`, final run metadata, and a stopped status.
+V67|Representative replay roles use one checkpoint and manifest training-seed outcomes only; best=max survival, bad=min survival, mean=closest to training mean, ties→lowest seed; holdout cannot influence roles.
+V68|Dashboard exposes valid best/mean/bad roles with existing path-safe 128x128 palette replays and finite seed/survival metadata; missing roles do not break ordinary replay listing.
+V69|Dashboard metrics inspection reads bounded tail; large metrics files cannot block HTTP/WebSocket connection.
+V70|Every saved DQN replay records complete native action/frame trace and compares each saved 128x128 palette frame against original-cartridge Pemsa output at same game frame; pass requires zero differing pixels.
+V71|Replay oracle provenance names seed, manifest/checkpoint/config, source/Pemsa identities, startup mode, cadence, compared count, and first mismatch coordinates/values; missing oracle or trace alignment never reports pass.
+V72|Replay regression uses isolated original execution and cannot mutate live training lanes, source cartridge, or Pemsa binary; replay metadata appears only after atomic frame/metadata finalization.
+V73|Arrival-latched waypoint control emits neutral after target enters configured tolerance until next decision boundary; unlatching preserves prior steering behavior; all actions stay in native nine-action contract.
+V74|Corner-ban policy maps any would-be corner target to current cell without teleport/physics bypass; grid spacing and decision interval remain explicit in config/checkpoint/replay provenance.
+V75|Optional corner safety penalty is finite and non-positive, applies only to selected corner targets, and remains zero by default; training/evaluation/replay use same control settings.
 
 §T
 id|status|task|cites
@@ -169,7 +192,7 @@ T27|x|Implement waypoint grid/target codec, deterministic bounded steering, tran
 T28|x|Run full-state oracle waypoint feasibility at 8, 16, and 32 pixels across training seeds; select resolution on training-only 800-frame evidence; report holdout after freeze.|V40,V42,V44,V45,G9,C2,C4,I20
 T29|x|Implement waypoint DQN observation/model/replay, Double-Dueling-n-step targets, checkpoints, resume validation, and provenance.|V39,V41,V46,I21,C18
 T30|.|Train first waypoint DQN under frozen 70/30 manifest and 800-frame relevance gate; report training/inner/holdout trends and throughput.|V42,G9,G8,C19,I21
-T31|.|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
+T31|~|Iterate waypoint baseline with declared replay, optimizer, regularization, and HPO variants only from training-side evidence; preserve matched interaction budget.|V42,G6,C19
 T32|.|Implement future-horizon hazard labels, hazard-field model, reachable gradient/waypoint controller, and method-specific tests.|V43,G10,I22,C20
 T33|.|Run matched waypoint/DQN versus hazard-field comparison and freeze next method from training-side evidence before locked holdout report.|V42,V43,G6,G10,I22
 T34|x|Add native `ml.rs` waypoint feature encoding, optional batch/PyO3 `ml_observation` and player-coordinate outputs, and canonical Python parity tests.|V47,V48,I24,C21
@@ -178,6 +201,11 @@ T36|x|Cache immutable waypoint geometry, add allocation-free scalar steering for
 T37|x|Remove redundant native per-frame snapshot construction while preserving exact frame-result parity, then profile the matched DQN workload again.|V52,I20,G11
 T38|x|Add a shared simulation ML-only frame path, expose fast batch reset/step results through PyO3/Python, migrate DQN to it, and verify canonical trace parity before profiling.|V53,V54,I20,G11,I24
 T39|x|Add non-blocking DQN telemetry/control mailbox, minimal WebSocket dashboard, checkpoint replay worker, and tests.|V56,V57,V58,V59,V60,V61,I25,I26,I27,I28
+T40|x|Add training-only three-life DQN collection semantics, negative death penalty, life telemetry, checkpoint compatibility, graceful signal stopping, and regression tests.|V39,V41,V62,V63,V64,V66,C24,I21,I25
+T41|x|Add reproducible overnight DQN preset using selected HPO parameters, larger batch, long budget, training-only interim evaluation, stop/resume CLI, and provenance tests.|V42,V50,V65,V66,C25,C26,I21,I29
+T42|x|Add training-split best/mean/bad replay set and labeled dashboard comparison controls for one checkpoint, with deterministic selection, metadata, and tests.|V59,V60,V61,V67,V68,V69,I26,I27
+T43|~|Record native action/frame traces and run mandatory original-cartridge indexed-pixel regression after every saved replay; expose failure provenance and tests.|V52,V59,V60,V70,V71,V72,C27,I26,I27,I30
+T44|~|Add opt-in arrival latching, configurable steering tolerance, corner-node ban, corner safety penalty, and explicit checkpoint/replay provenance across DQN train/eval/replay.|V37,V38,V51,V73,V74,V75,C28,I20,I21,I31
 
 §B
 id|date|cause|fix
@@ -224,3 +252,23 @@ B40|2026-09-04|Native parity fixture formatting drifted from rustfmt output.|Run
 B41|2026-09-04|Canonical snapshot construction moved across transition trail mutation during ML-path refactor, then closure formatting drifted.|Construct full snapshot at original post-input/pre-trail boundary and run rustfmt; V52.
 B42|2026-09-04|New Python ML boundary added two lines beyond repository Ruff width.|Wrap adapter and regression assertions before lint verification; no behavior invariant added.
 B43|2026-09-04|Full-suite PPO tests hit the existing 512 MiB runtime preflight on `/tmp` with about 299 MiB free; the same suite passed on `/home/taylor`.|Use a spacious pytest base directory for verification; no T39 code or invariant change.
+B44|2026-09-04|Native `ObservationFlags` gained `preserve_offscreen_coordinates` while one test initializer remained stale.|Update test initializer; no behavior invariant added.
+B45|2026-09-04|Mojo checkpoint option used Python-style `len(String)`, rejected by UTF-8-aware Mojo compiler.|Use `byte_length()` for String emptiness before Mojo build; no behavior invariant added.
+B46|2026-09-04|Initial HPO module retained an unused manifest type import after switching to the loader boundary.|Remove the unused import before HPO verification; no behavior invariant added.
+B47|2026-09-04|HPO regression imports were not in Ruff's private-symbol ordering.|Sort the imported checkpoint helpers before the next targeted lint gate; no behavior invariant added.
+B48|2026-09-04|The targeted pytest command pointed `TMPDIR` at a directory that had not been created, so devenv could not capture its environment.|Use the existing spacious project-home temp boundary for test execution; no code or invariant change.
+B49|2026-09-04|The first HPO test exposed a queued Optuna baseline being counted as a completed trial, while the parser test expected `ValueError` instead of its documented argparse type error.|Count only terminal study trials toward the requested campaign size and assert the parser's public exception type; preserve the holdout boundary test.
+B50|2026-09-04|The HPO project entry point and Just recipe were present, but devenv did not expose the command wrapper used by the launch path.|Add the native-aware `dodge-ng-hpo` devenv command with the same library/Python path setup as DQN; no behavior invariant added.
+B51|2026-09-04|The first overnight lint gate found four line-width violations in the new preset metadata and regression test.|Wrap the new literals and rerun targeted lint before the behavioral gate; no behavior invariant added.
+B52|2026-09-04|The stop-signal regression test name exceeded the repository's 88-column Ruff gate after the first lint fix.|Shorten the test identifier and rerun the targeted lint gate; no behavior invariant added.
+B53|2026-09-04|The first real stop smoke sent SIGINT during DQN model initialization, before the training-loop-only handler scope, so no stopped checkpoint was finalized.|Install the graceful handler around the complete DQN call and verify a real interrupted run reaches stopped finalization; enforce V66.
+B54|2026-09-05|T42 first lint gate found one unused import and three line-width violations in representative replay code/tests.|Remove unused import and wrap new signatures/path before rerun targeted lint; no behavior invariant added.
+B55|2026-09-05|Dashboard parsed entire 365 MB metrics log before WebSocket handshake, making live dashboard appear unavailable.|Read bounded metrics tail; enforce V69 with large-log dashboard smoke test.
+B56|2026-09-05|Representative button updater used `some`, stopping after Best and leaving Mean/Bad labels unset.|Iterate all role buttons; verify live dashboard renders/selects all roles; V68.
+B57|2026-09-05|Final format gate found two formatter-only wrapping differences in representative replay module after lint passed.|Run `ruff format` on touched Python files before final gate; no behavior invariant added.
+B58|2026-09-05|Controller-factory replacement removed training-local `grid` while checkpoint/report code still referenced it.|Keep shared grid/controller bindings available through training finalization; rerun targeted lint before the behavioral gate; no behavior invariant added.
+B59|2026-09-05|Long replay oracle exceeded fixed 60-second timeout before comparison, so valid saved replay became `unavailable` rather than a result.|Scale isolated oracle timeout with replay trace length while preserving non-passing unavailable status; no behavior invariant added.
+B60|2026-09-05|Pixel regression overwrote an earlier frame mismatch with a later missing oracle frame, obscuring the first divergence in a long replay.|Preserve the first mismatch reason and coordinates while still reporting the missing-frame boundary; require long replay diagnostics to identify the earliest mismatch.
+B61|2026-09-05|Native explosion update tested the post-growth size when deciding whether to switch from expansion to shrink, while the cartridge tests the pre-growth local size.|Use the pre-growth size for the phase transition and add a focused expanding-kamikaze regression; preserve V70's long-trace pixel gate.
+B62|2026-09-05|A personality-1 enemy marked for death spawned its kamikaze from the post-growth `current` state, while the cartridge's `kamikaze(_e)` uses the pre-growth source position and size.|Pass pre-growth position/size into kamikaze creation and add a focused dying-personality-1 regression; preserve V70's long-trace pixel gate.
+B63|2026-09-05|Native applied pattern bounce logic to personality -1 kamikazes, but the cartridge guards pattern collision with `p!=-1`; the explosion acquired velocity on the frame it entered a pattern rectangle.|Skip pattern collision for kamikazes and add a focused explosion/pattern regression; preserve V70's long-trace pixel gate.

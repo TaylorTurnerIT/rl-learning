@@ -175,6 +175,21 @@ dodge-ng-dqn *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-dqn {{ options }}
 
 [group("dodge")]
+dodge-ng-hpo *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-hpo {{ options }}
+
+[group("dodge")]
+dodge-ng-confirm *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-confirm {{ options }}
+
+[group("dodge")]
+dodge-ng-overnight *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-overnight {{ options }}
+
+[group("dodge")]
 dodge-ng-dashboard *options:
     @devenv -q shell -- dodge-ng-dashboard {{ options }}
 

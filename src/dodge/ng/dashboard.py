@@ -98,14 +98,7 @@ class RunInspector:
         signature = (stat.st_mtime_ns, stat.st_size)
         if signature == self._metrics_signature:
             return self._metrics[-500:]
-        metrics: list[dict[str, object]] = []
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                value = json.loads(line)
-                if isinstance(value, dict):
-                    metrics.append(value)
-        except (OSError, json.JSONDecodeError):
-            metrics = self._metrics
+        metrics = _read_metrics_tail(path, limit=500)
         self._metrics_signature = signature
         self._metrics = metrics
         return metrics[-500:]
@@ -125,6 +118,9 @@ class RunInspector:
             if frame_path is None:
                 continue
             item = dict(metadata)
+            playback_start, playback_frame_count = _replay_playback_window(item)
+            item["playback_start"] = playback_start
+            item["playback_frame_count"] = playback_frame_count
             item["url"] = f"/replay/{frame_file}"
             result.append(item)
         return result
@@ -339,6 +335,35 @@ def _read_json(path: Path) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
+def _read_metrics_tail(path: Path, *, limit: int) -> list[dict[str, object]]:
+    if limit < 1:
+        return []
+    chunks: list[bytes] = []
+    newline_count = 0
+    try:
+        with path.open("rb") as stream:
+            position = stream.seek(0, 2)
+            while position > 0 and newline_count <= limit:
+                read_size = min(64 * 1024, position)
+                position -= read_size
+                stream.seek(position)
+                chunk = stream.read(read_size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+    except OSError:
+        return []
+    lines = b"".join(reversed(chunks)).splitlines()
+    metrics: list[dict[str, object]] = []
+    for line in lines[-limit:]:
+        try:
+            value = json.loads(line.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            metrics.append(value)
+    return metrics
+
+
 def _summary(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -348,6 +373,33 @@ def _summary(value: object) -> dict[str, object] | None:
 
 def _integer_seed(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _replay_playback_window(metadata: dict[str, object]) -> tuple[int, int]:
+    """Return the playable frame window, excluding legacy boundary frames."""
+    frame_count = _nonnegative_integer(metadata.get("frame_count"))
+    if frame_count is None:
+        return 0, 0
+    explicit_start = _nonnegative_integer(metadata.get("playback_start"))
+    explicit_count = _nonnegative_integer(metadata.get("playback_frame_count"))
+    if (
+        explicit_start is not None
+        and explicit_count is not None
+        and explicit_start + explicit_count <= frame_count
+    ):
+        return explicit_start, explicit_count
+
+    if frame_count == 0:
+        return 0, 0
+    start = 1
+    terminal = 1 if metadata.get("done") is True else 0
+    return start, max(0, frame_count - start - terminal)
+
+
+def _nonnegative_integer(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 if __name__ == "__main__":

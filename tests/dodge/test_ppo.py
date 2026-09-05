@@ -21,6 +21,7 @@ from dodge.rl.ppo import (
     BOARD_SHAPE,
     FRAME_HEIGHT,
     FRAME_WIDTH,
+    FULL_BOARD_SHAPE,
     TRAINING_SEEDS,
     DodgeActorCriticCNN,
     NativePPOTrainer,
@@ -174,6 +175,20 @@ def test_pixel_config_requires_native_backend() -> None:
         board_spatial_pool="max",
         native_lanes=2,
     ).validate()
+    _config(
+        backend="native",
+        observation_mode="board_full_coords",
+        native_lanes=2,
+    ).validate()
+
+
+def test_coordinate_board_actor_critic_accepts_full_board_shape() -> None:
+    model = DodgeActorCriticCNN(hidden_size=16, board_shape=FULL_BOARD_SHAPE)
+
+    logits, values = model(torch.zeros((2, *FULL_BOARD_SHAPE)))
+
+    assert logits.shape == (2, 9)
+    assert values.shape == (2,)
 
 
 def test_v21_actor_warm_start_copies_policy_but_not_value_weights() -> None:

@@ -70,6 +70,21 @@ def test_baseline_config_routes_board_spatial_pool() -> None:
     assert ppo_config.board_spatial_pool == "max"
 
 
+def test_baseline_config_routes_coordinate_board_contract() -> None:
+    manifest = SeedManifest.fresh_default()
+    config = BaselineConfig(
+        observation_mode="board_full_coords",
+        board_spatial_pool="max",
+        native_lanes=8,
+        rollout_steps=32,
+    )
+
+    ppo_config = config.ppo_config(manifest)
+
+    assert ppo_config.observation_mode == "board_full_coords"
+    assert ppo_config.board_spatial_pool == "max"
+
+
 def test_run_baseline_passes_locked_split_to_ppo(monkeypatch, tmp_path: Path) -> None:
     manifest = SeedManifest.fresh_default()
     manifest_path = tmp_path / "manifest.json"

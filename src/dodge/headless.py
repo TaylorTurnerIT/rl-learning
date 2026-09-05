@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +55,17 @@ def duration_to_frames(duration_ms: int) -> int:
     return max(1, (duration_ms * 60 + 999) // 1_000)
 
 
+def _startup_axis_points(spacing: int) -> tuple[int, ...]:
+    points: list[int] = []
+    point = 2
+    while point < 125:
+        points.append(point)
+        point += spacing
+    if not points or points[-1] != 125:
+        points.append(125)
+    return tuple(points)
+
+
 def instrument_cartridge(
     source: str,
     commands: list[MovementCommand],
@@ -66,6 +77,8 @@ def instrument_cartridge(
     capture_states: bool = False,
     capture_pixels: bool = False,
     capture_frame_limit: int | None = None,
+    native_startup_grid_spacing: int | None = None,
+    capture_frame_indices: Sequence[int] | None = None,
 ) -> str:
     if not commands:
         raise ControlInputError("headless commands must not be empty")
@@ -73,6 +86,41 @@ def instrument_cartridge(
         raise ControlInputError("pixel capture requires render mode")
     if capture_frame_limit is not None and capture_frame_limit < 1:
         raise ControlInputError("capture frame limit must be positive")
+    if capture_frame_indices is not None:
+        if not capture_pixels:
+            raise ControlInputError(
+                "selected frame capture requires pixel capture mode"
+            )
+        if any(
+            isinstance(frame, bool) or not isinstance(frame, int) or frame < 1
+            for frame in capture_frame_indices
+        ):
+            raise ControlInputError("selected capture frame indexes must be positive")
+    if native_startup_grid_spacing is not None:
+        if (
+            isinstance(native_startup_grid_spacing, bool)
+            or not isinstance(native_startup_grid_spacing, int)
+            or native_startup_grid_spacing < 1
+        ):
+            raise ControlInputError(
+                "native startup grid spacing must be a positive integer"
+            )
+        if not wait_for_game_start:
+            raise ControlInputError(
+                "native startup grid spacing requires wait_for_game_start"
+            )
+    selected_capture_condition = "true"
+    selected_capture_definition = ""
+    if capture_frame_indices is not None:
+        selected_frames = sorted(set(capture_frame_indices))
+        encoded_frames = ",".join(f"[{frame}]=true" for frame in selected_frames)
+        selected_capture_definition = f"""__dodge_capture_frames={{{encoded_frames}}}
+function __dodge_should_capture_frame()
+ return __dodge_capture_frames[__dodge_frames] or __dodge_done
+end
+
+"""
+        selected_capture_condition = "__dodge_should_capture_frame()"
     capture_frames = capture_states or capture_pixels
     capture_frame_limit_value = (
         capture_frame_limit if capture_frame_limit is not None else -1
@@ -90,6 +138,77 @@ def instrument_cartridge(
         f"{{{COMMAND_MASKS[command.move]},{duration_to_frames(command.duration_ms)}}}"
         for command in commands
     )
+    startup_definition = ""
+    startup_initialization = ""
+    startup_control = ""
+    startup_countdown_guard = ""
+    if native_startup_grid_spacing is not None:
+        startup_points = _startup_axis_points(native_startup_grid_spacing)
+        encoded_points = ",".join(str(int(point)) for point in startup_points)
+        startup_definition = f"""__dodge_startup_enabled=true
+__dodge_startup_points={{{encoded_points}}}
+__dodge_startup_phase=0
+__dodge_startup_move_frames=0
+__dodge_startup_wait_frames=0
+__dodge_startup_target_x=64
+__dodge_startup_target_y=64
+
+function __dodge_nearest_startup_point(value)
+ local nearest=1
+ local distance=32767
+ for index=1,#__dodge_startup_points do
+  local candidate=abs(value-__dodge_startup_points[index])
+  if candidate<distance then
+   nearest=index
+   distance=candidate
+  end
+ end
+ return nearest
+end
+
+function __dodge_startup_reached()
+ return abs(px-__dodge_startup_target_x)<=2 and
+  abs(py-__dodge_startup_target_y)<=2
+end
+
+function __dodge_startup_visible_enemy()
+ for enemy in all(enemies) do
+  if enemy.ins then return true end
+ end
+ return false
+end
+
+"""
+        startup_initialization = """  local column=__dodge_nearest_startup_point(px)
+  local row=__dodge_nearest_startup_point(py)
+  __dodge_startup_target_x=__dodge_startup_points[column]
+  __dodge_startup_target_y=__dodge_startup_points[max(1,row-1)]
+  __dodge_startup_phase=1
+  __dodge_startup_move_frames=0
+  __dodge_startup_wait_frames=0
+"""
+        startup_control = """ local startup_controlled=false
+ if __dodge_startup_enabled and __dodge_startup_phase!=3 then
+  startup_controlled=true
+  if __dodge_startup_phase==1 then
+   if __dodge_startup_reached() or __dodge_startup_move_frames>=240 then
+    __dodge_startup_phase=2
+   else
+    __dodge_mask=4
+    __dodge_startup_move_frames+=1
+   end
+  end
+  if __dodge_startup_phase==2 then
+   if __dodge_startup_visible_enemy() or __dodge_startup_wait_frames>=240 then
+    __dodge_startup_phase=3
+    return
+   end
+   __dodge_mask=0
+   __dodge_startup_wait_frames+=1
+  end
+ end
+"""
+        startup_countdown_guard = " and not startup_controlled"
     draw_override = (
         """__dodge_game_draw=_draw
 __dodge_game_rnd=rnd
@@ -162,7 +281,8 @@ function __dodge_emit_pixels()
 end
 function _draw()
  __dodge_game_draw()
- if __dodge_capture_started and __dodge_last_draw_frame!=__dodge_frames then
+ if __dodge_capture_started and __dodge_last_draw_frame!=__dodge_frames and
+  {selected_capture_condition} then
   __dodge_last_draw_frame=__dodge_frames
   __dodge_emit_frame()
   __dodge_emit_state()
@@ -329,7 +449,8 @@ function stat(i)
  return __dodge_game_stat(i)
 end
 
-{draw_override}{transition_harness}{state_harness}{finish_definition}
+{draw_override}{transition_harness}{state_harness}{finish_definition}{selected_capture_definition}
+{startup_definition}
 
 function __dodge_step()
  local command=__dodge_commands[__dodge_command]
@@ -342,8 +463,10 @@ function __dodge_step()
   __dodge_command+=1
   local next_command=__dodge_commands[__dodge_command]
   if next_command then __dodge_remaining=next_command[2] end
+{startup_initialization}
 {capture_game_start}  return
  end
+{startup_control}
  local game_frame=_upd==updategame and not isdead
  __dodge_game_update60()
  if game_frame and not isdead then
@@ -360,7 +483,7 @@ function __dodge_step()
   __dodge_finish()
   return
  end
- if command and not __dodge_wait_for_game_start then
+ if command and not __dodge_wait_for_game_start{startup_countdown_guard} then
   __dodge_remaining-=1
   if __dodge_remaining<=0 then
    __dodge_mask=0

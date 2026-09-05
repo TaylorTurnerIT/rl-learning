@@ -2,8 +2,8 @@
 
 use dodge_batch::{
     ACTION_COUNT, BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, BatchConfig, BatchEnvironment,
-    BatchError, BatchObservation, ExecutionMode, ML_OBSERVATION_SIZE, ObservationFlags,
-    PIXEL_HEIGHT, PIXEL_WIDTH,
+    BatchError, BatchObservation, ExecutionMode, FULL_BOARD_CHANNELS, ML_OBSERVATION_SIZE,
+    ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
 };
 use dodge_core::{Action, FrameEvent, Mode};
 use ndarray::{Array1, Array2, Array3, Array4};
@@ -24,7 +24,7 @@ pub struct NativeBatchEnv {
 #[pymethods]
 impl NativeBatchEnv {
     #[new]
-    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true, ml=false, ml_grid_spacing=32, include_offscreen_board=false))]
+    #[pyo3(signature = (step_frames=4, execution="serial", full_state=false, pixels=false, board=true, difficulty=2, patterns_enabled=true, powerups_enabled=true, include_offscreen_board=false, preserve_offscreen_coordinates=false, ml=false, ml_grid_spacing=32))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         step_frames: u32,
@@ -35,9 +35,10 @@ impl NativeBatchEnv {
         difficulty: u8,
         patterns_enabled: bool,
         powerups_enabled: bool,
+        include_offscreen_board: bool,
+        preserve_offscreen_coordinates: bool,
         ml: bool,
         ml_grid_spacing: u32,
-        include_offscreen_board: bool,
     ) -> PyResult<Self> {
         let execution = parse_execution(execution)?;
         let mut config = BatchConfig::new(step_frames);
@@ -47,10 +48,11 @@ impl NativeBatchEnv {
         config.observations = ObservationFlags {
             full_state,
             pixels,
-            ml,
-            ml_grid_spacing,
             board,
             include_offscreen_board,
+            preserve_offscreen_coordinates,
+            ml,
+            ml_grid_spacing,
         };
         config.execution = execution;
         let inner = BatchEnvironment::new(config).map_err(batch_error)?;
@@ -89,6 +91,10 @@ impl NativeBatchEnv {
             self.flags.include_offscreen_board,
         )?;
         flags.set_item("ml", self.flags.ml)?;
+        flags.set_item(
+            "preserve_offscreen_coordinates",
+            self.flags.preserve_offscreen_coordinates,
+        )?;
         flags.set_item("ml_grid_spacing", self.flags.ml_grid_spacing)?;
         Ok(flags)
     }
@@ -104,6 +110,21 @@ impl NativeBatchEnv {
             .to_vec();
         let observations = py
             .detach(|| self.inner.reset(&seeds))
+            .map_err(batch_error)?;
+        observations_to_dict(py, observations, self.flags)
+    }
+
+    fn reset_batch_with_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        seeds: PyReadonlyArray1<'_, u32>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_with_startup(&seeds))
             .map_err(batch_error)?;
         observations_to_dict(py, observations, self.flags)
     }
@@ -131,6 +152,29 @@ impl NativeBatchEnv {
         observations_to_dict(py, observations, self.flags)
     }
 
+    fn reset_lanes_with_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        lanes: PyReadonlyArray1<'_, u32>,
+        seeds: PyReadonlyArray1<'_, u32>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let lanes = lanes
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .copied()
+            .map(|lane| lane as usize)
+            .collect::<Vec<_>>();
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_lanes_with_startup(&lanes, &seeds))
+            .map_err(batch_error)?;
+        observations_to_dict(py, observations, self.flags)
+    }
+
     fn reset_ml_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -142,6 +186,21 @@ impl NativeBatchEnv {
             .to_vec();
         let observations = py
             .detach(|| self.inner.reset_ml(&seeds))
+            .map_err(batch_error)?;
+        ml_observations_to_dict(py, observations)
+    }
+
+    fn reset_ml_batch_with_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        seeds: PyReadonlyArray1<'_, u32>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_ml_with_startup(&seeds))
             .map_err(batch_error)?;
         ml_observations_to_dict(py, observations)
     }
@@ -165,6 +224,29 @@ impl NativeBatchEnv {
             .to_vec();
         let observations = py
             .detach(|| self.inner.reset_ml_lanes(&lanes, &seeds))
+            .map_err(batch_error)?;
+        ml_observations_to_dict(py, observations)
+    }
+
+    fn reset_ml_lanes_with_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        lanes: PyReadonlyArray1<'_, u32>,
+        seeds: PyReadonlyArray1<'_, u32>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let lanes = lanes
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .copied()
+            .map(|lane| lane as usize)
+            .collect::<Vec<_>>();
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_ml_lanes_with_startup(&lanes, &seeds))
             .map_err(batch_error)?;
         ml_observations_to_dict(py, observations)
     }
@@ -249,10 +331,14 @@ impl NativeBatchEnv {
 
 #[pymodule]
 fn dodge_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add("ML_OBSERVATION_SHAPE", (ML_OBSERVATION_SIZE,))?;
     module.add("BATCH_SCHEMA_VERSION", BATCH_SCHEMA_VERSION)?;
     module.add("BOARD_SHAPE", (BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH))?;
+    module.add(
+        "FULL_BOARD_SHAPE",
+        (FULL_BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH),
+    )?;
     module.add("PIXEL_SHAPE", (PIXEL_HEIGHT, PIXEL_WIDTH))?;
+    module.add("ML_OBSERVATION_SHAPE", (ML_OBSERVATION_SIZE,))?;
     module.add_class::<NativeBatchEnv>()?;
     Ok(())
 }
@@ -341,6 +427,10 @@ fn observations_to_dict<'py>(
         None
     };
     let board = if flags.board {
+        let board_channels = observations
+            .first()
+            .and_then(|observation| observation.board.as_ref())
+            .map_or(BOARD_CHANNELS, |board| board.shape().0);
         let values = observations
             .iter()
             .flat_map(|value| {
@@ -353,7 +443,7 @@ fn observations_to_dict<'py>(
             .collect::<Vec<_>>();
         Some(
             Array4::from_shape_vec(
-                (lane_count, BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH),
+                (lane_count, board_channels, BOARD_HEIGHT, BOARD_WIDTH),
                 values,
             )
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
@@ -421,11 +511,11 @@ fn observations_to_dict<'py>(
     result.set_item("state_hashes", state_hashes)?;
     result.set_item("pixel_hashes", pixel_hashes)?;
     result.set_item("modes", modes)?;
-    result.set_item("ml_observation", ml_observation)?;
-    result.set_item("player_positions", player_positions)?;
     result.set_item("event_flags", event_flags)?;
     result.set_item("pixels", pixels)?;
     result.set_item("board", board)?;
+    result.set_item("ml_observation", ml_observation)?;
+    result.set_item("player_positions", player_positions)?;
     result.set_item("snapshot_bytes", snapshots)?;
     Ok(result)
 }

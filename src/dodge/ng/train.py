@@ -256,7 +256,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--observation-mode",
-        choices=("board", "board_full", "pixels"),
+        choices=("board", "board_full", "board_full_coords", "pixels"),
         default="board",
     )
     parser.add_argument(

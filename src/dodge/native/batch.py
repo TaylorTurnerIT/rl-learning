@@ -37,9 +37,9 @@ class NativeBatchResult:
     modes: np.ndarray
     event_flags: np.ndarray
     pixels: np.ndarray | None
+    board: np.ndarray | None
     ml_observation: np.ndarray | None
     player_positions: np.ndarray | None
-    board: np.ndarray | None
     snapshot_bytes: tuple[bytes | None, ...]
 
     @property
@@ -83,24 +83,25 @@ class NativeBatchEnvironment:
         pixels: bool = False,
         board: bool = True,
         difficulty: int = 2,
-        ml: bool = False,
-        ml_grid_spacing: int = 32,
         patterns_enabled: bool = True,
         powerups_enabled: bool = True,
         include_offscreen_board: bool = False,
+        preserve_offscreen_coordinates: bool = False,
+        ml: bool = False,
+        ml_grid_spacing: int = 32,
     ) -> None:
         if not 3 <= step_frames <= 5:
             raise ValueError("step_frames must be between 3 and 5")
         if execution not in {"serial", "parallel"}:
+            raise ValueError("execution must be serial or parallel")
+        if not 1 <= difficulty <= 3:
+            raise ValueError("difficulty must be between 1 and 3")
         if (
             isinstance(ml_grid_spacing, bool)
             or not isinstance(ml_grid_spacing, int)
             or ml_grid_spacing < 1
         ):
             raise ValueError("ml_grid_spacing must be a positive integer")
-            raise ValueError("execution must be serial or parallel")
-        if not 1 <= difficulty <= 3:
-            raise ValueError("difficulty must be between 1 and 3")
         try:
             import dodge_native
         except ModuleNotFoundError as error:
@@ -115,20 +116,22 @@ class NativeBatchEnvironment:
             pixels,
             board,
             difficulty,
-            ml,
-            ml_grid_spacing,
             patterns_enabled,
             powerups_enabled,
             include_offscreen_board,
+            preserve_offscreen_coordinates,
+            ml,
+            ml_grid_spacing,
         )
         self.step_frames = step_frames
         self.execution = execution
         self.full_state_enabled = full_state
-        self.ml_enabled = ml
-        self.ml_grid_spacing = ml_grid_spacing
         self.pixels_enabled = pixels
         self.board_enabled = board
         self.include_offscreen_board = include_offscreen_board
+        self.preserve_offscreen_coordinates = preserve_offscreen_coordinates
+        self.ml_enabled = ml
+        self.ml_grid_spacing = ml_grid_spacing
         self._last_result: NativeBatchResult | None = None
         self._last_ml_result: NativeMlBatchResult | None = None
         self._closed = False
@@ -151,6 +154,16 @@ class NativeBatchEnvironment:
         self._last_ml_result = None
         return result
 
+    def reset_batch_with_startup(self, seeds: object) -> NativeBatchResult:
+        """Reset after native movement to the first on-screen enemy."""
+        self._ensure_open()
+        values = _integer_array(seeds, "seeds", maximum=32_767)
+        payload = self._native.reset_batch_with_startup(values)
+        result = _result_from_payload(payload)
+        self._last_result = result
+        self._last_ml_result = None
+        return result
+
     def reset_lanes(self, lanes: object, seeds: object) -> NativeBatchResult:
         self._ensure_open()
         lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
@@ -158,6 +171,23 @@ class NativeBatchEnvironment:
         if lane_values.shape != seed_values.shape:
             raise ValueError("lanes and seeds must have the same length")
         payload = self._native.reset_lanes(lane_values, seed_values)
+        result = _result_from_payload(payload)
+        self._last_result = result
+        self._last_ml_result = None
+        return result
+
+    def reset_lanes_with_startup(
+        self,
+        lanes: object,
+        seeds: object,
+    ) -> NativeBatchResult:
+        """Reset selected lanes after the native AI startup sequence."""
+        self._ensure_open()
+        lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
+        seed_values = _integer_array(seeds, "seeds", maximum=32_767)
+        if lane_values.shape != seed_values.shape:
+            raise ValueError("lanes and seeds must have the same length")
+        payload = self._native.reset_lanes_with_startup(lane_values, seed_values)
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
@@ -182,6 +212,16 @@ class NativeBatchEnvironment:
         self._last_ml_result = result
         return result
 
+    def reset_ml_batch_with_startup(self, seeds: object) -> NativeMlBatchResult:
+        """Reset ML lanes at an upward waypoint with an on-screen enemy."""
+        self._ensure_open()
+        values = _integer_array(seeds, "seeds", maximum=32_767)
+        payload = self._native.reset_ml_batch_with_startup(values)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        return result
+
     def reset_ml_lanes(self, lanes: object, seeds: object) -> NativeMlBatchResult:
         """Reset selected lanes through the render-free ML boundary."""
         self._ensure_open()
@@ -190,6 +230,23 @@ class NativeBatchEnvironment:
         if lane_values.shape != seed_values.shape:
             raise ValueError("lanes and seeds must have the same length")
         payload = self._native.reset_ml_lanes(lane_values, seed_values)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        return result
+
+    def reset_ml_lanes_with_startup(
+        self,
+        lanes: object,
+        seeds: object,
+    ) -> NativeMlBatchResult:
+        """Reset selected ML lanes through the native AI startup sequence."""
+        self._ensure_open()
+        lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
+        seed_values = _integer_array(seeds, "seeds", maximum=32_767)
+        if lane_values.shape != seed_values.shape:
+            raise ValueError("lanes and seeds must have the same length")
+        payload = self._native.reset_ml_lanes_with_startup(lane_values, seed_values)
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
@@ -251,6 +308,10 @@ class NativeBatchEnvironment:
     def observe_board_19x16(self) -> np.ndarray:
         self._ensure_open()
         result = self._require_result()
+        if result.board is None:
+            raise ControlRuntimeError("board observation was not enabled")
+        return result.board
+
     def observe_ml(self) -> np.ndarray:
         """Return native waypoint features with shape ``(lanes, 225)``."""
         self._ensure_open()
@@ -266,10 +327,6 @@ class NativeBatchEnvironment:
         if result.player_positions is None:
             raise ControlRuntimeError("ML player positions were not enabled")
         return result.player_positions
-
-        if result.board is None:
-            raise ControlRuntimeError("board observation was not enabled")
-        return result.board
 
     @property
     def last_result(self) -> NativeBatchResult:
@@ -419,10 +476,10 @@ def _result_from_payload(payload: MappingLike) -> NativeBatchResult:
         pixel_hashes=_array(payload, "pixel_hashes"),
         modes=_array(payload, "modes"),
         event_flags=_array(payload, "event_flags"),
-        ml_observation=_optional_array(payload, "ml_observation"),
-        player_positions=_optional_array(payload, "player_positions"),
         pixels=_optional_array(payload, "pixels"),
         board=_optional_array(payload, "board"),
+        ml_observation=_optional_array(payload, "ml_observation"),
+        player_positions=_optional_array(payload, "player_positions"),
         snapshot_bytes=snapshots,
     )
 

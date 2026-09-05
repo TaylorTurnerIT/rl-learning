@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import signal
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -17,14 +19,21 @@ from dodge.ng.dqn import (
     DuelingWaypointDQN,
     NStepAccumulator,
     ReplayBuffer,
+    _checkpoint_config_matches,
+    _checkpoint_contract,
     _checkpoint_payload,
+    _collect_macro_transition,
+    _consume_training_life,
+    _epsilon,
+    _install_stop_signal_handlers,
     _load_checkpoint,
     _native_ml_state,
     _player_position,
+    _restore_stop_signal_handlers,
     encode_waypoint_observation,
 )
 from dodge.ng.manifest import SeedManifest
-from dodge.ng.waypoint import WaypointGrid
+from dodge.ng.waypoint import WaypointController, WaypointGrid
 
 pytest.importorskip("dodge_native")
 
@@ -179,6 +188,226 @@ def test_n_step_replay_preserves_target_and_stops_at_episode_boundary() -> None:
 def test_dqn_config_rejects_zero_evaluation_interval() -> None:
     with pytest.raises(ValueError, match="positive"):
         DQNConfig(eval_every=0).validate()
+
+
+def test_dqn_controller_controls_are_validated_and_provenanced() -> None:
+    config = DQNConfig(
+        grid_spacing=24,
+        hold_decisions=12,
+        steering_tolerance=6.0,
+        arrival_latching=True,
+        ban_corner_nodes=True,
+        corner_node_penalty=-8.0,
+    )
+
+    config.validate()
+    contract = _checkpoint_contract(config)
+
+    assert contract["grid_spacing"] == 24
+    assert contract["corner_nodes"] == "banned"
+    assert contract["controller"] == {
+        "tolerance": 6.0,
+        "arrival_latching": True,
+        "corner_node_penalty": -8.0,
+        "steering": "sign(target_position-current_position)",
+    }
+    assert contract["cadence"] == {
+        "step_frames": 4,
+        "hold_decisions": 12,
+        "decision_interval": 12,
+    }
+
+
+def test_epsilon_uses_explicit_decay_schedule_when_configured() -> None:
+    config = DQNConfig(epsilon_decay_steps=20, epsilon_final=0.2)
+
+    assert _epsilon(config, 0) == pytest.approx(1.0)
+    assert _epsilon(config, 10) == pytest.approx(0.6)
+    assert _epsilon(config, 20) == pytest.approx(0.2)
+    assert _epsilon(config, 100) == pytest.approx(0.2)
+
+
+def test_training_life_consumption_resets_life_steps_and_marks_final_loss() -> None:
+    lives = np.asarray([3], dtype=np.int64)
+    episode_steps = np.asarray([17], dtype=np.int64)
+
+    assert not _consume_training_life(lives, episode_steps, 0, 3)
+    assert lives.tolist() == [2]
+    assert episode_steps.tolist() == [0]
+
+    assert _consume_training_life(lives, episode_steps, 0, 3) is False
+    assert lives.tolist() == [1]
+    assert _consume_training_life(lives, episode_steps, 0, 3) is True
+    assert lives.tolist() == [3]
+
+
+def test_training_stop_signal_handler_sets_flag_and_restores() -> None:
+    requested, previous = _install_stop_signal_handlers()
+    try:
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(int(signal.SIGTERM), None)
+        assert requested[0]
+    finally:
+        _restore_stop_signal_handlers(previous)
+
+
+def test_training_lives_penalize_nonfinal_death_and_advance_seed_on_final_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeEnvironment:
+        def __init__(self) -> None:
+            self.reset_calls: list[tuple[np.ndarray, np.ndarray]] = []
+
+        def step_ml_batch(self, _actions: np.ndarray) -> SimpleNamespace:
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.full(
+                    (1, WAYPOINT_OBSERVATION_SIZE),
+                    2.0,
+                    dtype=np.float32,
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                rewards=np.asarray([4.0], dtype=np.float32),
+                done=np.asarray([True], dtype=bool),
+            )
+
+        def reset_ml_lanes_with_startup(
+            self,
+            lanes: np.ndarray,
+            seeds: np.ndarray,
+        ) -> SimpleNamespace:
+            self.reset_calls.append((lanes.copy(), seeds.copy()))
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.full(
+                    (1, WAYPOINT_OBSERVATION_SIZE),
+                    9.0,
+                    dtype=np.float32,
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                rewards=np.asarray([0.0], dtype=np.float32),
+                done=np.asarray([False], dtype=bool),
+            )
+
+    monkeypatch.setattr(
+        "dodge.ng.dqn._choose_actions",
+        lambda *_args: np.asarray([0], dtype=np.uint8),
+    )
+    config = DQNConfig(
+        total_steps=1,
+        batch_size=1,
+        replay_capacity=4,
+        n_step=1,
+        warmup_steps=1,
+        target_update_interval=1,
+        hidden_size=8,
+        hold_decisions=1,
+        native_lanes=1,
+        training_lives=3,
+        life_loss_penalty=-64.0,
+    )
+    environment = FakeEnvironment()
+    replay = ReplayBuffer(config.replay_capacity, WAYPOINT_OBSERVATION_SIZE)
+    accumulator = NStepAccumulator(1, config.n_step, config.gamma, replay)
+    model = DuelingWaypointDQN(hidden_size=config.hidden_size)
+    observations = np.zeros((1, WAYPOINT_OBSERVATION_SIZE), dtype=np.float32)
+    positions = np.full((1, 2), 66.0, dtype=np.float32)
+    episode_steps = np.asarray([17], dtype=np.int64)
+    episode_seeds = np.asarray([123], dtype=np.uint32)
+    lives_remaining = np.asarray([3], dtype=np.int64)
+
+    result = _collect_macro_transition(
+        environment,
+        observations,
+        positions,
+        WaypointController(WaypointGrid(config.grid_spacing)),
+        model,
+        config,
+        episode_steps,
+        episode_seeds,
+        lives_remaining,
+        (456, 789),
+        0,
+        accumulator,
+        np.random.default_rng(7),
+        torch.device("cpu"),
+        0,
+    )
+
+    assert result[2] == 0
+    assert lives_remaining.tolist() == [2]
+    assert episode_seeds.tolist() == [123]
+    assert environment.reset_calls[0][1].tolist() == [123]
+    assert replay.size == 1
+    assert replay.rewards[0] == pytest.approx(-60.0)
+    assert not bool(replay.terminated[0])
+    assert replay.next_observations[0, 0] == pytest.approx(9.0)
+    assert result[4]["life_loss_count"] == 1.0
+    assert result[4]["final_death_count"] == 0.0
+
+    lives_remaining[0] = 1
+    result = _collect_macro_transition(
+        environment,
+        result[0],
+        result[1],
+        WaypointController(WaypointGrid(config.grid_spacing)),
+        model,
+        config,
+        episode_steps,
+        episode_seeds,
+        lives_remaining,
+        (456, 789),
+        result[2],
+        accumulator,
+        np.random.default_rng(8),
+        torch.device("cpu"),
+        1,
+    )
+
+    assert result[2] == 1
+    assert lives_remaining.tolist() == [3]
+    assert episode_seeds.tolist() == [456]
+    assert environment.reset_calls[1][1].tolist() == [456]
+    assert replay.size == 2
+    assert replay.rewards[1] == pytest.approx(-60.0)
+    assert bool(replay.terminated[1])
+    assert replay.next_observations[1, 0] == pytest.approx(2.0)
+    assert result[4]["life_loss_count"] == 1.0
+    assert result[4]["final_death_count"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("weight_decay", -1.0, "weight decay"),
+        ("training_lives", 0, "training lives"),
+        ("life_loss_penalty", 1.0, "life-loss penalty"),
+        ("epsilon_decay_steps", -1, "epsilon decay"),
+        ("epsilon_final", 1.0, "final epsilon"),
+    ],
+)
+def test_dqn_config_rejects_invalid_regularization_or_epsilon(
+    field: str,
+    value: float | int,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        DQNConfig(**{field: value}).validate()
+
+
+def test_old_checkpoint_config_is_compatible_with_new_optional_fields() -> None:
+    config = DQNConfig(total_steps=20, reset_mode="legacy")
+    saved = config.to_json()
+    saved["total_steps"] = 10
+    saved.pop("weight_decay")
+    saved.pop("epsilon_decay_steps")
+    saved.pop("epsilon_final")
+    saved.pop("training_lives")
+    saved.pop("life_loss_penalty")
+    saved.pop("reset_mode")
+
+    assert _checkpoint_config_matches(saved, config)
 
 
 def test_checkpoint_round_trip_restores_contract_and_replay(

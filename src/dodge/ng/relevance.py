@@ -30,7 +30,7 @@ GAME_MODE = "game"
 
 Partition = Literal["training", "holdout"]
 Execution = Literal["serial", "parallel"]
-ObservationMode = Literal["board", "board_full", "pixels", "none"]
+ObservationMode = Literal["board", "board_full", "board_full_coords", "pixels", "none"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +199,7 @@ class _PolicyInfo:
     label: str
     observation_mode: ObservationMode
     pixel_stack: int = 1
+    board_shape: tuple[int, int, int] | None = None
 
 
 class _Policy:
@@ -297,17 +298,29 @@ def _load_policy(config: RelevanceConfig) -> _Policy:
             architecture=architecture,
         )
         info = _PolicyInfo(f"checkpoint:{config.checkpoint}", "pixels", stack_size)
-    elif mode in {"board", "board_full"}:
+    elif mode in {"board", "board_full", "board_full_coords"}:
         weight = state_dict.get("features.projection.0.weight")
         hidden_size = int(weight.shape[0]) if hasattr(weight, "shape") else 256
         spatial_pool = stored_config.get("board_spatial_pool", "average")
         if spatial_pool not in {"average", "max"}:
             raise ValueError("relevance board spatial pool is invalid")
+        stored_shape = payload.get("observation_shape")
+        if isinstance(stored_shape, (list, tuple)) and len(stored_shape) == 3:
+            board_shape = tuple(int(value) for value in stored_shape)
+        else:
+            board_shape = (23, 16, 16) if mode == "board_full_coords" else (19, 16, 16)
+        if board_shape not in {(19, 16, 16), (23, 16, 16)}:
+            raise ValueError("relevance board shape is invalid")
         model = DodgeActorCriticCNN(
             hidden_size=hidden_size,
             spatial_pool=spatial_pool,
+            board_shape=board_shape,
         )
-        info = _PolicyInfo(f"checkpoint:{config.checkpoint}", mode)
+        info = _PolicyInfo(
+            f"checkpoint:{config.checkpoint}",
+            mode,
+            board_shape=board_shape,
+        )
     else:
         raise ValueError("relevance checkpoint observation mode is invalid")
     try:
@@ -410,14 +423,21 @@ def _collect_batch(
 ) -> tuple[dict[int, _PathMetrics], list[_Sample]]:
     paths = {int(seed): _PathMetrics(int(seed)) for seed in seeds}
     samples: list[_Sample] = []
-    board_enabled = policy.info.observation_mode in {"board", "board_full"}
+    board_enabled = policy.info.observation_mode in {
+        "board",
+        "board_full",
+        "board_full_coords",
+    }
     with NativeBatchEnvironment(
         step_frames=config.step_frames,
         execution=config.native_execution,
         full_state=True,
         pixels=True,
         board=board_enabled,
-        include_offscreen_board=policy.info.observation_mode == "board_full",
+        include_offscreen_board=policy.info.observation_mode
+        in {"board_full", "board_full_coords"},
+        preserve_offscreen_coordinates=policy.info.observation_mode
+        == "board_full_coords",
         difficulty=config.difficulty,
         patterns_enabled=config.patterns_enabled,
         powerups_enabled=config.powerups_enabled,

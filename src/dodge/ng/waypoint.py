@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from bisect import bisect_left
 from dataclasses import dataclass, field
@@ -46,8 +47,7 @@ _ACTION_INDEX_BY_ACTION: Final[dict[Direction, int]] = {
     action: index for index, action in enumerate(ACTION_CHOICES)
 }
 _DELTA_TO_ACTION_INDEX: Final[dict[tuple[int, int], int]] = {
-    delta: _ACTION_INDEX_BY_ACTION[action]
-    for delta, action in _DELTA_TO_ACTION.items()
+    delta: _ACTION_INDEX_BY_ACTION[action] for delta, action in _DELTA_TO_ACTION.items()
 }
 
 
@@ -58,6 +58,7 @@ class WaypointGrid:
     spacing: int
     min_center: float = PLAYER_CENTER_MIN
     max_center: float = PLAYER_CENTER_MAX
+    ban_corner_nodes: bool = False
     _axis_points: tuple[float, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -73,6 +74,8 @@ class WaypointGrid:
             or self.max_center <= self.min_center
         ):
             raise ValueError("waypoint center bounds are invalid")
+        if not isinstance(self.ban_corner_nodes, bool):
+            raise ValueError("corner-node policy must be a boolean")
 
         points: list[float] = []
         point = self.min_center
@@ -120,20 +123,38 @@ class WaypointGrid:
             min(last, max(0, row + delta[1])),
         )
 
+    def is_corner(self, cell: tuple[int, int]) -> bool:
+        """Return whether a cell is one of the four grid corners."""
+        last = len(self.axis_points) - 1
+        return cell[0] in {0, last} and cell[1] in {0, last}
+
+    def _apply_corner_policy(
+        self,
+        current_cell: tuple[int, int],
+        target_cell: tuple[int, int],
+    ) -> tuple[int, int]:
+        if self.ban_corner_nodes and self.is_corner(target_cell):
+            return current_cell
+        return target_cell
+
     def target_for_action(
         self, x: float, y: float, waypoint_action_index: int
     ) -> tuple[tuple[int, int], tuple[int, int], tuple[float, float]]:
         current_cell = self.nearest_cell(x, y)
-        target_cell = self.neighbor_cell(current_cell, waypoint_action_index)
+        target_cell = self._apply_corner_policy(
+            current_cell,
+            self.neighbor_cell(current_cell, waypoint_action_index),
+        )
         return current_cell, target_cell, self.point(target_cell)
 
     def target_cell_for_action(
         self, x: float, y: float, waypoint_action_index: int
     ) -> tuple[int, int]:
         """Return only the neighboring cell needed by the DQN hot path."""
-        return self.neighbor_cell(
-            self.nearest_cell(x, y),
-            waypoint_action_index,
+        current_cell = self.nearest_cell(x, y)
+        return self._apply_corner_policy(
+            current_cell,
+            self.neighbor_cell(current_cell, waypoint_action_index),
         )
 
     def _nearest_axis(self, value: float) -> int:
@@ -171,12 +192,15 @@ class WaypointController:
 
     grid: WaypointGrid
     tolerance: float = 2.0
+    arrival_latching: bool = False
 
     def __post_init__(self) -> None:
         if self.tolerance < 0:
             raise ValueError("waypoint steering tolerance must not be negative")
         if self.tolerance >= self.grid.spacing / 2:
             raise ValueError("waypoint steering tolerance must be below half spacing")
+        if not isinstance(self.arrival_latching, bool):
+            raise ValueError("arrival latching must be a boolean")
 
     def decide(self, state: RawState, waypoint_action_index: int) -> WaypointDecision:
         current_cell, target_cell, target = self.grid.target_for_action(
@@ -197,9 +221,12 @@ class WaypointController:
         state: RawState,
         target_cell: tuple[int, int],
         waypoint_action_index: int = 0,
+        *,
+        arrived: bool = False,
     ) -> WaypointDecision:
         """Steer toward an already selected target until it is reached."""
         current_cell = self.grid.nearest_cell(state.player.x, state.player.y)
+        target_cell = self.grid._apply_corner_policy(current_cell, target_cell)
         target = self.grid.point(target_cell)
         return self._decision(
             state,
@@ -207,6 +234,7 @@ class WaypointController:
             current_cell,
             target_cell,
             target,
+            arrived=arrived,
         )
 
     def steer_position(
@@ -215,12 +243,14 @@ class WaypointController:
         y: float,
         target_cell: tuple[int, int],
         waypoint_action_index: int = 0,
+        *,
+        arrived: bool = False,
     ) -> WaypointDecision:
         """Steer from numeric player coordinates without decoding hazards."""
         current_cell = self.grid.nearest_cell(x, y)
+        target_cell = self.grid._apply_corner_policy(current_cell, target_cell)
         target = self.grid.point(target_cell)
-        horizontal = _sign(target[0] - x, self.tolerance)
-        vertical = _sign(target[1] - y, self.tolerance)
+        horizontal, vertical = self._steering_delta(x, y, target, arrived=arrived)
         native_action = _DELTA_TO_ACTION[(horizontal, vertical)]
         return WaypointDecision(
             waypoint_action_index=waypoint_action_index,
@@ -236,12 +266,36 @@ class WaypointController:
         x: float,
         y: float,
         target_cell: tuple[int, int],
+        *,
+        arrived: bool = False,
     ) -> int:
         """Return a native action without allocating a decision object."""
         target = self.grid.point(target_cell)
-        horizontal = _sign(target[0] - x, self.tolerance)
-        vertical = _sign(target[1] - y, self.tolerance)
+        horizontal, vertical = self._steering_delta(x, y, target, arrived=arrived)
         return _DELTA_TO_ACTION_INDEX[(horizontal, vertical)]
+
+    def target_reached(self, x: float, y: float, target_cell: tuple[int, int]) -> bool:
+        """Return whether a player center is inside the configured target window."""
+        target = self.grid.point(target_cell)
+        return (
+            abs(target[0] - x) <= self.tolerance
+            and abs(target[1] - y) <= self.tolerance
+        )
+
+    def _steering_delta(
+        self,
+        x: float,
+        y: float,
+        target: tuple[float, float],
+        *,
+        arrived: bool,
+    ) -> tuple[int, int]:
+        if self.arrival_latching and arrived:
+            return 0, 0
+        return (
+            _sign(target[0] - x, self.tolerance),
+            _sign(target[1] - y, self.tolerance),
+        )
 
     def _decision(
         self,
@@ -250,11 +304,17 @@ class WaypointController:
         current_cell: tuple[int, int],
         target_cell: tuple[int, int],
         target: tuple[float, float],
+        *,
+        arrived: bool = False,
     ) -> WaypointDecision:
         if not 0 <= waypoint_action_index < len(ACTION_CHOICES):
             raise ValueError("waypoint action index is outside the nine-action space")
-        horizontal = _sign(target[0] - state.player.x, self.tolerance)
-        vertical = _sign(target[1] - state.player.y, self.tolerance)
+        horizontal, vertical = self._steering_delta(
+            state.player.x,
+            state.player.y,
+            target,
+            arrived=arrived,
+        )
         native_action = _DELTA_TO_ACTION[(horizontal, vertical)]
         return WaypointDecision(
             waypoint_action_index=waypoint_action_index,
@@ -282,6 +342,9 @@ class WaypointFeasibilityConfig:
     max_episode_steps: int = 200
     lookahead_steps: int = 8
     hold_decisions: int = 8
+    steering_tolerance: float = 2.0
+    arrival_latching: bool = False
+    ban_corner_nodes: bool = False
     native_lanes: int = 32
     execution: Literal["serial", "parallel"] = "parallel"
 
@@ -294,6 +357,14 @@ class WaypointFeasibilityConfig:
             raise ValueError("counterfactual lookahead must be positive")
         if self.hold_decisions < 1:
             raise ValueError("waypoint hold decisions must be positive")
+        if not math.isfinite(self.steering_tolerance) or self.steering_tolerance < 0:
+            raise ValueError(
+                "waypoint steering tolerance must be finite and non-negative"
+            )
+        if not isinstance(self.arrival_latching, bool):
+            raise ValueError("waypoint arrival latching must be a boolean")
+        if not isinstance(self.ban_corner_nodes, bool):
+            raise ValueError("waypoint corner-node policy must be a boolean")
         if self.native_lanes < 1:
             raise ValueError("native lane count must be positive")
         if self.execution not in {"serial", "parallel"}:
@@ -312,8 +383,12 @@ def evaluate_waypoint_oracle(
     config.validate()
     if not seeds:
         raise ValueError("waypoint feasibility requires at least one seed")
-    grid = WaypointGrid(spacing)
-    controller = WaypointController(grid)
+    grid = WaypointGrid(spacing, ban_corner_nodes=config.ban_corner_nodes)
+    controller = WaypointController(
+        grid,
+        tolerance=config.steering_tolerance,
+        arrival_latching=config.arrival_latching,
+    )
     survival: dict[int, int] = {}
     terminated: dict[int, bool] = {}
     for start in range(0, len(seeds), config.native_lanes):
@@ -337,6 +412,10 @@ def evaluate_waypoint_oracle(
         "step_frames": config.step_frames,
         "lookahead_steps": config.lookahead_steps,
         "hold_decisions": config.hold_decisions,
+        "decision_interval": config.hold_decisions,
+        "steering_tolerance": config.steering_tolerance,
+        "arrival_latching": config.arrival_latching,
+        "ban_corner_nodes": config.ban_corner_nodes,
         "max_episode_steps": config.max_episode_steps,
         "execution": config.execution,
         "summary": summarize_evaluation(
@@ -365,6 +444,7 @@ def _evaluate_waypoint_batch(
     survival = np.zeros(len(seeds), dtype=np.int64)
     terminated = np.zeros(len(seeds), dtype=bool)
     hold_remaining = np.zeros(len(seeds), dtype=np.int64)
+    arrived = np.zeros(len(seeds), dtype=bool)
     target_cells: list[tuple[int, int] | None] = [None] * len(seeds)
     current_snapshots: list[bytes | None]
     try:
@@ -407,6 +487,7 @@ def _evaluate_waypoint_batch(
                     )
                     target_cells[lane] = target
                     hold_remaining[lane] = config.hold_decisions
+                    arrived[lane] = False
             for lane in active_indices:
                 lane_index = int(lane)
                 target_cell = target_cells[lane_index]
@@ -417,6 +498,7 @@ def _evaluate_waypoint_batch(
                 decision = controller.steer_to_cell(
                     states[lane_index],
                     target_cell,
+                    arrived=bool(arrived[lane_index]),
                 )
                 actions[lane_index] = decision.native_action_index
                 hold_remaining[lane_index] -= 1
@@ -431,6 +513,21 @@ def _evaluate_waypoint_batch(
                 if bool(result.done[lane_index]):
                     active[lane_index] = False
                     terminated[lane_index] = True
+                elif controller.arrival_latching and not arrived[lane_index]:
+                    selected_target = target_cells[lane_index]
+                    if selected_target is None:
+                        raise ControlRuntimeError(
+                            "waypoint feasibility lost its active target cell"
+                        )
+                    state = _raw_state_from_snapshot(
+                        _decode_snapshot(_snapshot_at(current_snapshots, lane_index))
+                    )
+                    if controller.target_reached(
+                        state.player.x,
+                        state.player.y,
+                        selected_target,
+                    ):
+                        arrived[lane_index] = True
             if completed:
                 reset = environment.reset_lanes(
                     np.asarray(completed, dtype=np.uint32),
@@ -440,6 +537,7 @@ def _evaluate_waypoint_batch(
                     current_snapshots[lane] = reset.snapshot_bytes[reset_index]
                     target_cells[lane] = None
                     hold_remaining[lane] = 0
+                    arrived[lane] = False
         unfinished = np.flatnonzero(active)
         survival[unfinished] = config.max_episode_steps * config.step_frames
     finally:
@@ -515,6 +613,10 @@ def build_waypoint_feasibility(
             "max_episode_steps": config.max_episode_steps,
             "lookahead_steps": config.lookahead_steps,
             "hold_decisions": config.hold_decisions,
+            "decision_interval": config.hold_decisions,
+            "steering_tolerance": config.steering_tolerance,
+            "arrival_latching": config.arrival_latching,
+            "ban_corner_nodes": config.ban_corner_nodes,
             "native_lanes": config.native_lanes,
             "execution": config.execution,
         },
@@ -611,7 +713,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step-frames", type=int, default=4)
     parser.add_argument("--max-episode-steps", type=int, default=200)
     parser.add_argument("--lookahead-steps", type=int, default=8)
-    parser.add_argument("--hold-decisions", type=int, default=8)
+    parser.add_argument(
+        "--hold-decisions",
+        "--decision-interval",
+        dest="hold_decisions",
+        type=int,
+        default=8,
+    )
+    parser.add_argument("--steering-tolerance", type=float, default=2.0)
+    parser.add_argument("--arrival-latching", action="store_true")
+    parser.add_argument("--ban-corner-nodes", action="store_true")
     parser.add_argument("--native-lanes", type=int, default=32)
     parser.add_argument(
         "--execution", choices=("serial", "parallel"), default="parallel"
@@ -622,6 +733,9 @@ def main(argv: list[str] | None = None) -> int:
         max_episode_steps=arguments.max_episode_steps,
         lookahead_steps=arguments.lookahead_steps,
         hold_decisions=arguments.hold_decisions,
+        steering_tolerance=arguments.steering_tolerance,
+        arrival_latching=arguments.arrival_latching,
+        ban_corner_nodes=arguments.ban_corner_nodes,
         native_lanes=arguments.native_lanes,
         execution=arguments.execution,
     )

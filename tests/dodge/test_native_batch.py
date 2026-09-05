@@ -253,6 +253,33 @@ def test_native_ml_lane_reset_preserves_unselected_progress() -> None:
         np.testing.assert_array_equal(mixed.seeds, [13, 99])
 
 
+def test_native_ai_startup_uses_up_waypoint_and_waits_for_visible_enemy() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+            ml_grid_spacing=32,
+        ) as ready,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+            ml_grid_spacing=32,
+        ) as started,
+    ):
+        ready_result = ready.reset_ml_batch([42])
+        started_result = started.reset_ml_batch_with_startup([42])
+
+    assert started_result.frames[0] > ready_result.frames[0]
+    assert started_result.player_positions[0, 1] < 58.0
+    assert started_result.ml_observation[0, 5] == 1.0
+
+
 def test_enabling_ml_preserves_existing_optional_observations() -> None:
     with (
         NativeBatchEnvironment(
@@ -392,6 +419,63 @@ def test_board_full_matches_python_reference_encoder_for_native_state() -> None:
     environment.close()
 
 
+def test_board_full_coords_preserves_canonical_positions_and_matches_reference() -> (
+    None
+):
+    environment = NativeBatchEnvironment(
+        step_frames=4,
+        full_state=True,
+        board=True,
+        include_offscreen_board=True,
+        preserve_offscreen_coordinates=True,
+    )
+    environment.reset_batch([30100])
+    for _ in range(15):
+        environment.step_batch([0])
+
+    snapshot = environment.observe_full_state()[0]
+    fixed_scale = 1 / 65_536
+    player_x, player_y, player_vx, player_vy, player_size = snapshot.player
+    reference = RawState(
+        frame=snapshot.frame,
+        player=PlayerState(
+            player_x * fixed_scale,
+            player_y * fixed_scale,
+            player_vx * fixed_scale,
+            player_vy * fixed_scale,
+            player_size * fixed_scale,
+        ),
+        enemies=tuple(
+            EntityState(
+                enemy.x * fixed_scale,
+                enemy.y * fixed_scale,
+                enemy.vx * fixed_scale,
+                enemy.vy * fixed_scale,
+                enemy.size * fixed_scale,
+                enemy.size * fixed_scale,
+                "enemy",
+                0,
+            )
+            for enemy in snapshot.enemies
+        ),
+        aoes=(),
+    )
+
+    assert environment.last_result.board is not None
+    assert environment.last_result.board.shape == (1, 23, 16, 16)
+    np.testing.assert_array_equal(
+        environment.last_result.board[0],
+        encode_board(
+            reference,
+            include_offscreen=True,
+            preserve_coordinates=True,
+        ),
+    )
+    assert np.any(environment.last_result.board[0, 19:21] != 0)
+    assert environment.preserve_offscreen_coordinates is True
+    environment.close()
+
+
 def test_single_lane_compatibility_adapter_preserves_restart_contract() -> None:
     environment = NativeDodgeEnv(step_frames=4)
     observation = environment.reset(seed=42)
@@ -418,6 +502,7 @@ def test_serial_and_parallel_python_batches_are_lane_identical() -> None:
         "pixels": True,
         "board": True,
         "include_offscreen_board": True,
+        "preserve_offscreen_coordinates": True,
     }
     serial = NativeBatchEnvironment(execution="serial", **kwargs)
     parallel = NativeBatchEnvironment(execution="parallel", **kwargs)

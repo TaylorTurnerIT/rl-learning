@@ -4,17 +4,25 @@ use std::fmt::{Display, Formatter};
 
 use dodge_core::{
     Action, AudioEvent, BUTTON_X_MASK, CoreError, FRAMEBUFFER_SIZE, FrameEvent, FullState,
-    MlFrameResult, Mode, NativeConfig, NativeGame, RenderState, Snapshot,
+    MlFrameResult, Mode, NativeConfig, NativeGame, PicoFixed, RenderState, Snapshot,
 };
 use rayon::prelude::*;
 
 mod board;
 mod ml;
 
-pub use board::{BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_VALUES, BOARD_WIDTH, Board19x16};
-pub use ml::{DEFAULT_GRID_SPACING, ML_OBSERVATION_SIZE, encode_waypoint_observation};
+pub use board::{
+    BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_VALUES, BOARD_WIDTH, Board19x16,
+    FULL_BOARD_CHANNELS, FULL_BOARD_VALUES,
+};
+pub use ml::{
+    DEFAULT_GRID_SPACING, ML_OBSERVATION_SIZE, encode_waypoint_observation,
+    encode_waypoint_observation_from_game,
+};
 
 const START_HOLD_FRAMES: usize = 13;
+const AI_STARTUP_MAX_MOVE_FRAMES: usize = 240;
+const AI_STARTUP_MAX_WAIT_FRAMES: usize = 240;
 
 pub const PIXEL_WIDTH: usize = dodge_core::FRAMEBUFFER_WIDTH;
 pub const PIXEL_HEIGHT: usize = dodge_core::FRAMEBUFFER_HEIGHT;
@@ -40,6 +48,7 @@ pub struct ObservationFlags {
     pub pixels: bool,
     pub board: bool,
     pub include_offscreen_board: bool,
+    pub preserve_offscreen_coordinates: bool,
     pub ml: bool,
     pub ml_grid_spacing: u32,
 }
@@ -49,10 +58,11 @@ impl ObservationFlags {
         Self {
             full_state: true,
             pixels: true,
-            ml: false,
-            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: true,
             include_offscreen_board: false,
+            preserve_offscreen_coordinates: false,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
         }
     }
 
@@ -60,10 +70,11 @@ impl ObservationFlags {
         Self {
             full_state: false,
             pixels: false,
-            ml: false,
-            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: true,
             include_offscreen_board: false,
+            preserve_offscreen_coordinates: false,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
         }
     }
 
@@ -71,10 +82,11 @@ impl ObservationFlags {
         Self {
             full_state: true,
             pixels: true,
-            ml: false,
-            ml_grid_spacing: DEFAULT_GRID_SPACING,
             board: false,
             include_offscreen_board: false,
+            preserve_offscreen_coordinates: false,
+            ml: false,
+            ml_grid_spacing: DEFAULT_GRID_SPACING,
         }
     }
 }
@@ -322,6 +334,24 @@ impl BatchEnvironment {
         Ok(observations)
     }
 
+    /// Reset lanes for AI episodes after the scripted startup boundary.
+    ///
+    /// The ordinary reset remains at the exact game-ready frame. This variant
+    /// moves the player out of the cartridge's center `fyou` trigger and then
+    /// advances neutral frames until the first enemy is on-screen, keeping
+    /// those non-learning frames inside the native loop.
+    pub fn reset_with_startup(
+        &mut self,
+        seeds: &[u32],
+    ) -> Result<Vec<BatchObservation>, BatchError> {
+        self.reset(seeds)?;
+        let grid_spacing = self.config.observations.ml_grid_spacing;
+        for game in &mut self.games {
+            prepare_render_startup(game, grid_spacing)?;
+        }
+        self.refresh_render_reset_observations()
+    }
+
     /// Reset all lanes through the render-free ML boundary.
     pub fn reset_ml(&mut self, seeds: &[u32]) -> Result<Vec<MlBatchObservation>, BatchError> {
         let grid_spacing = self.ml_grid_spacing()?;
@@ -367,6 +397,19 @@ impl BatchEnvironment {
             observations.push(ml_observation_at_reset(lane, seed, game, grid_spacing)?);
         }
         Ok(observations)
+    }
+
+    /// Render-free AI reset with native startup movement and hazard wait.
+    pub fn reset_ml_with_startup(
+        &mut self,
+        seeds: &[u32],
+    ) -> Result<Vec<MlBatchObservation>, BatchError> {
+        self.reset_ml(seeds)?;
+        let grid_spacing = self.config.observations.ml_grid_spacing;
+        for game in &mut self.games {
+            prepare_ml_startup(game, grid_spacing)?;
+        }
+        self.refresh_ml_reset_observations()
     }
 
     /// Reset only the requested lanes, preserving every other lane's state.
@@ -441,6 +484,25 @@ impl BatchEnvironment {
         Ok(observations)
     }
 
+    /// Reset selected lanes through the AI startup path.
+    pub fn reset_lanes_with_startup(
+        &mut self,
+        lanes: &[usize],
+        seeds: &[u32],
+    ) -> Result<Vec<BatchObservation>, BatchError> {
+        self.reset_lanes(lanes, seeds)?;
+        let lane_count = self.games.len();
+        let grid_spacing = self.config.observations.ml_grid_spacing;
+        for lane in lanes.iter().copied() {
+            let game = self
+                .games
+                .get_mut(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            prepare_render_startup(game, grid_spacing)?;
+        }
+        self.refresh_render_reset_lane_observations(lanes)
+    }
+
     /// Reset only selected lanes through the render-free ML boundary.
     pub fn reset_ml_lanes(
         &mut self,
@@ -489,6 +551,25 @@ impl BatchEnvironment {
             )?);
         }
         Ok(observations)
+    }
+
+    /// Reset selected lanes through the render-free AI startup path.
+    pub fn reset_ml_lanes_with_startup(
+        &mut self,
+        lanes: &[usize],
+        seeds: &[u32],
+    ) -> Result<Vec<MlBatchObservation>, BatchError> {
+        self.reset_ml_lanes(lanes, seeds)?;
+        let lane_count = self.games.len();
+        let grid_spacing = self.config.observations.ml_grid_spacing;
+        for lane in lanes.iter().copied() {
+            let game = self
+                .games
+                .get_mut(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            prepare_ml_startup(game, grid_spacing)?;
+        }
+        self.refresh_ml_reset_lane_observations(lanes)
     }
 
     pub fn step(&mut self, actions: &[Action]) -> Result<Vec<BatchObservation>, BatchError> {
@@ -817,6 +898,116 @@ impl BatchEnvironment {
         }
         Ok(observation)
     }
+
+    fn refresh_render_reset_observations(&mut self) -> Result<Vec<BatchObservation>, BatchError> {
+        let flags = self.config.observations;
+        let lane_count = self.games.len();
+        let mut observations = Vec::with_capacity(lane_count);
+        for lane in 0..lane_count {
+            let snapshot = self
+                .games
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?
+                .snapshot();
+            let state = snapshot.logical_state();
+            let done = state.lifecycle.dead;
+            if let Some(done_slot) = self.done.get_mut(lane) {
+                *done_slot = done;
+            }
+            if let Some(last_frame) = self.last_frames.get_mut(lane) {
+                *last_frame = state.lifecycle.frame;
+            }
+            if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+                *last_survival = state.survival_frames;
+            }
+            observations.push(observation_from_snapshot(
+                lane,
+                0,
+                done,
+                Vec::new(),
+                Vec::new(),
+                &snapshot,
+                flags,
+            ));
+        }
+        Ok(observations)
+    }
+
+    fn refresh_render_reset_lane_observations(
+        &mut self,
+        lanes: &[usize],
+    ) -> Result<Vec<BatchObservation>, BatchError> {
+        let flags = self.config.observations;
+        let lane_count = self.games.len();
+        let mut observations = Vec::with_capacity(lanes.len());
+        for lane in lanes.iter().copied() {
+            let snapshot = self
+                .games
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?
+                .snapshot();
+            let state = snapshot.logical_state();
+            let done = state.lifecycle.dead;
+            if let Some(done_slot) = self.done.get_mut(lane) {
+                *done_slot = done;
+            }
+            if let Some(last_frame) = self.last_frames.get_mut(lane) {
+                *last_frame = state.lifecycle.frame;
+            }
+            if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+                *last_survival = state.survival_frames;
+            }
+            observations.push(observation_from_snapshot(
+                lane,
+                0,
+                done,
+                Vec::new(),
+                Vec::new(),
+                &snapshot,
+                flags,
+            ));
+        }
+        Ok(observations)
+    }
+
+    fn refresh_ml_reset_observations(&mut self) -> Result<Vec<MlBatchObservation>, BatchError> {
+        let grid_spacing = self.ml_grid_spacing()?;
+        let lane_count = self.games.len();
+        let mut observations = Vec::with_capacity(lane_count);
+        for lane in 0..lane_count {
+            let seed = *self
+                .seeds
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            let game = self
+                .games
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            observations.push(ml_observation_at_reset(lane, seed, game, grid_spacing)?);
+        }
+        Ok(observations)
+    }
+
+    fn refresh_ml_reset_lane_observations(
+        &mut self,
+        lanes: &[usize],
+    ) -> Result<Vec<MlBatchObservation>, BatchError> {
+        let grid_spacing = self.ml_grid_spacing()?;
+        let lane_count = self.games.len();
+        let mut observations = Vec::with_capacity(lanes.len());
+        for lane in lanes.iter().copied() {
+            let seed = *self
+                .seeds
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            let game = self
+                .games
+                .get(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            observations.push(ml_observation_at_reset(lane, seed, game, grid_spacing)?);
+        }
+        Ok(observations)
+    }
 }
 
 struct IndexedStep {
@@ -861,6 +1052,102 @@ fn validate_reset_lanes(
         }
     }
     Ok(())
+}
+
+fn prepare_render_startup(game: &mut NativeGame, grid_spacing: u32) -> Result<(), BatchError> {
+    let target = startup_up_target(game, grid_spacing);
+    for _ in 0..AI_STARTUP_MAX_MOVE_FRAMES {
+        if waypoint_reached(game, target) {
+            break;
+        }
+        let result = game.advance_frame(Action::Up.mask())?;
+        if result.done {
+            return Ok(());
+        }
+    }
+    for _ in 0..AI_STARTUP_MAX_WAIT_FRAMES {
+        if has_visible_enemy(game) {
+            break;
+        }
+        let result = game.advance_frame(Action::Neutral.mask())?;
+        if result.done {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn prepare_ml_startup(game: &mut NativeGame, grid_spacing: u32) -> Result<(), BatchError> {
+    let target = startup_up_target(game, grid_spacing);
+    for _ in 0..AI_STARTUP_MAX_MOVE_FRAMES {
+        if waypoint_reached(game, target) {
+            break;
+        }
+        let result = game.advance_frame_ml(Action::Up.mask(), Action::Up.mask())?;
+        if result.done {
+            return Ok(());
+        }
+    }
+    for _ in 0..AI_STARTUP_MAX_WAIT_FRAMES {
+        if has_visible_enemy(game) {
+            break;
+        }
+        let result = game.advance_frame_ml(Action::Neutral.mask(), Action::Neutral.mask())?;
+        if result.done {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn startup_up_target(game: &NativeGame, spacing: u32) -> (PicoFixed, PicoFixed) {
+    let points = waypoint_axis_points(spacing);
+    let player = game.player();
+    let column = nearest_waypoint_index(&points, player.x);
+    let row = nearest_waypoint_index(&points, player.y);
+    (points[column], points[row.saturating_sub(1)])
+}
+
+fn waypoint_axis_points(spacing: u32) -> Vec<PicoFixed> {
+    let mut points = Vec::new();
+    let mut point = 2_u32;
+    while point < 125 {
+        points.push(PicoFixed::from_int(point as i32));
+        let next = point.saturating_add(spacing);
+        if next == point {
+            break;
+        }
+        point = next;
+    }
+    if points.last().copied() != Some(PicoFixed::from_int(125)) {
+        points.push(PicoFixed::from_int(125));
+    }
+    points
+}
+
+fn nearest_waypoint_index(points: &[PicoFixed], value: PicoFixed) -> usize {
+    let mut nearest = 0;
+    let mut distance = i64::MAX;
+    for (index, point) in points.iter().copied().enumerate() {
+        let difference = i64::from(value.raw()) - i64::from(point.raw());
+        let candidate_distance = difference.abs();
+        if candidate_distance < distance {
+            nearest = index;
+            distance = candidate_distance;
+        }
+    }
+    nearest
+}
+
+fn waypoint_reached(game: &NativeGame, target: (PicoFixed, PicoFixed)) -> bool {
+    let player = game.player();
+    let tolerance = PicoFixed::from_int(2);
+    player.x.sub(target.0).raw().abs() <= tolerance.raw()
+        && player.y.sub(target.1).raw().abs() <= tolerance.raw()
+}
+
+fn has_visible_enemy(game: &NativeGame) -> bool {
+    game.enemies().iter().any(|enemy| enemy.inside)
 }
 
 fn ml_observation_at_reset(
@@ -965,6 +1252,17 @@ fn observation_from_snapshot(
         full_state: flags.full_state.then(|| logical_state.clone()),
         render_state: flags.full_state.then(|| snapshot.render_state().clone()),
         pixels: flags.pixels.then(|| *snapshot.pixels()),
+        board: flags.board.then(|| {
+            if flags.preserve_offscreen_coordinates {
+                Board19x16::from_full_state_with_coordinates(logical_state)
+            } else {
+                Board19x16::from_full_state_with_offscreen(
+                    logical_state,
+                    flags.include_offscreen_board,
+                )
+            }
+        }),
+        canonical_snapshot: flags.full_state.then(|| snapshot.canonical_bytes()),
         ml_observation: flags
             .ml
             .then(|| encode_waypoint_observation(logical_state, flags.ml_grid_spacing))
@@ -975,10 +1273,6 @@ fn observation_from_snapshot(
                 logical_state.player.y.to_f32(),
             ]
         }),
-        board: flags.board.then(|| {
-            Board19x16::from_full_state_with_offscreen(logical_state, flags.include_offscreen_board)
-        }),
-        canonical_snapshot: flags.full_state.then(|| snapshot.canonical_bytes()),
     }
 }
 
@@ -1004,6 +1298,7 @@ mod tests {
             pixels: false,
             board: false,
             include_offscreen_board: false,
+            preserve_offscreen_coordinates: false,
             ml: true,
             ml_grid_spacing: 32,
         };

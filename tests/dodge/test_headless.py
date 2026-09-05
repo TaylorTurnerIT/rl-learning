@@ -165,6 +165,38 @@ def test_instrumented_neat_replay_waits_for_the_game_before_actions() -> None:
     assert "__dodge_mouse_y=64" in legacy_result
 
 
+def test_instrumented_original_replay_can_match_native_startup_and_sample_frames() -> (
+    None
+):
+    source = (
+        "pico-8 cartridge\nversion 42\n__lua__\n"
+        "function _init()\nend\nfunction _update60()\nend\n"
+        "function _draw()\nend\n__gfx__\n"
+    )
+
+    result = instrument_cartridge(
+        source,
+        COMMANDS,
+        seed=42,
+        render=True,
+        wait_for_game_start=True,
+        capture_pixels=True,
+        native_startup_grid_spacing=24,
+        capture_frame_indices=[8, 4, 8],
+    )
+
+    assert "__dodge_startup_points={2,26,50,74,98,122,125}" in result
+    assert "__dodge_capture_frames={[4]=true,[8]=true}" in result
+    assert "__dodge_capture_frames[__dodge_frames] or __dodge_done" in result
+    with pytest.raises(ControlInputError, match="requires wait_for_game_start"):
+        instrument_cartridge(
+            source,
+            COMMANDS,
+            seed=42,
+            native_startup_grid_spacing=24,
+        )
+
+
 def test_run_headless_uses_dummy_drivers_isolated_cwd_and_parses_score(
     tmp_path: Path,
 ) -> None:
