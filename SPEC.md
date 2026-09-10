@@ -13,6 +13,7 @@ G9|Test whether waypoint-discretized movement plus DQN improves action credit, s
 G10|Retain predictive hazard-field/gradient control as matched later method; separate hazard prediction from movement control and compare under same NG protocol.
 G11|Move waypoint ML observation extraction into the native batch runtime; preserve Python reference parity and expose uncapped survival beyond the 800-frame gate.
 G12|Make every saved NG replay an original-cartridge pixel-regression sample; expose movement/corner safety controls for measured waypoint ablations.
+G13|Measure isolated pixel-only DQN learning at exactly 200,000 updates with matched one-life and three-life runs.
 
 §C
 C1|NG sample space is new and finite: default 100 native-valid seeds, disjoint from every legacy seed used by the prior experiments.
@@ -43,6 +44,7 @@ C25|The overnight campaign inherits the selected HPO parameters, changes only de
 C26|Stopping may happen through the dashboard mailbox, SIGINT, or SIGTERM; the trainer must finish the current safe boundary and write a resumable latest checkpoint.
 C27|Replay regression runs original `src/dodge/game/dodge.p8` through Pemsa/Xvfb under same seed, startup boundary, action trace, and frame cadence; unavailable or mismatched oracle cannot pass.
 C28|Movement interventions remain opt-in, native-physics/action-space preserving, checkpoint-provenanced, and comparable against legacy defaults.
+C29|Pixel ablation keeps NG manifest, learner seed, HPO values, action/controller contract, cadence, budget, and death penalty fixed; only `training_lives` differs; waypoint artifacts untouched.
 
 §I
 I1|`src/dodge/ng/manifest.py` owns the immutable NG seed manifest, validation, hashing, and CLI generation.
@@ -76,6 +78,7 @@ I28|NG dashboard command is `dodge-ng-dashboard`.
 I29|`src/dodge/ng/overnight.py` owns the reproducible long-run DQN preset, HPO parameter inheritance, CLI overrides, and training-only evaluation defaults.
 I30|`src/dodge/ng/pixel_regression.py` owns replay action traces, original-cartridge execution, exact indexed-pixel comparison, and regression metadata.
 I31|`src/dodge/ng/waypoint.py` and `DQNConfig` expose grid spacing, decision interval, arrival tolerance/latching, corner policy, and optional corner safety penalty.
+I32|`src/dodge/ng/pixel_dqn.py` owns pixel-only DQN model, uint8 frame-stack replay, life ablation runner, checkpoints, reports, and matched-run comparison.
 
 §R
 R1|Native batch API exposes board, pixels, hashes, snapshots, rewards, done flags, and deterministic reset/step results|`src/dodge/native/batch.py`
@@ -159,6 +162,10 @@ V72|Replay regression uses isolated original execution and cannot mutate live tr
 V73|Arrival-latched waypoint control emits neutral after target enters configured tolerance until next decision boundary; unlatching preserves prior steering behavior; all actions stay in native nine-action contract.
 V74|Corner-ban policy maps any would-be corner target to current cell without teleport/physics bypass; grid spacing and decision interval remain explicit in config/checkpoint/replay provenance.
 V75|Optional corner safety penalty is finite and non-positive, applies only to selected corner targets, and remains zero by default; training/evaluation/replay use same control settings.
+V76|Pixel DQN forward input contains only validated native indexed pixels with exact `(N,stack,128,128)` shape; player coordinates remain action-controller plumbing and never model features.
+V77|Matched pixel life runs share manifest hash, learner seed, pixel architecture, HPO, action/controller contract, cadence, and 200,000-update budget; `training_lives` remains sole declared difference.
+V78|Pixel replay stores palette frames as `uint8`, n-step references never cross terminal/truncated/reset boundaries, checkpoints preserve frame-store/progress contracts, and final evaluation uses one life on both splits.
+V79|Pixel run provenance identifies observation mode/source, stack/raster, model/action contract, life settings, exact update count, native steps, and train/holdout results; comparison rejects mismatched runs.
 
 §T
 id|status|task|cites
@@ -206,6 +213,7 @@ T41|x|Add reproducible overnight DQN preset using selected HPO parameters, large
 T42|x|Add training-split best/mean/bad replay set and labeled dashboard comparison controls for one checkpoint, with deterministic selection, metadata, and tests.|V59,V60,V61,V67,V68,V69,I26,I27
 T43|~|Record native action/frame traces and run mandatory original-cartridge indexed-pixel regression after every saved replay; expose failure provenance and tests.|V52,V59,V60,V70,V71,V72,C27,I26,I27,I30
 T44|~|Add opt-in arrival latching, configurable steering tolerance, corner-node ban, corner safety penalty, and explicit checkpoint/replay provenance across DQN train/eval/replay.|V37,V38,V51,V73,V74,V75,C28,I20,I21,I31
+T45|.|Implement isolated pixel-only DQN with native indexed frame stacks, compact uint8 replay/checkpoints, life semantics, split evaluation, reports, and matched 200k one-life/three-life comparison.|V25,V26,V27,V62,V63,V64,V76,V77,V78,V79,G13,C29,I32
 
 §B
 id|date|cause|fix
@@ -272,3 +280,4 @@ B60|2026-09-05|Pixel regression overwrote an earlier frame mismatch with a later
 B61|2026-09-05|Native explosion update tested the post-growth size when deciding whether to switch from expansion to shrink, while the cartridge tests the pre-growth local size.|Use the pre-growth size for the phase transition and add a focused expanding-kamikaze regression; preserve V70's long-trace pixel gate.
 B62|2026-09-05|A personality-1 enemy marked for death spawned its kamikaze from the post-growth `current` state, while the cartridge's `kamikaze(_e)` uses the pre-growth source position and size.|Pass pre-growth position/size into kamikaze creation and add a focused dying-personality-1 regression; preserve V70's long-trace pixel gate.
 B63|2026-09-05|Native applied pattern bounce logic to personality -1 kamikazes, but the cartridge guards pattern collision with `p!=-1`; the explosion acquired velocity on the frame it entered a pattern rectangle.|Skip pattern collision for kamikazes and add a focused explosion/pattern regression; preserve V70's long-trace pixel gate.
+B64|2026-09-05|Pixel smoke harness passed a NumPy array directly to a PyTorch module instead of using the declared tensor boundary.|Use `torch.from_numpy` in model-bound tests and keep V76's tensor/input contract explicit; no production fix required.

@@ -55,6 +55,8 @@ dodge-ng-dqn = "dodge.ng.dqn:main"
 dodge-ng-hpo = "dodge.ng.hpo:main"
 dodge-ng-confirm = "dodge.ng.confirm:main"
 dodge-ng-overnight = "dodge.ng.overnight:main"
+dodge-ng-pixel-dqn = "dodge.ng.pixel_dqn:main"
+dodge-ng-pixel-compare = "dodge.ng.pixel_dqn:compare_main"
 dodge-ng-replay = "dodge.ng.replay:main"
 dodge-ng-dashboard = "dodge.ng.dashboard:main"
 

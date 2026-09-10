@@ -190,6 +190,15 @@ dodge-ng-overnight *options:
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-overnight {{ options }}
 
 [group("dodge")]
+dodge-ng-pixel-dqn *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-pixel-dqn {{ options }}
+
+[group("dodge")]
+dodge-ng-pixel-compare *options:
+    @dodge-ng-pixel-compare {{ options }}
+
+[group("dodge")]
 dodge-ng-dashboard *options:
     @devenv -q shell -- dodge-ng-dashboard {{ options }}
 
