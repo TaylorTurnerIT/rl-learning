@@ -123,6 +123,23 @@ def test_arrival_latching_holds_neutral_until_the_next_waypoint_decision() -> No
     assert latched.target_reached is True
 
 
+def test_arrival_latching_detects_a_waypoint_crossed_between_samples() -> None:
+    controller = WaypointController(
+        WaypointGrid.centered(16),
+        tolerance=2.0,
+        arrival_latching=True,
+    )
+
+    assert controller.target_reached_between(66.0, 31.0, 66.0, 40.0, (8, 4))
+    assert controller.native_action_index_for_position(
+        66.0,
+        40.0,
+        (8, 4),
+        arrived=True,
+    ) == ACTION_CHOICES.index("neutral")
+    assert not controller.target_reached_between(66.0, 20.0, 66.0, 25.0, (8, 4))
+
+
 @pytest.mark.parametrize("tolerance", [0.0, 2.0, 7.5])
 def test_waypoint_hot_path_matches_full_decision_for_all_targets_and_actions(
     tolerance: float,

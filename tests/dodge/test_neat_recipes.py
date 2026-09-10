@@ -16,3 +16,12 @@ def test_v14_neat_recipes_use_the_project_uv_environment() -> None:
     assert 'TMPDIR="$PWD/history/dodge/ppo/.launch-tmp"' in justfile
     assert "devenv -q shell -- dodge-ppo-train {{ options }}" in justfile
     assert "dodge-ppo-train.exec" in devenv
+
+
+def test_pixel_dqn_recipe_resolves_its_devenv_command() -> None:
+    devenv = (PROJECT_ROOT / "devenv.nix").read_text(encoding="utf-8")
+    justfile = (PROJECT_ROOT / "justfile").read_text(encoding="utf-8")
+
+    assert "dodge-ng-pixel-dqn.exec" in devenv
+    assert "exec uv run --extra native dodge-ng-pixel-dqn" in devenv
+    assert "dodge-ng-pixel-dqn *options:" in justfile

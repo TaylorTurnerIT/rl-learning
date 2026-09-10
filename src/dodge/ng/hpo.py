@@ -18,9 +18,11 @@ from dodge.control import PROJECT_ROOT, ControlRuntimeError
 from dodge.ng.dqn import (
     DQNConfig,
     DuelingWaypointDQN,
+    ObservationMode,
     evaluate_waypoint_dqn,
     train_waypoint_dqn,
 )
+from dodge.ng.hazard import HazardObservationSpec
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, load_manifest
 
 DEFAULT_RUN_DIRECTORY = PROJECT_ROOT / "history" / "dodge" / "ng" / "waypoint-hpo"
@@ -29,6 +31,10 @@ DEFAULT_STUDY_SEED: Final[int] = 2_026_0904
 DEFAULT_LEARNER_SEED: Final[int] = 2_026_0903
 DEFAULT_BUDGETS: tuple[int, ...] = (20_000, 60_000, 120_000)
 INNER_VALIDATION_COUNT: Final[int] = 10
+# HPO already evaluates and checkpoints at the end of every promoted rung.
+# Keeping these intervals at the largest rung boundary avoids replay-bearing
+# checkpoint rewrites and validation rollouts during the rung itself.
+HPO_RUNG_INTERVAL: Final[int] = 60_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +48,10 @@ class HPOConfig:
     learner_seed: int = DEFAULT_LEARNER_SEED
     native_lanes: int = 32
     device: str = "cpu"
+    observation_mode: ObservationMode = "legacy"
+    hazard_grid_size: int = 16
+    prediction_horizon_frames: int = 32
+    spawn_halo_radius: int = 1
 
     def validate(self) -> None:
         if self.trials < 1:
@@ -54,6 +64,14 @@ class HPOConfig:
             raise ValueError("HPO lane count must be positive")
         if self.device not in {"cpu", "cuda", "auto"}:
             raise ValueError("HPO device must be cpu, cuda, or auto")
+        if self.observation_mode not in {"legacy", "hazard"}:
+            raise ValueError("HPO observation mode must be legacy or hazard")
+        if self.observation_mode == "hazard":
+            HazardObservationSpec(
+                grid_size=self.hazard_grid_size,
+                prediction_horizon_frames=self.prediction_horizon_frames,
+                spawn_halo_radius=self.spawn_halo_radius,
+            )
 
 
 def _baseline_parameters() -> dict[str, object]:
@@ -94,6 +112,10 @@ def _trial_config(
     learner_seed: int,
     native_lanes: int,
     device: str,
+    observation_mode: ObservationMode = "legacy",
+    hazard_grid_size: int = 16,
+    prediction_horizon_frames: int = 32,
+    spawn_halo_radius: int = 1,
 ) -> DQNConfig:
     return DQNConfig(
         total_steps=budget,
@@ -107,21 +129,29 @@ def _trial_config(
         train_frequency=1,
         target_update_interval=int(parameters["target_update_interval"]),
         hidden_size=256,
+        observation_mode=observation_mode,
+        hazard_observation_cadence=(
+            "decision_boundary" if observation_mode == "hazard" else "every_step"
+        ),
         grid_spacing=32,
+        hazard_grid_size=hazard_grid_size,
+        prediction_horizon_frames=prediction_horizon_frames,
+        spawn_halo_radius=spawn_halo_radius,
         hold_decisions=8,
         step_frames=4,
         max_episode_steps=2_000,
         native_lanes=native_lanes,
-        native_execution="parallel",
+        native_execution="parallel" if observation_mode == "hazard" else "serial",
         reset_mode="native-startup",
         training_lives=1,
         life_loss_penalty=0.0,
         epsilon_decay_steps=int(parameters["epsilon_decay_steps"]),
         epsilon_final=float(parameters["epsilon_final"]),
-        checkpoint_every=10_000,
-        eval_every=5_000,
+        checkpoint_every=HPO_RUNG_INTERVAL,
+        eval_every=HPO_RUNG_INTERVAL,
         seed=learner_seed,
         device=device,
+        torch_threads=8,
     )
 
 
@@ -159,7 +189,15 @@ def _load_best_model(path: Path, hidden_size: int) -> DuelingWaypointDQN:
     state = payload.get("best_model_state") or payload.get("model_state_dict")
     if not isinstance(state, dict):
         raise ControlRuntimeError("HPO checkpoint has no model state")
-    model = DuelingWaypointDQN(hidden_size=hidden_size)
+    contract = payload.get("contract")
+    observation_size = (
+        contract.get("observation_size") if isinstance(contract, dict) else None
+    )
+    model = (
+        DuelingWaypointDQN(input_size=observation_size, hidden_size=hidden_size)
+        if isinstance(observation_size, int) and not isinstance(observation_size, bool)
+        else DuelingWaypointDQN(hidden_size=hidden_size)
+    )
     try:
         model.load_state_dict(state)
     except (TypeError, RuntimeError) as error:
@@ -276,6 +314,10 @@ def run_hpo(config: HPOConfig) -> dict[str, object]:
                 config.learner_seed,
                 config.native_lanes,
                 config.device,
+                config.observation_mode,
+                config.hazard_grid_size,
+                config.prediction_horizon_frames,
+                config.spawn_halo_radius,
             )
             run = train_waypoint_dqn(
                 trial_config,
@@ -327,6 +369,10 @@ def run_hpo(config: HPOConfig) -> dict[str, object]:
         config.learner_seed,
         config.native_lanes,
         config.device,
+        config.observation_mode,
+        config.hazard_grid_size,
+        config.prediction_horizon_frames,
+        config.spawn_halo_radius,
     )
     training_evaluation = evaluate_waypoint_dqn(
         model,
@@ -401,6 +447,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--learner-seed", type=int, default=DEFAULT_LEARNER_SEED)
     parser.add_argument("--native-lanes", type=int, default=32)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cpu")
+    parser.add_argument(
+        "--observation-mode",
+        choices=("legacy", "hazard"),
+        default="legacy",
+        help="legacy projected features or frozen-center hazard fields",
+    )
+    parser.add_argument("--hazard-grid-size", type=int, default=16)
+    parser.add_argument("--prediction-horizon-frames", type=int, default=32)
+    parser.add_argument("--spawn-halo-radius", type=int, default=1)
     arguments = parser.parse_args(argv)
     config = HPOConfig(
         manifest_path=arguments.manifest,
@@ -412,6 +467,10 @@ def main(argv: list[str] | None = None) -> int:
         learner_seed=arguments.learner_seed,
         native_lanes=arguments.native_lanes,
         device=arguments.device,
+        observation_mode=arguments.observation_mode,
+        hazard_grid_size=arguments.hazard_grid_size,
+        prediction_horizon_frames=arguments.prediction_horizon_frames,
+        spawn_halo_radius=arguments.spawn_halo_radius,
     )
     try:
         started = time.monotonic()

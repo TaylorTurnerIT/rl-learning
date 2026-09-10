@@ -3,12 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from dodge.dataset import ACTION_CHOICES
 from dodge.imitation.board import encode_board
 from dodge.native.batch import (
     ML_OBSERVATION_SIZE,
     NativeBatchEnvironment,
     NativeDodgeEnv,
     NativeMlBatchResult,
+    NativePixelBatchResult,
     _raw_state_from_snapshot,
 )
 from dodge.neat.state import EntityState, PlayerState, RawState
@@ -233,6 +235,174 @@ def test_native_ml_fast_boundary_matches_full_batch_features_and_metadata() -> N
                 break
 
 
+def test_native_ml_compact_step_preserves_full_observation_at_boundary() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as reference,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as compact,
+    ):
+        reference.reset_ml_batch([42, 13, 30100])
+        compact_result = compact.reset_ml_batch([42, 13, 30100])
+        fallback = compact_result.ml_observation.copy()
+        for step in range(90):
+            actions = [step % 9, (step + 2) % 9, (step + 5) % 9]
+            reference_result = reference.step_ml_batch(actions)
+            compact_result = compact.step_ml_positions_batch(actions, fallback)
+            np.testing.assert_array_equal(
+                compact_result.frames, reference_result.frames
+            )
+            np.testing.assert_array_equal(
+                compact_result.frames_advanced, reference_result.frames_advanced
+            )
+            np.testing.assert_array_equal(
+                compact_result.rewards, reference_result.rewards
+            )
+            np.testing.assert_array_equal(compact_result.done, reference_result.done)
+            np.testing.assert_array_equal(
+                compact_result.player_positions, reference_result.player_positions
+            )
+            materialized = compact.observe_ml_batch()
+            np.testing.assert_array_equal(
+                materialized.ml_observation, reference_result.ml_observation
+            )
+            fallback = materialized.ml_observation
+            if bool(np.any(reference_result.done)):
+                break
+
+
+def test_native_hazard_observation_is_deterministic_and_live_state_preserving() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as environment,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=False,
+            board=False,
+            ml=True,
+        ) as control,
+    ):
+        environment.reset_ml_batch([42, 13])
+        control.reset_ml_batch([42, 13])
+        for actions in ([0, 1], [2, 3], [8, 0], [4, 5]):
+            environment.step_ml_batch(actions)
+            control.step_ml_batch(actions)
+
+        first = environment.hazard_observations(
+            4,
+            prediction_horizon_frames=32,
+            spawn_halo_radius=1,
+        )
+        second = environment.hazard_observations(
+            4,
+            prediction_horizon_frames=32,
+            spawn_halo_radius=1,
+        )
+        np.testing.assert_array_equal(first.lane_ids, second.lane_ids)
+        np.testing.assert_array_equal(first.frames, second.frames)
+        np.testing.assert_array_equal(first.done, second.done)
+        np.testing.assert_array_equal(
+            first.hazard_observation,
+            second.hazard_observation,
+        )
+        np.testing.assert_array_equal(first.ttc_reference, second.ttc_reference)
+        assert first.hazard_observation.shape == (2, 14 * 4 * 4 + 4)
+        assert np.isfinite(first.hazard_observation).all()
+        assert not np.isnan(first.ttc_reference).any()
+
+        expected = control.step_ml_batch([1, 2])
+        actual = environment.step_ml_batch([1, 2])
+        np.testing.assert_array_equal(actual.frames, expected.frames)
+        np.testing.assert_array_equal(
+            actual.frames_advanced,
+            expected.frames_advanced,
+        )
+        np.testing.assert_array_equal(actual.rewards, expected.rewards)
+        np.testing.assert_array_equal(actual.done, expected.done)
+        np.testing.assert_array_equal(actual.seeds, expected.seeds)
+        np.testing.assert_array_equal(actual.modes, expected.modes)
+        np.testing.assert_array_equal(
+            actual.ml_observation,
+            expected.ml_observation,
+        )
+        np.testing.assert_array_equal(
+            actual.player_positions,
+            expected.player_positions,
+        )
+
+
+def test_native_pixel_fast_boundary_matches_full_batch_pixels_and_metadata() -> None:
+    with (
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=True,
+            pixels=True,
+            board=False,
+            ml=True,
+        ) as reference,
+        NativeBatchEnvironment(
+            step_frames=4,
+            full_state=False,
+            pixels=True,
+            board=False,
+        ) as fast,
+    ):
+        seeds = [42, 13, 30_100]
+        reference.reset_batch(seeds)
+        fast.reset_batch(seeds)
+
+        for step in range(90):
+            actions = [step % 9, (step + 2) % 9, (step + 5) % 9]
+            reference_result = reference.step_batch(actions)
+            fast_result = fast.step_pixels(actions)
+            assert isinstance(fast_result, NativePixelBatchResult)
+            assert fast_result.pixels.shape == (3, 128, 128)
+            assert fast_result.pixels.dtype == np.uint8
+            assert fast_result.player_positions.shape == (3, 2)
+            assert fast_result.player_positions.dtype == np.float32
+            np.testing.assert_array_equal(
+                fast_result.lane_ids,
+                reference_result.lane_ids,
+            )
+            np.testing.assert_array_equal(fast_result.frames, reference_result.frames)
+            np.testing.assert_array_equal(
+                fast_result.frames_advanced,
+                reference_result.frames_advanced,
+            )
+            np.testing.assert_array_equal(fast_result.rewards, reference_result.rewards)
+            np.testing.assert_array_equal(fast_result.done, reference_result.done)
+            np.testing.assert_array_equal(fast_result.seeds, reference_result.seeds)
+            np.testing.assert_array_equal(fast_result.modes, reference_result.modes)
+            np.testing.assert_array_equal(fast_result.pixels, reference_result.pixels)
+            np.testing.assert_array_equal(
+                fast_result.player_positions,
+                reference_result.player_positions,
+            )
+            np.testing.assert_array_equal(fast.observe_pixels(), fast_result.pixels)
+            np.testing.assert_array_equal(
+                fast.observe_player_positions(),
+                fast_result.player_positions,
+            )
+            if bool(np.any(fast_result.done)):
+                break
+
+
 def test_native_ml_lane_reset_preserves_unselected_progress() -> None:
     with NativeBatchEnvironment(
         step_frames=4,
@@ -278,6 +448,21 @@ def test_native_ai_startup_uses_up_waypoint_and_waits_for_visible_enemy() -> Non
     assert started_result.frames[0] > ready_result.frames[0]
     assert started_result.player_positions[0, 1] < 58.0
     assert started_result.ml_observation[0, 5] == 1.0
+
+
+def test_native_ml_startup_does_not_credit_scripted_survival() -> None:
+    with NativeBatchEnvironment(
+        step_frames=4,
+        full_state=False,
+        pixels=False,
+        board=False,
+        ml=True,
+    ) as environment:
+        environment.reset_ml_batch_with_startup([42])
+        step = environment.step_ml_batch([0])
+
+    assert step.frames_advanced[0] <= 4
+    assert step.rewards[0] <= step.frames_advanced[0]
 
 
 def test_enabling_ml_preserves_existing_optional_observations() -> None:
@@ -603,3 +788,27 @@ def test_counterfactual_scores_validate_inputs() -> None:
     with pytest.raises(ValueError, match="bytes"):
         environment.score_actions(["not-bytes"], lookahead_steps=8)  # type: ignore[list-item]
     environment.close()
+
+
+def test_v102_waypoint_scores_are_deterministic_and_non_mutating() -> None:
+    options = dict(full_state=True, pixels=True, board=False, ml_grid_spacing=32)
+    environment = NativeBatchEnvironment(**options)
+    reference = NativeBatchEnvironment(**options)
+    initial = environment.reset_batch_with_startup([30101, 30102])
+    reference.reset_batch_with_startup([30101, 30102])
+    snapshots = [value for value in initial.snapshot_bytes if value is not None]
+    first = environment.score_waypoint_actions(snapshots, 4)
+    second = environment.score_waypoint_actions(snapshots, 4)
+    np.testing.assert_array_equal(first, second)
+    assert first.shape == (2, len(ACTION_CHOICES))
+    assert first.dtype == np.float32
+    np.testing.assert_array_equal(
+        environment.step_batch([0, 0]).pixels,
+        reference.step_batch([0, 0]).pixels,
+    )
+    with pytest.raises(ValueError, match="lookahead"):
+        environment.score_waypoint_actions(snapshots, 0)
+    with pytest.raises(ValueError, match="tolerance"):
+        environment.score_waypoint_actions(snapshots, 4, tolerance=16.0)
+    environment.close()
+    reference.close()

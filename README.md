@@ -128,6 +128,11 @@ Start the dashboard in another terminal:
 just dodge-ng-dashboard
 ```
 
-It selects the latest run; pass `--run-dir` to choose one explicitly. Open the
-printed URL for live progress, controls, and checkpoint replays. Telemetry is
-best-effort and never waits on the dashboard.
+The dashboard is read-only by default. It lists local danger-map DDQ runs and
+durable Colab job status, and lets you select a run to inspect its progress and
+checkpoint replays. Recording a replay starts a separate process from a saved
+local checkpoint, so it does not attach to or control the active Colab run.
+
+Pass `--run-root` to use another run catalog or `--run-dir` to open one run
+explicitly. Training controls require the explicit `--enable-controls` flag.
+Telemetry is best-effort and never waits on the dashboard.

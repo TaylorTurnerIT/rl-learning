@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import json
 import math
+import os
 import platform
 import random
 import signal
 import time
+import uuid
 from collections import deque
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
@@ -22,7 +26,11 @@ from torch import Tensor, nn
 
 from dodge.control import PROJECT_ROOT, ControlRuntimeError
 from dodge.dataset import ACTION_CHOICES
-from dodge.native.batch import NativeBatchEnvironment, NativeBatchResult
+from dodge.native.batch import (
+    NativeBatchEnvironment,
+    NativeBatchResult,
+    NativePixelBatchResult,
+)
 from dodge.native.differential import FRAME_HEIGHT, FRAME_WIDTH
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import summarize_evaluation
@@ -33,12 +41,19 @@ from dodge.rl.ppo import PixelFeatureEncoder
 PIXEL_DQN_VERSION: Final[int] = 1
 PIXEL_DQN_MODEL_TYPE: Final[str] = "DodgePixelDuelingDQN"
 PIXEL_PALETTE_MAX: Final[int] = 15
-PIXEL_ARCHITECTURES: tuple[str, ...] = ("fast", "small", "current")
+PIXEL_ARCHITECTURES: tuple[str, ...] = (
+    "fast",
+    "small",
+    "current",
+    "palette-spatial",
+)
 PIXEL_SHAPE: tuple[int, int] = (FRAME_HEIGHT, FRAME_WIDTH)
 RELEVANCE_GATE_FRAMES: Final[int] = 800
-PixelArchitecture = Literal["fast", "small", "current"]
+PixelArchitecture = Literal["fast", "small", "current", "palette-spatial"]
 PixelExecution = Literal["serial", "parallel"]
+PixelBoundary = Literal["legacy", "fast"]
 ResetMode = Literal["native-startup", "legacy"]
+MacroResetMode = Literal["freeze-lanes", "stop-macro", "legacy-continue"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +69,11 @@ class PixelDQNConfig:
     n_step: int = 5
     warmup_steps: int = 2_000
     train_frequency: int = 1
+    gradient_steps: int = 1
     target_update_interval: int = 500
+    target_update_unit: Literal["optimizer", "collection"] = "optimizer"
+    reward_scale: float = 1.0
+    huber_beta: float = 1.0
     hidden_size: int = 128
     pixel_stack: int = 4
     pixel_architecture: PixelArchitecture = "fast"
@@ -68,7 +87,9 @@ class PixelDQNConfig:
     max_episode_steps: int = 2_000
     native_lanes: int = 12
     native_execution: PixelExecution = "parallel"
+    native_pixel_boundary: PixelBoundary = "legacy"
     reset_mode: ResetMode = "native-startup"
+    macro_reset_mode: MacroResetMode = "freeze-lanes"
     training_lives: int = 1
     life_loss_penalty: float = -64.0
     epsilon_decay_steps: int = 50_000
@@ -87,6 +108,7 @@ class PixelDQNConfig:
             self.n_step,
             self.warmup_steps,
             self.train_frequency,
+            self.gradient_steps,
             self.target_update_interval,
             self.hidden_size,
             self.pixel_stack,
@@ -104,6 +126,12 @@ class PixelDQNConfig:
             raise ValueError("pixel DQN learning rate must be positive")
         if self.weight_decay < 0:
             raise ValueError("pixel DQN weight decay must not be negative")
+        if self.target_update_unit not in {"optimizer", "collection"}:
+            raise ValueError("pixel target update unit is invalid")
+        if not np.isfinite(self.reward_scale) or self.reward_scale <= 0:
+            raise ValueError("pixel DQN reward scale must be finite and positive")
+        if not np.isfinite(self.huber_beta) or self.huber_beta <= 0:
+            raise ValueError("pixel DQN Huber beta must be finite and positive")
         if not 0 < self.gamma <= 1:
             raise ValueError("pixel DQN gamma must be between 0 and 1")
         if not 3 <= self.step_frames <= 5:
@@ -132,8 +160,16 @@ class PixelDQNConfig:
             raise ValueError("pixel DQN n-step horizon must fit replay storage")
         if self.native_execution not in {"serial", "parallel"}:
             raise ValueError("pixel DQN execution must be serial or parallel")
+        if self.native_pixel_boundary not in {"legacy", "fast"}:
+            raise ValueError("pixel DQN native pixel boundary is invalid")
         if self.reset_mode not in {"native-startup", "legacy"}:
             raise ValueError("pixel DQN reset mode is invalid")
+        if self.macro_reset_mode not in {
+            "freeze-lanes",
+            "stop-macro",
+            "legacy-continue",
+        }:
+            raise ValueError("pixel DQN macro reset mode is invalid")
         if (
             isinstance(self.training_lives, bool)
             or not isinstance(self.training_lives, int)
@@ -174,11 +210,14 @@ class DuelingPixelDQN(nn.Module):
         self.stack_size = stack_size
         self.action_count = action_count
         self.pixel_architecture = architecture
-        self.features = PixelFeatureEncoder(
-            stack_size=stack_size,
-            hidden_size=hidden_size,
-            architecture=architecture,
-        )
+        if architecture == "palette-spatial":
+            self.features = PaletteSpatialEncoder(stack_size, hidden_size)
+        else:
+            self.features = PixelFeatureEncoder(
+                stack_size=stack_size,
+                hidden_size=hidden_size,
+                architecture=architecture,
+            )
         self.value = nn.Linear(hidden_size, 1)
         self.advantage = nn.Linear(hidden_size, action_count)
         self._initialize_weights()
@@ -199,6 +238,50 @@ class DuelingPixelDQN(nn.Module):
                     nn.init.zeros_(module.bias)
         nn.init.orthogonal_(self.advantage.weight, gain=0.01)
         nn.init.orthogonal_(self.value.weight, gain=1.0)
+
+
+class PaletteSpatialEncoder(nn.Module):
+    """Encode palette labels without pretending that their numeric ids are ordered."""
+
+    def __init__(self, stack_size: int, hidden_size: int) -> None:
+        super().__init__()
+        if not 1 <= stack_size <= 8:
+            raise ValueError("pixel stack must be between 1 and 8")
+        if hidden_size < 1:
+            raise ValueError("hidden size must be positive")
+        self.stack_size = stack_size
+        self.embedding = nn.Embedding(PIXEL_PALETTE_MAX + 1, 4)
+        self.convolution = nn.Sequential(
+            nn.Conv2d(stack_size * 4, 32, 5, stride=2, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveMaxPool2d((4, 4)),
+            nn.Flatten(),
+        )
+        self.projection = nn.Sequential(
+            nn.Linear(64 * 4 * 4, hidden_size),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations: Tensor) -> Tensor:
+        if observations.dtype != torch.uint8:
+            raise ValueError("pixel DQN observations must use uint8 palette indexes")
+        expected_shape = (self.stack_size, FRAME_HEIGHT, FRAME_WIDTH)
+        if observations.ndim != 4 or tuple(observations.shape[1:]) != expected_shape:
+            raise ValueError(
+                "pixel observations must have shape "
+                f"(N, {expected_shape[0]}, {expected_shape[1]}, {expected_shape[2]})"
+            )
+        embedded = self.embedding(observations.long())
+        batch, stack, height, width, channels = embedded.shape
+        features = embedded.permute(0, 1, 4, 2, 3).reshape(
+            batch, stack * channels, height, width
+        )
+        return self.projection(self.convolution(features))
 
 
 @dataclass(frozen=True, slots=True)
@@ -583,6 +666,92 @@ def _resolve_device(device: str) -> torch.device:
     return torch.device(device)
 
 
+class _PixelProfiler:
+    """Bounded opt-in profiler for one training-loop window."""
+
+    def __init__(
+        self,
+        directory: Path | None,
+        device: torch.device,
+        max_steps: int,
+    ) -> None:
+        self.directory = Path(directory) if directory is not None else None
+        self.device = device
+        self.max_steps = max_steps
+        self.captured_steps = 0
+        self._profiler: object | None = None
+        self._closed = False
+
+    @property
+    def enabled(self) -> bool:
+        return self.directory is not None and self.max_steps > 0
+
+    def start(self) -> None:
+        if not self.enabled or self._profiler is not None:
+            return
+        from torch.profiler import ProfilerActivity
+
+        activities = [ProfilerActivity.CPU]
+        if self.device.type == "cuda":
+            activities.append(ProfilerActivity.CUDA)
+        assert self.directory is not None
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self._profiler = torch.profiler.profile(
+            activities=activities,
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=False,
+        )
+        self._profiler.start()  # type: ignore[union-attr]
+
+    def step(self) -> None:
+        if self._profiler is None or self._closed:
+            return
+        self._profiler.step()  # type: ignore[union-attr]
+        self.captured_steps += 1
+        if self.captured_steps >= self.max_steps:
+            self.close()
+
+    def close(self) -> None:
+        if self._profiler is None or self._closed:
+            return
+        assert self.directory is not None
+        profiler = self._profiler
+        profiler.stop()  # type: ignore[union-attr]
+        trace_path = self.directory / "trace.json"
+        summary_path = self.directory / "summary.txt"
+        profiler.export_chrome_trace(str(trace_path))  # type: ignore[union-attr]
+        sort_by = (
+            "self_cuda_time_total"
+            if self.device.type == "cuda"
+            else "self_cpu_time_total"
+        )
+        table = profiler.key_averages().table(  # type: ignore[union-attr]
+            sort_by=sort_by,
+            row_limit=40,
+        )
+        summary_path.write_text(table + "\n", encoding="utf-8")
+        _write_json(
+            self.directory / "profile.json",
+            {
+                "schema_version": 1,
+                "kind": "dodge_ng_pixel_dqn_profile",
+                "device": str(self.device),
+                "activities": [
+                    "cpu",
+                    "cuda",
+                ]
+                if self.device.type == "cuda"
+                else ["cpu"],
+                "requested_steps": self.max_steps,
+                "captured_steps": self.captured_steps,
+                "trace_file": trace_path.name,
+                "summary_file": summary_path.name,
+            },
+        )
+        self._closed = True
+
+
 def _seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -618,7 +787,7 @@ def _consume_training_life(
 
 
 def _validate_pixel_result(
-    result: NativeBatchResult,
+    result: NativeBatchResult | NativePixelBatchResult,
 ) -> tuple[np.ndarray, np.ndarray]:
     pixels = result.pixels
     positions = result.player_positions
@@ -647,6 +816,16 @@ def _validate_pixel_result(
     if not np.isfinite(positions).all():
         raise ControlRuntimeError("native pixel player positions must be finite")
     return pixels, positions
+
+
+def _step_pixel_batch(
+    environment: NativeBatchEnvironment,
+    actions: np.ndarray,
+    config: PixelDQNConfig,
+) -> NativeBatchResult | NativePixelBatchResult:
+    if config.native_pixel_boundary == "fast":
+        return environment.step_pixels(actions)
+    return environment.step_batch(actions)
 
 
 def _initial_pixel_stacks(
@@ -700,14 +879,37 @@ def _choose_actions(
     epsilon: float,
     rng: np.random.Generator,
     device: torch.device,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict[str, float]]:
     with torch.inference_mode():
         values = model(torch.from_numpy(observations).to(device))
-    greedy = values.argmax(dim=1).detach().cpu().numpy().astype(np.uint8)
+    greedy_tensor = values.argmax(dim=1)
+    top_values = values.topk(k=min(2, values.shape[1]), dim=1).values
+    greedy = greedy_tensor.detach().cpu().numpy().astype(np.uint8)
+    greedy_before_exploration = greedy.copy()
     random_mask = rng.random(len(greedy)) < epsilon
     random_actions = rng.integers(0, len(ACTION_CHOICES), size=len(greedy))
     greedy[random_mask] = random_actions[random_mask]
-    return greedy
+    diagnostics = {
+        "random_action_fraction": float(random_mask.mean()),
+        "greedy_action_entropy": _categorical_entropy(
+            greedy_before_exploration,
+            len(ACTION_CHOICES),
+        ),
+        "q_action_margin_mean": float(
+            (top_values[:, 0] - top_values[:, 1]).mean().item()
+        ),
+        **{
+            f"action_count_{name}": float(np.count_nonzero(greedy == index))
+            for index, name in enumerate(ACTION_CHOICES)
+        },
+    }
+    return greedy, diagnostics
+
+
+def _categorical_entropy(values: np.ndarray, category_count: int) -> float:
+    counts = np.bincount(values.astype(np.int64), minlength=category_count)
+    probabilities = counts[counts > 0] / max(1, len(values))
+    return float(-(probabilities * np.log(probabilities)).sum())
 
 
 def _learn_step(
@@ -719,12 +921,17 @@ def _learn_step(
     rng: np.random.Generator,
     device: torch.device,
 ) -> dict[str, float]:
+    sample_started = time.perf_counter()
     sample = replay.sample(config.batch_size, rng)
+    replay_sample_seconds = time.perf_counter() - sample_started
+    transfer_started = time.perf_counter()
     observations = torch.from_numpy(sample.observations).to(device)
     actions = torch.from_numpy(sample.actions.astype(np.int64)).to(device)
     rewards = torch.from_numpy(sample.rewards).to(device)
     next_observations = torch.from_numpy(sample.next_observations).to(device)
     discounts = torch.from_numpy(sample.discounts).to(device)
+    host_to_device_seconds = time.perf_counter() - transfer_started
+    learner_started = time.perf_counter()
     q_values = model(observations).gather(1, actions.unsqueeze(1)).squeeze(1)
     with torch.no_grad():
         next_actions = model(next_observations).argmax(dim=1)
@@ -734,19 +941,33 @@ def _learn_step(
             .squeeze(1)
         )
         targets = rewards + discounts * next_values
-    loss = nn.functional.smooth_l1_loss(q_values, targets)
+    loss = nn.functional.smooth_l1_loss(
+        q_values,
+        targets,
+        beta=config.huber_beta,
+    )
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     gradient_norm = float(
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
     )
     optimizer.step()
+    learner_compute_seconds = time.perf_counter() - learner_started
     return {
         "loss": float(loss.item()),
         "q_mean": float(q_values.detach().mean().item()),
         "target_mean": float(targets.mean().item()),
         "td_error": float((q_values.detach() - targets).abs().mean().item()),
         "gradient_norm": gradient_norm,
+        "gradient_clipped": float(gradient_norm > 10.0),
+        "sample_reward_mean": float(sample.rewards.mean()),
+        "sample_reward_min": float(sample.rewards.min()),
+        "sample_reward_max": float(sample.rewards.max()),
+        "sample_terminal_fraction": float(sample.terminated.mean()),
+        "sample_n_step_mean": float(sample.n_steps.mean()),
+        "replay_sample_seconds": replay_sample_seconds,
+        "host_to_device_seconds": host_to_device_seconds,
+        "learner_compute_seconds": learner_compute_seconds,
     }
 
 
@@ -804,7 +1025,7 @@ def _collect_macro_transition(
     observations = current_stacks.copy()
     observation_refs = current_frame_refs.copy()
     epsilon = _epsilon(config, global_step)
-    waypoint_actions = _choose_actions(
+    waypoint_actions, action_diagnostics = _choose_actions(
         model,
         observations,
         epsilon,
@@ -846,6 +1067,8 @@ def _collect_macro_transition(
     life_loss_count = 0
     final_death_count = 0
     native_steps = 0
+    game_frames = 0
+    pending_resets: set[int] = set()
     arrived = np.zeros(lane_count, dtype=bool)
     if controller.arrival_latching:
         for lane, target_cell in enumerate(target_cells):
@@ -855,7 +1078,7 @@ def _collect_macro_transition(
                 target_cell,
             )
 
-    for _ in range(config.hold_decisions):
+    for micro_step in range(config.hold_decisions):
         native_actions = np.zeros(lane_count, dtype=np.uint8)
         for lane in range(lane_count):
             if boundary[lane]:
@@ -867,21 +1090,28 @@ def _collect_macro_transition(
                 target_cells[lane],
                 arrived=bool(arrived[lane]),
             )
-        result = environment.step_batch(native_actions)
+        if config.macro_reset_mode == "freeze-lanes":
+            result = environment.step_pixels_active(native_actions, ~boundary)
+        else:
+            result = _step_pixel_batch(environment, native_actions, config)
         result_pixels, result_positions = _validate_pixel_result(result)
-        current_stacks[:] = _advance_pixel_stacks(current_stacks, result_pixels)
-        current_positions[:] = result_positions
-        native_steps += lane_count
+        result_lanes = result.lane_ids.astype(np.int64)
+        current_stacks[result_lanes] = _advance_pixel_stacks(
+            current_stacks[result_lanes], result_pixels
+        )
+        current_positions[result_lanes] = result_positions
+        native_steps += len(result_lanes)
+        game_frames += int(result.frames_advanced.sum())
         reset_lanes: set[int] = set()
-        for lane in range(lane_count):
-            actual_terminal = bool(result.done[lane])
+        for result_index, lane in enumerate(result_lanes.tolist()):
+            actual_terminal = bool(result.done[result_index])
             if boundary[lane]:
                 if actual_terminal:
                     reset_lanes.add(lane)
                 else:
                     episode_steps[lane] += 1
                 continue
-            macro_rewards[lane] += float(result.rewards[lane])
+            macro_rewards[lane] += float(result.rewards[result_index])
             episode_steps[lane] += 1
             truncated = (
                 not actual_terminal and episode_steps[lane] >= config.max_episode_steps
@@ -897,7 +1127,12 @@ def _collect_macro_transition(
                 )
                 final_death_count += int(final_loss)
                 boundary[lane] = True
-                macro_terminated[lane] = final_loss
+                # Every collision is an MDP boundary because the following
+                # pixels come from a reset. Outer "lives" only control seed
+                # reuse; they must never bootstrap through an invisible reset.
+                macro_terminated[lane] = (
+                    final_loss if config.macro_reset_mode == "legacy-continue" else True
+                )
                 macro_next_stacks[lane] = current_stacks[lane]
                 reset_lanes.add(lane)
                 if not final_loss:
@@ -913,6 +1148,13 @@ def _collect_macro_transition(
                     float(current_positions[lane, 1]),
                     target_cells[lane],
                 )
+        if config.macro_reset_mode == "freeze-lanes":
+            pending_resets.update(reset_lanes)
+            reset_lanes = (
+                pending_resets
+                if micro_step == config.hold_decisions - 1 or bool(boundary.all())
+                else set()
+            )
         if reset_lanes:
             ordered_reset_lanes = sorted(reset_lanes)
             replacement_seeds: list[int] = []
@@ -941,8 +1183,13 @@ def _collect_macro_transition(
                 current_stacks[lane] = reset_stacks[index]
                 current_positions[lane] = reset_positions[index]
                 episode_steps[lane] = 0
-                if lane in life_reset_lanes:
+                if (
+                    lane in life_reset_lanes
+                    and config.macro_reset_mode == "legacy-continue"
+                ):
                     macro_next_stacks[lane] = reset_stacks[index]
+            if config.macro_reset_mode == "stop-macro":
+                break
         if bool(boundary.all()):
             break
 
@@ -959,7 +1206,7 @@ def _collect_macro_transition(
             observation_refs[lane],
             int(waypoint_actions[lane]),
             target_cells[lane],
-            float(macro_rewards[lane]),
+            float(macro_rewards[lane] * config.reward_scale),
             transition_refs[lane],
             bool(macro_terminated[lane]),
             bool(macro_truncated[lane]),
@@ -974,10 +1221,15 @@ def _collect_macro_transition(
             "epsilon": epsilon,
             "macro_reward_mean": float(macro_rewards.mean()),
             "macro_reward_max": float(macro_rewards.max()),
+            "scaled_macro_reward_mean": float(
+                macro_rewards.mean() * config.reward_scale
+            ),
             "life_loss_count": float(life_loss_count),
             "final_death_count": float(final_death_count),
             "lives_remaining_mean": float(lives_remaining.mean()),
             "corner_target_count": float(corner_target_count),
+            "game_frames_collected": float(game_frames),
+            **action_diagnostics,
         },
     )
 
@@ -1095,7 +1347,7 @@ def _evaluate_pixel_batch(
                         target_cells[local],
                         arrived=bool(arrived[local]),
                     )
-                result = environment.step_batch(native_actions)
+                result = _step_pixel_batch(environment, native_actions, config)
                 result_pixels, result_positions = _validate_pixel_result(result)
                 current_stacks[:] = _advance_pixel_stacks(
                     current_stacks,
@@ -1175,6 +1427,7 @@ def _checkpoint_contract(config: PixelDQNConfig) -> dict[str, object]:
             "decision_interval": config.hold_decisions,
         },
         "reset_mode": config.reset_mode,
+        "macro_reset_mode": config.macro_reset_mode,
         "training_lives": config.training_lives,
         "life_loss_penalty": config.life_loss_penalty,
         "replay": {
@@ -1182,12 +1435,17 @@ def _checkpoint_contract(config: PixelDQNConfig) -> dict[str, object]:
             "storage": "uint8_memmapped_frame_ring",
             "n_step": config.n_step,
             "gamma": config.gamma,
+            "reward_scale": config.reward_scale,
             "boundary": "terminated_or_truncated_zero_bootstrap",
         },
         "target": {
             "algorithm": "double_dqn",
             "network": "dueling",
             "update_interval": config.target_update_interval,
+            "update_unit": config.target_update_unit,
+            "train_frequency": config.train_frequency,
+            "gradient_steps": config.gradient_steps,
+            "huber_beta": config.huber_beta,
         },
         "actions": list(ACTION_CHOICES),
     }
@@ -1236,13 +1494,111 @@ def _checkpoint_payload(
 
 
 def _save_checkpoint(path: Path, payload: dict[str, object]) -> None:
+    """Commit weights and an immutable replay image at the same boundary.
+
+    The live memory map is overwritten by subsequent collection. Its existence
+    alone cannot make an older checkpoint resumable.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
+    snapshot_path = path.parent / f"replay-{uuid.uuid4().hex}.u8.gz"
+    snapshot_temporary = snapshot_path.with_suffix(".tmp")
+    previous_snapshot = _checkpoint_snapshot_name(path)
+    committed = False
     try:
+        replay_state = payload["training_state"]["replay"]
+        frame_path = path.parent / str(replay_state["frame_file"])
+        digest = hashlib.sha256()
+        raw_bytes = 0
+        with (
+            frame_path.open("rb") as source,
+            gzip.open(snapshot_temporary, "wb", compresslevel=1) as destination,
+        ):
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                destination.write(block)
+                digest.update(block)
+                raw_bytes += len(block)
+        snapshot_temporary.replace(snapshot_path)
+        with snapshot_path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        payload = {
+            **payload,
+            "replay_snapshot": {
+                "path": snapshot_path.name,
+                "raw_bytes": raw_bytes,
+                "raw_sha256": digest.hexdigest(),
+                "format": "gzip-u8-v1",
+            },
+        }
         torch.save(payload, temporary)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
         temporary.replace(path)
+        committed = True
+        if previous_snapshot is not None:
+            with suppress(OSError):
+                (path.parent / previous_snapshot).unlink(missing_ok=True)
+    except BaseException:
+        # The old checkpoint still owns its old immutable replay image.
+        if not committed:
+            snapshot_path.unlink(missing_ok=True)
+        raise
     finally:
         temporary.unlink(missing_ok=True)
+        snapshot_temporary.unlink(missing_ok=True)
+
+
+def _checkpoint_snapshot_name(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    saved = torch.load(path, map_location="cpu", weights_only=False)
+    snapshot = saved.get("replay_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    name = snapshot.get("path")
+    if (
+        not isinstance(name, str)
+        or Path(name).name != name
+        or not name.startswith("replay-")
+    ):
+        raise ValueError("pixel checkpoint replay snapshot name is invalid")
+    return name
+
+
+def _restore_replay_snapshot(checkpoint: Path, frame_path: Path) -> bool:
+    """Restore the exact saved ring before opening the mutable replay map."""
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    snapshot = saved.get("replay_snapshot")
+    if snapshot is None:
+        return False  # Legacy checkpoint uses its historical external frame map.
+    name = _checkpoint_snapshot_name(checkpoint)
+    if name is None or snapshot.get("format") != "gzip-u8-v1":
+        raise ValueError("pixel checkpoint replay snapshot format is invalid")
+    expected_bytes = snapshot.get("raw_bytes")
+    if not isinstance(expected_bytes, int) or expected_bytes <= 0:
+        raise ValueError("pixel checkpoint replay snapshot size is invalid")
+    temporary = frame_path.with_name(f".{frame_path.name}.restore")
+    try:
+        digest = hashlib.sha256()
+        restored_bytes = 0
+        with (
+            gzip.open(checkpoint.parent / name, "rb") as source,
+            temporary.open("wb") as output,
+        ):
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                restored_bytes += len(block)
+                if restored_bytes > expected_bytes:
+                    raise ValueError("replay snapshot exceeds declared size")
+                digest.update(block)
+                output.write(block)
+        if restored_bytes != expected_bytes or digest.hexdigest() != snapshot.get(
+            "raw_sha256"
+        ):
+            raise ValueError("replay snapshot hash or size does not match checkpoint")
+        temporary.replace(frame_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 def _checkpoint_config_matches(
@@ -1252,6 +1608,12 @@ def _checkpoint_config_matches(
     if not isinstance(saved, dict):
         return False
     normalized = dict(saved)
+    normalized.setdefault("native_pixel_boundary", "legacy")
+    normalized.setdefault("macro_reset_mode", "legacy-continue")
+    normalized.setdefault("gradient_steps", 1)
+    normalized.setdefault("reward_scale", 1.0)
+    normalized.setdefault("huber_beta", 1.0)
+    normalized.setdefault("target_update_unit", "collection")
     saved_total = normalized.get("total_steps")
     if (
         isinstance(saved_total, bool)
@@ -1267,7 +1629,24 @@ def _checkpoint_contract_matches(
     saved: object,
     config: PixelDQNConfig,
 ) -> bool:
-    return isinstance(saved, dict) and dict(saved) == _checkpoint_contract(config)
+    if not isinstance(saved, dict):
+        return False
+    normalized = dict(saved)
+    normalized.setdefault("macro_reset_mode", "legacy-continue")
+    replay = normalized.get("replay")
+    if isinstance(replay, dict):
+        replay = dict(replay)
+        replay.setdefault("reward_scale", 1.0)
+        normalized["replay"] = replay
+    target = normalized.get("target")
+    if isinstance(target, dict):
+        target = dict(target)
+        target.setdefault("train_frequency", 1)
+        target.setdefault("gradient_steps", 1)
+        target.setdefault("huber_beta", 1.0)
+        target.setdefault("update_unit", "collection")
+        normalized["target"] = target
+    return normalized == _checkpoint_contract(config)
 
 
 def _load_checkpoint(
@@ -1451,6 +1830,34 @@ def _write_metrics(path: Path, records: Sequence[Mapping[str, object]]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _mark_previous_finalization_stale(run_directory: Path, resumed_step: int) -> None:
+    marker = {
+        "state": "stale_during_resumed_training",
+        "resumed_from_step": resumed_step,
+        "marked_at": time.time(),
+    }
+    for name in ("run.json", "report.json"):
+        path = run_directory / name
+        if not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            value["artifact_state"] = marker
+            _write_json(path, value)
+    report_path = run_directory / "REPORT.md"
+    if report_path.is_file():
+        report = report_path.read_text(encoding="utf-8")
+        warning = (
+            "> **Stale:** training resumed from this finalization; use live dashboard "
+            "status until the next stop or completion.\n\n"
+        )
+        if not report.startswith("> **Stale:**"):
+            report_path.write_text(warning + report, encoding="utf-8")
+
+
 def _copy_model_state(model: nn.Module) -> dict[str, Tensor]:
     return {
         name: value.detach().cpu().clone() for name, value in model.state_dict().items()
@@ -1466,9 +1873,15 @@ def _train_pixel_dqn_impl(
     evaluate_holdout: bool,
     evaluate_training: bool,
     stop_requested: list[bool],
+    profile_directory: Path | None = None,
+    profile_steps: int = 0,
 ) -> dict[str, object]:
     config.validate()
     manifest.validate()
+    if profile_steps < 0:
+        raise ValueError("pixel profiler steps must not be negative")
+    if profile_steps and profile_directory is None:
+        profile_directory = run_directory / "profile"
     if len(manifest.training_seeds) < config.native_lanes:
         raise ValueError("pixel DQN lane count exceeds NG training seed count")
     run_directory.mkdir(parents=True, exist_ok=True)
@@ -1488,6 +1901,7 @@ def _train_pixel_dqn_impl(
     _configure_torch_threads(config.torch_threads)
     _seed_everything(config.seed)
     device = _resolve_device(config.device)
+    profiler = _PixelProfiler(profile_directory, device, profile_steps)
     model = DuelingPixelDQN(
         stack_size=config.pixel_stack,
         hidden_size=config.hidden_size,
@@ -1504,6 +1918,17 @@ def _train_pixel_dqn_impl(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
+    if resume and checkpoint_path.is_file():
+        saved = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        if (
+            saved.get("manifest_sha256") != manifest.sha256
+            or not _checkpoint_config_matches(saved.get("config"), config)
+            or not _checkpoint_contract_matches(saved.get("contract"), config)
+        ):
+            raise ValueError(
+                "pixel checkpoint configuration or manifest does not match"
+            )
+        _restore_replay_snapshot(checkpoint_path, run_directory / ".pixel-frames.u8")
     replay = PixelReplayBuffer(
         config.replay_capacity,
         config.pixel_stack,
@@ -1545,6 +1970,7 @@ def _train_pixel_dqn_impl(
             replay,
             rng,
         )
+        _mark_previous_finalization_stale(run_directory, step)
     metrics = _read_metrics(metrics_path)
     if resume:
         metrics = [
@@ -1556,6 +1982,17 @@ def _train_pixel_dqn_impl(
     elif metrics_path.exists():
         replay.close()
         raise ControlRuntimeError(f"pixel metrics already exist: {metrics_path}")
+    optimizer_steps = sum(
+        int(item.get("gradient_steps", 1)) for item in metrics if "loss" in item
+    )
+    samples_drawn = optimizer_steps * config.batch_size
+    total_game_frames = (
+        int(metrics[-1].get("game_frames", total_native_steps * config.step_frames))
+        if metrics
+        else 0
+    )
+    session_started = time.monotonic()
+    session_start_game_frames = total_game_frames
     telemetry = DashboardTelemetry(run_directory)
     environment = _new_pixel_environment(config)
     controller = _controller_for_config(config)
@@ -1630,6 +2067,9 @@ def _train_pixel_dqn_impl(
                 )
                 time.sleep(0.1)
                 continue
+            step_started = time.perf_counter()
+            profiler.start()
+            collection_started = time.monotonic()
             (
                 current_stacks,
                 current_positions,
@@ -1656,94 +2096,90 @@ def _train_pixel_dqn_impl(
                 device,
                 step,
             )
+            collection_seconds = time.monotonic() - collection_started
             total_native_steps += native_steps
+            total_game_frames += int(collection["game_frames_collected"])
             step += 1
             learning: dict[str, float] = {}
+            learning_seconds = 0.0
             if (
                 step >= config.warmup_steps
                 and step % config.train_frequency == 0
                 and replay.size >= config.batch_size
             ):
                 model.train()
-                learning = _learn_step(
-                    model,
-                    target_model,
-                    optimizer,
-                    replay,
-                    config,
-                    rng,
-                    device,
-                )
-            if step % config.target_update_interval == 0:
+                learning_started = time.monotonic()
+                learning_records: list[dict[str, float]] = []
+                for _ in range(config.gradient_steps):
+                    learning_records.append(
+                        _learn_step(
+                            model,
+                            target_model,
+                            optimizer,
+                            replay,
+                            config,
+                            rng,
+                            device,
+                        )
+                    )
+                    optimizer_steps += 1
+                    samples_drawn += config.batch_size
+                    if (
+                        config.target_update_unit == "optimizer"
+                        and optimizer_steps % config.target_update_interval == 0
+                    ):
+                        target_model.load_state_dict(model.state_dict())
+                learning_seconds = time.monotonic() - learning_started
+                learning = {
+                    name: float(np.mean([record[name] for record in learning_records]))
+                    for name in learning_records[0]
+                }
+                learning["gradient_steps"] = float(config.gradient_steps)
+            evaluation_seconds = 0.0
+            checkpoint_seconds = 0.0
+            if (
+                config.target_update_unit == "collection"
+                and step % config.target_update_interval == 0
+            ):
                 target_model.load_state_dict(model.state_dict())
+            elapsed_seconds = time.monotonic() - session_started
+            transitions_collected = step * config.native_lanes
             record: dict[str, object] = {
                 "step": step,
                 "replay_size": replay.size,
                 "native_steps": total_native_steps,
+                "game_frames": total_game_frames,
+                "optimizer_steps": optimizer_steps,
+                "samples_drawn": samples_drawn,
+                "update_to_data_ratio": optimizer_steps / max(1, transitions_collected),
+                "sample_replay_ratio": samples_drawn / max(1, transitions_collected),
+                "collection_seconds": collection_seconds,
+                "learning_seconds": learning_seconds,
+                "replay_sample_seconds": float(
+                    learning.get("replay_sample_seconds", 0.0)
+                ),
+                "host_to_device_seconds": float(
+                    learning.get("host_to_device_seconds", 0.0)
+                ),
+                "learner_compute_seconds": float(
+                    learning.get("learner_compute_seconds", 0.0)
+                ),
+                "evaluation_seconds": evaluation_seconds,
+                "checkpoint_seconds": checkpoint_seconds,
+                "session_elapsed_seconds": elapsed_seconds,
+                "session_game_frames_per_second": (
+                    (total_game_frames - session_start_game_frames)
+                    / max(elapsed_seconds, 1e-9)
+                ),
                 **collection,
                 **learning,
             }
-            if step % config.eval_every == 0 or step == config.total_steps:
-                telemetry.publish(
-                    _status(
-                        config,
-                        manifest,
-                        state="evaluating",
-                        step=step,
-                        total_native_steps=total_native_steps,
-                        replay_size=replay.size,
-                        best_inner=best_inner,
-                        record=record,
-                    )
-                )
-                inner = evaluate_pixel_dqn(
-                    model,
-                    manifest.training_seeds[:10],
-                    config,
-                )
-                record["inner_validation"] = inner["summary"]
-                inner_mean = float(inner["summary"]["mean_survival_frames"])
-                if best_inner is None or inner_mean > float(
-                    best_inner["mean_survival_frames"]
-                ):
-                    best_inner = {
-                        "mean_survival_frames": inner_mean,
-                        "step": step,
-                    }
-                    best_model_state = _copy_model_state(model)
-                    _save_checkpoint(
-                        checkpoint_best_path,
-                        _checkpoint_payload(
-                            model,
-                            target_model,
-                            optimizer,
-                            config,
-                            manifest,
-                            step=step,
-                            seed_cursor=seed_cursor,
-                            best_inner=best_inner,
-                            best_model_state=best_model_state,
-                            replay=replay,
-                            accumulator=accumulator,
-                            rng=rng,
-                            total_native_steps=total_native_steps,
-                        ),
-                    )
-                model.train()
-            metrics_stream.write(json.dumps(record, sort_keys=True) + "\n")
-            telemetry.publish(
-                _status(
-                    config,
-                    manifest,
-                    state="running",
-                    step=step,
-                    total_native_steps=total_native_steps,
-                    replay_size=replay.size,
-                    best_inner=best_inner,
-                    record=record,
-                )
-            )
-            if step % config.checkpoint_every == 0 or step == config.total_steps:
+            evaluation_due = step % config.eval_every == 0 or step == config.total_steps
+            if evaluation_due:
+                # Evaluation can take substantially longer than collection on
+                # large seed sets. Publish a resumable boundary before entering
+                # it so a runtime loss cannot discard the just-completed budget.
+                checkpoint_started = time.perf_counter()
                 _save_checkpoint(
                     checkpoint_path,
                     _checkpoint_payload(
@@ -1762,6 +2198,105 @@ def _train_pixel_dqn_impl(
                         total_native_steps=total_native_steps,
                     ),
                 )
+                checkpoint_seconds += time.perf_counter() - checkpoint_started
+                telemetry.publish(
+                    _status(
+                        config,
+                        manifest,
+                        state="evaluating",
+                        step=step,
+                        total_native_steps=total_native_steps,
+                        replay_size=replay.size,
+                        best_inner=best_inner,
+                        record=record,
+                    )
+                )
+                evaluation_started = time.perf_counter()
+                inner = evaluate_pixel_dqn(
+                    model,
+                    manifest.training_seeds[:10],
+                    config,
+                )
+                evaluation_seconds += time.perf_counter() - evaluation_started
+                record["inner_validation"] = inner["summary"]
+                inner_mean = float(inner["summary"]["mean_survival_frames"])
+                if best_inner is None or inner_mean > float(
+                    best_inner["mean_survival_frames"]
+                ):
+                    best_inner = {
+                        "mean_survival_frames": inner_mean,
+                        "step": step,
+                    }
+                    best_model_state = _copy_model_state(model)
+                    checkpoint_started = time.perf_counter()
+                    _save_checkpoint(
+                        checkpoint_best_path,
+                        _checkpoint_payload(
+                            model,
+                            target_model,
+                            optimizer,
+                            config,
+                            manifest,
+                            step=step,
+                            seed_cursor=seed_cursor,
+                            best_inner=best_inner,
+                            best_model_state=best_model_state,
+                            replay=replay,
+                            accumulator=accumulator,
+                            rng=rng,
+                            total_native_steps=total_native_steps,
+                        ),
+                    )
+                    checkpoint_seconds += time.perf_counter() - checkpoint_started
+                model.train()
+            if step % config.checkpoint_every == 0 or step == config.total_steps:
+                checkpoint_started = time.perf_counter()
+                _save_checkpoint(
+                    checkpoint_path,
+                    _checkpoint_payload(
+                        model,
+                        target_model,
+                        optimizer,
+                        config,
+                        manifest,
+                        step=step,
+                        seed_cursor=seed_cursor,
+                        best_inner=best_inner,
+                        best_model_state=best_model_state,
+                        replay=replay,
+                        accumulator=accumulator,
+                        rng=rng,
+                        total_native_steps=total_native_steps,
+                    ),
+                )
+                checkpoint_seconds += time.perf_counter() - checkpoint_started
+                record["checkpoint_seconds"] = checkpoint_seconds
+            step_wall_seconds = time.perf_counter() - step_started
+            phase_seconds = (
+                collection_seconds
+                + learning_seconds
+                + evaluation_seconds
+                + checkpoint_seconds
+            )
+            record["step_wall_seconds"] = step_wall_seconds
+            record["phase_overhead_seconds"] = max(
+                0.0,
+                step_wall_seconds - phase_seconds,
+            )
+            profiler.step()
+            metrics_stream.write(json.dumps(record, sort_keys=True) + "\n")
+            telemetry.publish(
+                _status(
+                    config,
+                    manifest,
+                    state="running",
+                    step=step,
+                    total_native_steps=total_native_steps,
+                    replay_size=replay.size,
+                    best_inner=best_inner,
+                    record=record,
+                )
+            )
     except Exception as error:
         telemetry.publish(
             {
@@ -1782,6 +2317,7 @@ def _train_pixel_dqn_impl(
         raise
     finally:
         metrics_stream.close()
+        profiler.close()
         environment.close()
 
     _save_checkpoint(
@@ -1803,6 +2339,17 @@ def _train_pixel_dqn_impl(
         ),
     )
     final_model = model
+    selected_model = "final_at_configured_budget"
+    selected_model_step = step
+    if best_model_state is not None and best_inner is not None:
+        final_model = DuelingPixelDQN(
+            stack_size=config.pixel_stack,
+            hidden_size=config.hidden_size,
+            architecture=config.pixel_architecture,
+        ).to(device)
+        final_model.load_state_dict(best_model_state)
+        selected_model = "best_inner_checkpoint"
+        selected_model_step = int(best_inner["step"])
     final_inner = evaluate_pixel_dqn(
         final_model,
         manifest.training_seeds[:10],
@@ -1835,9 +2382,23 @@ def _train_pixel_dqn_impl(
         "holdout_seeds": list(manifest.holdout_seeds),
         "updates_completed": step,
         "native_steps": total_native_steps,
+        "game_frames": total_game_frames,
+        "collection_steps": step,
+        "optimizer_steps": optimizer_steps,
+        "samples_drawn": samples_drawn,
+        "wall_seconds_this_session": time.monotonic() - session_started,
+        "profiling": {
+            "enabled": profiler.enabled,
+            "directory": (
+                str(profile_directory) if profile_directory is not None else None
+            ),
+            "requested_steps": profile_steps,
+            "captured_steps": profiler.captured_steps,
+        },
         "stopped_early": stopped,
         "best_inner": best_inner,
-        "selected_model": "final_at_configured_budget",
+        "selected_model": selected_model,
+        "selected_model_step": selected_model_step,
         "final_validation": final_inner,
         "final_training_evaluation": final_training,
         "final_evaluation": final_holdout,
@@ -1883,6 +2444,8 @@ def train_pixel_dqn(
     resume: bool = False,
     evaluate_holdout: bool = True,
     evaluate_training: bool = True,
+    profile_directory: Path | None = None,
+    profile_steps: int = 0,
 ) -> dict[str, object]:
     """Train one pixel DQN run with graceful stop handling."""
     stop_requested, previous_handlers = _install_stop_signal_handlers()
@@ -1895,6 +2458,8 @@ def train_pixel_dqn(
             evaluate_holdout=evaluate_holdout,
             evaluate_training=evaluate_training,
             stop_requested=stop_requested,
+            profile_directory=profile_directory,
+            profile_steps=profile_steps,
         )
     finally:
         _restore_stop_signal_handlers(previous_handlers)
@@ -2101,6 +2666,8 @@ def _pixel_report_markdown(
         "",
         f"- Updates completed: `{run_record.get('updates_completed')}`",
         f"- Observation: `{run_record.get('observation_source')}`",
+        "- Native pixel boundary: "
+        f"`{config_value.get('native_pixel_boundary', 'legacy')}`",
         f"- Pixel shape: `{run_record.get('pixel_shape')}`",
         f"- Training lives: `{config_value.get('training_lives')}`",
         f"- Life-loss penalty: `{config_value.get('life_loss_penalty')}`",
@@ -2169,6 +2736,8 @@ def compare_pixel_runs(
         raise ValueError("pixel comparison configs are invalid")
     left = dict(first_config)
     right = dict(second_config)
+    left.setdefault("native_pixel_boundary", "legacy")
+    right.setdefault("native_pixel_boundary", "legacy")
     if left.get("training_lives") == right.get("training_lives"):
         raise ValueError("pixel comparison requires different training_lives")
     left.pop("training_lives", None)
@@ -2293,12 +2862,19 @@ def main(argv: list[str] | None = None) -> int:
         default=PROJECT_ROOT / "history" / "dodge" / "ng" / "pixel-dqn-200k",
     )
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--no-holdout", action="store_true")
+    parser.add_argument("--no-training-evaluation", action="store_true")
     parser.add_argument("--total-steps", type=_positive_int, default=200_000)
     parser.add_argument("--batch-size", type=_positive_int, default=128)
     parser.add_argument("--replay-capacity", type=_positive_int, default=100_000)
     parser.add_argument("--training-lives", type=_positive_int, default=1)
     parser.add_argument("--life-loss-penalty", type=float, default=-64.0)
     parser.add_argument("--native-lanes", type=_positive_int, default=12)
+    parser.add_argument(
+        "--native-pixel-boundary",
+        choices=("legacy", "fast"),
+        default="legacy",
+    )
     parser.add_argument("--checkpoint-every", type=_positive_int, default=10_000)
     parser.add_argument("--eval-every", type=_positive_int, default=10_000)
     parser.add_argument("--pixel-stack", type=_positive_int, default=4)
@@ -2321,12 +2897,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--n-step", type=_positive_int, default=5)
     parser.add_argument("--warmup-steps", type=_positive_int, default=2_000)
+    parser.add_argument("--train-frequency", type=_positive_int, default=1)
+    parser.add_argument("--gradient-steps", type=_positive_int, default=1)
+    parser.add_argument("--reward-scale", type=float, default=1.0)
+    parser.add_argument("--huber-beta", type=float, default=1.0)
     parser.add_argument("--target-update-interval", type=_positive_int, default=500)
+    parser.add_argument(
+        "--target-update-unit", choices=("optimizer", "collection"), default="optimizer"
+    )
+    parser.add_argument(
+        "--macro-reset-mode",
+        choices=("freeze-lanes", "stop-macro", "legacy-continue"),
+        default="freeze-lanes",
+    )
     parser.add_argument("--epsilon-decay-steps", type=_nonnegative_int, default=50_000)
     parser.add_argument("--epsilon-final", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=2_026_0903)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="cpu")
     parser.add_argument("--torch-threads", type=_nonnegative_int, default=8)
+    parser.add_argument("--profile-dir", type=Path)
+    parser.add_argument("--profile-steps", type=_nonnegative_int, default=0)
     arguments = parser.parse_args(argv)
     config = PixelDQNConfig(
         total_steps=arguments.total_steps,
@@ -2337,7 +2927,12 @@ def main(argv: list[str] | None = None) -> int:
         gamma=arguments.gamma,
         n_step=arguments.n_step,
         warmup_steps=arguments.warmup_steps,
+        train_frequency=arguments.train_frequency,
+        gradient_steps=arguments.gradient_steps,
+        reward_scale=arguments.reward_scale,
+        huber_beta=arguments.huber_beta,
         target_update_interval=arguments.target_update_interval,
+        target_update_unit=arguments.target_update_unit,
         hidden_size=arguments.hidden_size,
         pixel_stack=arguments.pixel_stack,
         pixel_architecture=arguments.pixel_architecture,
@@ -2350,6 +2945,8 @@ def main(argv: list[str] | None = None) -> int:
         step_frames=arguments.step_frames,
         max_episode_steps=arguments.max_episode_steps,
         native_lanes=arguments.native_lanes,
+        native_pixel_boundary=arguments.native_pixel_boundary,
+        macro_reset_mode=arguments.macro_reset_mode,
         training_lives=arguments.training_lives,
         life_loss_penalty=arguments.life_loss_penalty,
         epsilon_decay_steps=arguments.epsilon_decay_steps,
@@ -2368,6 +2965,10 @@ def main(argv: list[str] | None = None) -> int:
             arguments.run_dir,
             manifest,
             resume=arguments.resume,
+            evaluate_holdout=not arguments.no_holdout,
+            evaluate_training=not arguments.no_training_evaluation,
+            profile_directory=arguments.profile_dir,
+            profile_steps=arguments.profile_steps,
         )
     except (ControlRuntimeError, OSError, ValueError) as error:
         print(f"dodge-ng-pixel-dqn: {error}")

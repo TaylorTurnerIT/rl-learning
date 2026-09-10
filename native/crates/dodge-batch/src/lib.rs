@@ -4,16 +4,25 @@ use std::fmt::{Display, Formatter};
 
 use dodge_core::{
     Action, AudioEvent, BUTTON_X_MASK, CoreError, FRAMEBUFFER_SIZE, FrameEvent, FullState,
-    MlFrameResult, Mode, NativeConfig, NativeGame, PicoFixed, RenderState, Snapshot,
+    MlFrameResult, Mode, NativeConfig, NativeGame, PicoFixed, PixelFrameResult, RenderState,
+    Snapshot,
 };
 use rayon::prelude::*;
 
 mod board;
+mod hazard;
 mod ml;
 
 pub use board::{
     BOARD_CHANNELS, BOARD_HEIGHT, BOARD_SIZE, BOARD_VALUES, BOARD_WIDTH, Board19x16,
     FULL_BOARD_CHANNELS, FULL_BOARD_VALUES,
+};
+pub use hazard::{
+    HAZARD_AOE_EXPLOSION, HAZARD_AOE_PATTERN, HAZARD_AOE_PRESENCE, HAZARD_AOE_STAGE, HAZARD_AOE_VX,
+    HAZARD_AOE_VY, HAZARD_CHANNELS, HAZARD_DEFAULT_HORIZON, HAZARD_DEFAULT_SPAWN_HALO_RADIUS,
+    HAZARD_ENEMY_PRESENCE, HAZARD_ENEMY_TYPE, HAZARD_ENEMY_VX, HAZARD_ENEMY_VY,
+    HAZARD_MAX_GRID_SIZE, HAZARD_OBSERVATION_VERSION, HAZARD_PLAYER_PRESENCE, HAZARD_SCALARS,
+    HAZARD_SPAWN_CORNER_MASK, HAZARD_SPAWN_HALO, HAZARD_TTC, HazardObservation,
 };
 pub use ml::{
     DEFAULT_GRID_SPACING, ML_OBSERVATION_SIZE, encode_waypoint_observation,
@@ -23,6 +32,7 @@ pub use ml::{
 const START_HOLD_FRAMES: usize = 13;
 const AI_STARTUP_MAX_MOVE_FRAMES: usize = 240;
 const AI_STARTUP_MAX_WAIT_FRAMES: usize = 240;
+const HAZARD_CELL_PARALLEL_MAX_LANES: usize = 16;
 
 pub const PIXEL_WIDTH: usize = dodge_core::FRAMEBUFFER_WIDTH;
 pub const PIXEL_HEIGHT: usize = dodge_core::FRAMEBUFFER_HEIGHT;
@@ -143,6 +153,7 @@ pub struct BatchObservation {
     pub frame: u32,
     pub frames_advanced: u32,
     pub reward: u32,
+    pub survival_frames: u32,
     pub done: bool,
     pub mode: Mode,
     pub events: Vec<FrameEvent>,
@@ -173,6 +184,42 @@ pub struct MlBatchObservation {
     pub player_position: [f32; 2],
 }
 
+/// One render-free ML step result that omits the observation vector.
+///
+/// The waypoint learner holds each selected target for several native steps;
+/// intermediate steps only need reward, terminal state, and player position.
+/// A full `MlBatchObservation` is still materialized at the decision boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MlPositionBatchObservation {
+    pub lane: usize,
+    pub seed: u32,
+    pub frame: u32,
+    pub frames_advanced: u32,
+    pub reward: u32,
+    pub done: bool,
+    pub mode: Mode,
+    pub player_position: [f32; 2],
+}
+
+/// One ordered rendered result for pixel-only ML consumers.
+///
+/// This boundary intentionally carries no snapshot, hashes, board, events,
+/// audio, or derived waypoint vector. It is the smallest native result that
+/// can drive a pixel learner and the hidden movement controller.
+#[derive(Debug, PartialEq)]
+pub struct PixelBatchObservation {
+    pub lane: usize,
+    pub seed: u32,
+    pub frame: u32,
+    pub frames_advanced: u32,
+    pub reward: u32,
+    pub survival_frames: u32,
+    pub done: bool,
+    pub mode: Mode,
+    pub pixels: [u8; FRAMEBUFFER_SIZE],
+    pub player_position: [f32; 2],
+}
+
 impl BatchObservation {
     pub fn is_game_ready(&self) -> bool {
         self.full_state
@@ -192,8 +239,11 @@ impl BatchObservation {
 pub enum BatchError {
     InvalidStepFrames(u32),
     InvalidMlGridSpacing(u32),
+    InvalidHazardGridSize(u32),
+    InvalidHazardHorizon(u32),
     MlObservationDisabled,
     InvalidLookaheadSteps(u32),
+    InvalidWaypointTolerance,
     EmptyBatch,
     EmptySnapshots,
     LaneCountMismatch { expected: usize, actual: usize },
@@ -215,6 +265,19 @@ impl Display for BatchError {
             Self::InvalidMlGridSpacing(spacing) => {
                 write!(formatter, "ML grid spacing must be positive: {spacing}")
             }
+            Self::InvalidHazardGridSize(size) => {
+                write!(
+                    formatter,
+                    "hazard grid size must be between 1 and {0}: {size}",
+                    HAZARD_MAX_GRID_SIZE
+                )
+            }
+            Self::InvalidHazardHorizon(horizon) => {
+                write!(
+                    formatter,
+                    "hazard prediction horizon must be positive: {horizon}"
+                )
+            }
             Self::MlObservationDisabled => {
                 formatter.write_str("fast ML batch operations require ML observation support")
             }
@@ -224,6 +287,9 @@ impl Display for BatchError {
                     "counterfactual lookahead must be positive: {steps}"
                 )
             }
+            Self::InvalidWaypointTolerance => formatter.write_str(
+                "waypoint tolerance must be finite, non-negative, and below half spacing",
+            ),
             Self::EmptyBatch => formatter.write_str("batch must contain at least one lane"),
             Self::EmptySnapshots => {
                 formatter.write_str("counterfactual scoring requires at least one snapshot")
@@ -412,6 +478,22 @@ impl BatchEnvironment {
         self.refresh_ml_reset_observations()
     }
 
+    /// Render-free AI reset using centered fixed-N hazard waypoints.
+    pub fn reset_ml_with_centered_startup(
+        &mut self,
+        seeds: &[u32],
+        grid_size: u32,
+    ) -> Result<Vec<MlBatchObservation>, BatchError> {
+        if !hazard::validate_grid_size(grid_size) {
+            return Err(BatchError::InvalidHazardGridSize(grid_size));
+        }
+        self.reset_ml(seeds)?;
+        for game in &mut self.games {
+            prepare_ml_centered_startup(game, grid_size)?;
+        }
+        self.refresh_ml_reset_observations()
+    }
+
     /// Reset only the requested lanes, preserving every other lane's state.
     pub fn reset_lanes(
         &mut self,
@@ -572,11 +654,74 @@ impl BatchEnvironment {
         self.refresh_ml_reset_lane_observations(lanes)
     }
 
+    /// Reset selected ML lanes using centered fixed-N hazard waypoints.
+    pub fn reset_ml_lanes_with_centered_startup(
+        &mut self,
+        lanes: &[usize],
+        seeds: &[u32],
+        grid_size: u32,
+    ) -> Result<Vec<MlBatchObservation>, BatchError> {
+        if !hazard::validate_grid_size(grid_size) {
+            return Err(BatchError::InvalidHazardGridSize(grid_size));
+        }
+        self.reset_ml_lanes(lanes, seeds)?;
+        let lane_count = self.games.len();
+        for lane in lanes.iter().copied() {
+            let game = self
+                .games
+                .get_mut(lane)
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            prepare_ml_centered_startup(game, grid_size)?;
+        }
+        self.refresh_ml_reset_lane_observations(lanes)
+    }
+
     pub fn step(&mut self, actions: &[Action]) -> Result<Vec<BatchObservation>, BatchError> {
         self.validate_actions(actions)?;
         match self.config.execution {
             ExecutionMode::Serial => self.step_serial(actions),
             ExecutionMode::Parallel => self.step_parallel(actions),
+        }
+    }
+
+    /// Advance all lanes through the rendered pixel-only boundary.
+    pub fn step_pixels(
+        &mut self,
+        actions: &[Action],
+    ) -> Result<Vec<PixelBatchObservation>, BatchError> {
+        self.validate_actions(actions)?;
+        match self.config.execution {
+            ExecutionMode::Serial => self.step_pixels_serial(actions, None),
+            ExecutionMode::Parallel => self.step_pixels_parallel(actions, None),
+        }
+    }
+
+    /// Step selected lanes only; excluded games and their bookkeeping stay frozen.
+    /// Results retain original lane IDs and contain only selected lanes.
+    pub fn step_pixels_active(
+        &mut self,
+        actions: &[Action],
+        active: &[bool],
+    ) -> Result<Vec<PixelBatchObservation>, BatchError> {
+        if actions.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        for actual in [actions.len(), active.len()] {
+            if actual != self.games.len() {
+                return Err(BatchError::LaneCountMismatch {
+                    expected: self.games.len(),
+                    actual,
+                });
+            }
+        }
+        for (lane, (complete, selected)) in self.done.iter().zip(active).enumerate() {
+            if *complete && *selected {
+                return Err(BatchError::LaneAlreadyDone(lane));
+            }
+        }
+        match self.config.execution {
+            ExecutionMode::Serial => self.step_pixels_serial(actions, Some(active)),
+            ExecutionMode::Parallel => self.step_pixels_parallel(actions, Some(active)),
         }
     }
 
@@ -587,6 +732,93 @@ impl BatchEnvironment {
         match self.config.execution {
             ExecutionMode::Serial => self.step_ml_serial(actions, grid_spacing),
             ExecutionMode::Parallel => self.step_ml_parallel(actions, grid_spacing),
+        }
+    }
+
+    /// Advance all lanes through the render-free ML boundary without encoding
+    /// the 225-value observation vector.
+    pub fn step_ml_positions(
+        &mut self,
+        actions: &[Action],
+    ) -> Result<Vec<MlPositionBatchObservation>, BatchError> {
+        let grid_spacing = self.ml_grid_spacing()?;
+        self.validate_actions(actions)?;
+        match self.config.execution {
+            ExecutionMode::Serial => self.step_ml_positions_serial(actions, grid_spacing),
+            ExecutionMode::Parallel => self.step_ml_positions_parallel(actions, grid_spacing),
+        }
+    }
+
+    /// Materialize the current render-free ML observation without advancing.
+    pub fn observe_ml(&self) -> Result<Vec<MlBatchObservation>, BatchError> {
+        let grid_spacing = self.ml_grid_spacing()?;
+        if self.games.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        self.games
+            .iter()
+            .enumerate()
+            .map(|(lane, game)| {
+                let seed = *self
+                    .seeds
+                    .get(lane)
+                    .ok_or(BatchError::LaneIndexOutOfBounds {
+                        lane,
+                        lane_count: self.games.len(),
+                    })?;
+                ml_observation_at_reset(lane, seed, game, grid_spacing)
+            })
+            .collect()
+    }
+
+    /// Compute the slow/reference frozen-center hazard field for every lane.
+    ///
+    /// The live games are borrowed immutably. Each TTC query clones its lane
+    /// inside the core, so this operation cannot advance or mutate training
+    /// state. Rayon is used only for independent lane work; result ordering
+    /// remains the stable lane order.
+    pub fn hazard_observations(
+        &self,
+        grid_size: u32,
+        horizon: u32,
+        spawn_halo_radius: u32,
+    ) -> Result<Vec<HazardObservation>, BatchError> {
+        if self.games.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        if !hazard::validate_grid_size(grid_size) {
+            return Err(BatchError::InvalidHazardGridSize(grid_size));
+        }
+        if horizon == 0 {
+            return Err(BatchError::InvalidHazardHorizon(horizon));
+        }
+        let geometry = hazard::HazardGeometry::new(grid_size as usize)
+            .ok_or(BatchError::InvalidHazardGridSize(grid_size))?;
+        let observe_lane = |(lane, game): (usize, &NativeGame)| {
+            hazard::observe_with_geometry(lane, game, &geometry, horizon, spawn_halo_radius, false)
+                .map_err(BatchError::Core)
+        };
+        let observe_parallel_lane = |(lane, game): (usize, &NativeGame)| {
+            hazard::observe_with_geometry(lane, game, &geometry, horizon, spawn_halo_radius, true)
+                .map_err(BatchError::Core)
+        };
+        match self.config.execution {
+            ExecutionMode::Serial => self.games.iter().enumerate().map(observe_lane).collect(),
+            ExecutionMode::Parallel => {
+                if self.games.len() <= HAZARD_CELL_PARALLEL_MAX_LANES {
+                    self.games
+                        .par_iter()
+                        .enumerate()
+                        .map(observe_parallel_lane)
+                        .collect()
+                } else {
+                    self.games
+                        .par_iter()
+                        .enumerate()
+                        .map(observe_lane)
+                        .collect()
+                }
+            }
         }
     }
 
@@ -627,6 +859,67 @@ impl BatchEnvironment {
             }
         };
 
+        match self.config.execution {
+            ExecutionMode::Serial => snapshots.iter().map(score_snapshot).collect(),
+            ExecutionMode::Parallel => snapshots.par_iter().map(score_snapshot).collect(),
+        }
+    }
+
+    /// Score the nine relative waypoint choices under the training controller.
+    /// Each choice fixes one neighboring target, then recomputes native steering
+    /// from the simulated player position for every held decision.
+    pub fn score_waypoint_actions(
+        &self,
+        snapshots: &[Vec<u8>],
+        hold_decisions: u32,
+        grid_spacing: u32,
+        tolerance: f32,
+        arrival_latching: bool,
+        ban_corner_nodes: bool,
+    ) -> Result<Vec<[f32; ACTION_COUNT]>, BatchError> {
+        if snapshots.is_empty() {
+            return Err(BatchError::EmptySnapshots);
+        }
+        if hold_decisions == 0 {
+            return Err(BatchError::InvalidLookaheadSteps(hold_decisions));
+        }
+        if grid_spacing == 0 {
+            return Err(BatchError::InvalidMlGridSpacing(grid_spacing));
+        }
+        if !tolerance.is_finite() || tolerance < 0.0 || tolerance >= grid_spacing as f32 / 2.0 {
+            return Err(BatchError::InvalidWaypointTolerance);
+        }
+        let tolerance = PicoFixed::from_f32(tolerance);
+        let points = waypoint_axis_points(grid_spacing);
+        let score_snapshot = |bytes: &Vec<u8>| -> Result<[f32; ACTION_COUNT], BatchError> {
+            let snapshot = Snapshot::from_canonical_bytes(bytes)?;
+            let initial_survival = snapshot.logical_state().survival_frames;
+            let base_game = NativeGame::restore(&snapshot)?;
+            let mut scores = [0.0; ACTION_COUNT];
+            for (score, waypoint_action) in scores.iter_mut().zip(Action::ALL) {
+                let mut game = base_game.clone();
+                let target = waypoint_target(&game, &points, waypoint_action, ban_corner_nodes);
+                let mut arrived =
+                    arrival_latching && waypoint_reached_with_tolerance(&game, target, tolerance);
+                for _ in 0..hold_decisions {
+                    let action = waypoint_steering_action(
+                        &game,
+                        target,
+                        tolerance,
+                        arrival_latching && arrived,
+                    );
+                    let result = game.step(action, self.config.step_frames)?;
+                    if result.done {
+                        break;
+                    }
+                    if arrival_latching && !arrived {
+                        arrived = waypoint_reached_with_tolerance(&game, target, tolerance);
+                    }
+                }
+                *score = game.survival_frames().saturating_sub(initial_survival) as f32;
+            }
+            Ok(scores)
+        };
         match self.config.execution {
             ExecutionMode::Serial => snapshots.iter().map(score_snapshot).collect(),
             ExecutionMode::Parallel => snapshots.par_iter().map(score_snapshot).collect(),
@@ -730,6 +1023,129 @@ impl BatchEnvironment {
             if let Some(done) = self.done.get_mut(lane) {
                 *done = frame_result.done;
             }
+            observations.push(observation);
+        }
+        Ok(observations)
+    }
+
+    fn step_pixels_serial(
+        &mut self,
+        actions: &[Action],
+        active: Option<&[bool]>,
+    ) -> Result<Vec<PixelBatchObservation>, BatchError> {
+        let mut observations = Vec::with_capacity(actions.len());
+        let game_count = self.games.len();
+        for (lane, action) in actions.iter().copied().enumerate() {
+            if active.is_some_and(|mask| !mask.get(lane).copied().unwrap_or(false)) {
+                continue;
+            }
+            let previous_frame =
+                self.last_frames
+                    .get(lane)
+                    .copied()
+                    .ok_or(BatchError::LaneCountMismatch {
+                        expected: actions.len(),
+                        actual: game_count,
+                    })?;
+            let previous_survival = self.last_survival_frames.get(lane).copied().ok_or(
+                BatchError::LaneCountMismatch {
+                    expected: actions.len(),
+                    actual: self.last_survival_frames.len(),
+                },
+            )?;
+            let seed = self
+                .seeds
+                .get(lane)
+                .copied()
+                .ok_or(BatchError::LaneCountMismatch {
+                    expected: actions.len(),
+                    actual: self.seeds.len(),
+                })?;
+            let (observation, frame, survival, done) = {
+                let game = self
+                    .games
+                    .get_mut(lane)
+                    .ok_or(BatchError::LaneCountMismatch {
+                        expected: actions.len(),
+                        actual: game_count,
+                    })?;
+                let result = game.step_pixels(action, self.config.step_frames)?;
+                let frame = result.frame;
+                let survival = result.survival_frames;
+                let done = result.done;
+                let observation = pixel_observation_from_result(
+                    lane,
+                    seed,
+                    previous_frame,
+                    previous_survival,
+                    result,
+                );
+                (observation, frame, survival, done)
+            };
+            self.record_pixel_step(lane, frame, survival, done);
+            observations.push(observation);
+        }
+        Ok(observations)
+    }
+
+    fn step_pixels_parallel(
+        &mut self,
+        actions: &[Action],
+        active: Option<&[bool]>,
+    ) -> Result<Vec<PixelBatchObservation>, BatchError> {
+        let previous_frames = self.last_frames.clone();
+        let previous_survival_frames = self.last_survival_frames.clone();
+        let seeds = self.seeds.clone();
+        let step_frames = self.config.step_frames;
+        let results: Vec<Result<IndexedPixelStep, BatchError>> =
+            self.games
+                .par_iter_mut()
+                .enumerate()
+                .zip(actions.par_iter().copied())
+                .filter(|((lane, _), _)| {
+                    active.is_none_or(|mask| mask.get(*lane).copied().unwrap_or(false))
+                })
+                .map(|((lane, game), action)| {
+                    let previous_frame = previous_frames.get(lane).copied().ok_or(
+                        BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: previous_frames.len(),
+                        },
+                    )?;
+                    let previous_survival = previous_survival_frames.get(lane).copied().ok_or(
+                        BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: previous_survival_frames.len(),
+                        },
+                    )?;
+                    let seed = seeds
+                        .get(lane)
+                        .copied()
+                        .ok_or(BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: seeds.len(),
+                        })?;
+                    let result = game.step_pixels(action, step_frames)?;
+                    let observation = pixel_observation_from_result(
+                        lane,
+                        seed,
+                        previous_frame,
+                        previous_survival,
+                        result,
+                    );
+                    Ok(IndexedPixelStep { observation })
+                })
+                .collect();
+
+        let mut observations = Vec::with_capacity(results.len());
+        for indexed in results {
+            let observation = indexed?.observation;
+            self.record_pixel_step(
+                observation.lane,
+                observation.frame,
+                observation.survival_frames,
+                observation.done,
+            );
             observations.push(observation);
         }
         Ok(observations)
@@ -847,6 +1263,118 @@ impl BatchEnvironment {
         Ok(observations)
     }
 
+    fn step_ml_positions_serial(
+        &mut self,
+        actions: &[Action],
+        grid_spacing: u32,
+    ) -> Result<Vec<MlPositionBatchObservation>, BatchError> {
+        let mut observations = Vec::with_capacity(actions.len());
+        let game_count = self.games.len();
+        for (lane, action) in actions.iter().copied().enumerate() {
+            let previous_frame =
+                self.last_frames
+                    .get(lane)
+                    .copied()
+                    .ok_or(BatchError::LaneCountMismatch {
+                        expected: actions.len(),
+                        actual: game_count,
+                    })?;
+            let previous_survival = self.last_survival_frames.get(lane).copied().ok_or(
+                BatchError::LaneCountMismatch {
+                    expected: actions.len(),
+                    actual: self.last_survival_frames.len(),
+                },
+            )?;
+            let seed = self
+                .seeds
+                .get(lane)
+                .copied()
+                .ok_or(BatchError::LaneCountMismatch {
+                    expected: actions.len(),
+                    actual: self.seeds.len(),
+                })?;
+            let observation = {
+                let game = self
+                    .games
+                    .get_mut(lane)
+                    .ok_or(BatchError::LaneCountMismatch {
+                        expected: actions.len(),
+                        actual: game_count,
+                    })?;
+                let result = game.step_ml(action, self.config.step_frames)?;
+                ml_position_observation_from_game(
+                    lane,
+                    seed,
+                    previous_frame,
+                    previous_survival,
+                    result,
+                    game,
+                    grid_spacing,
+                )?
+            };
+            self.record_ml_position_step(&observation);
+            observations.push(observation);
+        }
+        Ok(observations)
+    }
+
+    fn step_ml_positions_parallel(
+        &mut self,
+        actions: &[Action],
+        grid_spacing: u32,
+    ) -> Result<Vec<MlPositionBatchObservation>, BatchError> {
+        let previous_frames = self.last_frames.clone();
+        let previous_survival_frames = self.last_survival_frames.clone();
+        let seeds = self.seeds.clone();
+        let step_frames = self.config.step_frames;
+        let results: Vec<Result<IndexedMlPositionStep, BatchError>> =
+            self.games
+                .par_iter_mut()
+                .enumerate()
+                .zip(actions.par_iter().copied())
+                .map(|((lane, game), action)| {
+                    let previous_frame = previous_frames.get(lane).copied().ok_or(
+                        BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: previous_frames.len(),
+                        },
+                    )?;
+                    let previous_survival = previous_survival_frames.get(lane).copied().ok_or(
+                        BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: previous_survival_frames.len(),
+                        },
+                    )?;
+                    let seed = seeds
+                        .get(lane)
+                        .copied()
+                        .ok_or(BatchError::LaneCountMismatch {
+                            expected: actions.len(),
+                            actual: seeds.len(),
+                        })?;
+                    let result = game.step_ml(action, step_frames)?;
+                    let observation = ml_position_observation_from_game(
+                        lane,
+                        seed,
+                        previous_frame,
+                        previous_survival,
+                        result,
+                        game,
+                        grid_spacing,
+                    )?;
+                    Ok(IndexedMlPositionStep { observation })
+                })
+                .collect();
+
+        let mut observations = Vec::with_capacity(results.len());
+        for indexed in results {
+            let observation = indexed?.observation;
+            self.record_ml_position_step(&observation);
+            observations.push(observation);
+        }
+        Ok(observations)
+    }
+
     fn record_ml_step(&mut self, observation: &MlBatchObservation) {
         if let Some(last_frame) = self.last_frames.get_mut(observation.lane) {
             *last_frame = observation.frame;
@@ -856,6 +1384,30 @@ impl BatchEnvironment {
         }
         if let Some(done) = self.done.get_mut(observation.lane) {
             *done = observation.done;
+        }
+    }
+
+    fn record_ml_position_step(&mut self, observation: &MlPositionBatchObservation) {
+        if let Some(last_frame) = self.last_frames.get_mut(observation.lane) {
+            *last_frame = observation.frame;
+        }
+        if let Some(last_survival) = self.last_survival_frames.get_mut(observation.lane) {
+            *last_survival = last_survival.saturating_add(observation.reward);
+        }
+        if let Some(done) = self.done.get_mut(observation.lane) {
+            *done = observation.done;
+        }
+    }
+
+    fn record_pixel_step(&mut self, lane: usize, frame: u32, survival: u32, done: bool) {
+        if let Some(last_frame) = self.last_frames.get_mut(lane) {
+            *last_frame = frame;
+        }
+        if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+            *last_survival = survival;
+        }
+        if let Some(done_slot) = self.done.get_mut(lane) {
+            *done_slot = done;
         }
     }
 
@@ -979,6 +1531,26 @@ impl BatchEnvironment {
                 .seeds
                 .get(lane)
                 .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            let (frame, survival_frames, done) = self
+                .games
+                .get(lane)
+                .map(|game| {
+                    (
+                        game.lifecycle().frame,
+                        game.survival_frames(),
+                        game.lifecycle().dead,
+                    )
+                })
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            if let Some(last_frame) = self.last_frames.get_mut(lane) {
+                *last_frame = frame;
+            }
+            if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+                *last_survival = survival_frames;
+            }
+            if let Some(done_slot) = self.done.get_mut(lane) {
+                *done_slot = done;
+            }
             let game = self
                 .games
                 .get(lane)
@@ -1000,6 +1572,26 @@ impl BatchEnvironment {
                 .seeds
                 .get(lane)
                 .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            let (frame, survival_frames, done) = self
+                .games
+                .get(lane)
+                .map(|game| {
+                    (
+                        game.lifecycle().frame,
+                        game.survival_frames(),
+                        game.lifecycle().dead,
+                    )
+                })
+                .ok_or(BatchError::LaneIndexOutOfBounds { lane, lane_count })?;
+            if let Some(last_frame) = self.last_frames.get_mut(lane) {
+                *last_frame = frame;
+            }
+            if let Some(last_survival) = self.last_survival_frames.get_mut(lane) {
+                *last_survival = survival_frames;
+            }
+            if let Some(done_slot) = self.done.get_mut(lane) {
+                *done_slot = done;
+            }
             let game = self
                 .games
                 .get(lane)
@@ -1020,6 +1612,14 @@ struct IndexedStep {
 
 struct IndexedMlStep {
     observation: MlBatchObservation,
+}
+
+struct IndexedMlPositionStep {
+    observation: MlPositionBatchObservation,
+}
+
+struct IndexedPixelStep {
+    observation: PixelBatchObservation,
 }
 
 fn validate_reset_lanes(
@@ -1079,6 +1679,37 @@ fn prepare_render_startup(game: &mut NativeGame, grid_spacing: u32) -> Result<()
 
 fn prepare_ml_startup(game: &mut NativeGame, grid_spacing: u32) -> Result<(), BatchError> {
     let target = startup_up_target(game, grid_spacing);
+    prepare_ml_startup_to(game, target)
+}
+
+fn prepare_ml_centered_startup(game: &mut NativeGame, grid_size: u32) -> Result<(), BatchError> {
+    let target = centered_startup_up_target(game, grid_size);
+    for _ in 0..AI_STARTUP_MAX_MOVE_FRAMES {
+        if waypoint_reached(game, target) {
+            break;
+        }
+        let action = waypoint_steering_action(game, target, PicoFixed::from_int(2), false);
+        let result = game.advance_frame_ml(action.mask(), action.mask())?;
+        if result.done {
+            return Ok(());
+        }
+    }
+    for _ in 0..AI_STARTUP_MAX_WAIT_FRAMES {
+        if has_visible_enemy(game) {
+            break;
+        }
+        let result = game.advance_frame_ml(Action::Neutral.mask(), Action::Neutral.mask())?;
+        if result.done {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn prepare_ml_startup_to(
+    game: &mut NativeGame,
+    target: (PicoFixed, PicoFixed),
+) -> Result<(), BatchError> {
     for _ in 0..AI_STARTUP_MAX_MOVE_FRAMES {
         if waypoint_reached(game, target) {
             break;
@@ -1102,10 +1733,28 @@ fn prepare_ml_startup(game: &mut NativeGame, grid_spacing: u32) -> Result<(), Ba
 
 fn startup_up_target(game: &NativeGame, spacing: u32) -> (PicoFixed, PicoFixed) {
     let points = waypoint_axis_points(spacing);
+    startup_up_target_from_points(game, &points)
+}
+
+fn centered_startup_up_target(game: &NativeGame, grid_size: u32) -> (PicoFixed, PicoFixed) {
+    let points = hazard::centered_points(grid_size as usize);
+    startup_up_target_from_points(game, &points)
+}
+
+fn startup_up_target_from_points(
+    game: &NativeGame,
+    points: &[PicoFixed],
+) -> (PicoFixed, PicoFixed) {
     let player = game.player();
     let column = nearest_waypoint_index(&points, player.x);
     let row = nearest_waypoint_index(&points, player.y);
-    (points[column], points[row.saturating_sub(1)])
+    (
+        points.get(column).copied().unwrap_or(PicoFixed::ZERO),
+        points
+            .get(row.saturating_sub(1))
+            .copied()
+            .unwrap_or(PicoFixed::ZERO),
+    )
 }
 
 fn waypoint_axis_points(spacing: u32) -> Vec<PicoFixed> {
@@ -1140,10 +1789,96 @@ fn nearest_waypoint_index(points: &[PicoFixed], value: PicoFixed) -> usize {
 }
 
 fn waypoint_reached(game: &NativeGame, target: (PicoFixed, PicoFixed)) -> bool {
+    waypoint_reached_with_tolerance(game, target, PicoFixed::from_int(2))
+}
+
+fn waypoint_reached_with_tolerance(
+    game: &NativeGame,
+    target: (PicoFixed, PicoFixed),
+    tolerance: PicoFixed,
+) -> bool {
     let player = game.player();
-    let tolerance = PicoFixed::from_int(2);
     player.x.sub(target.0).raw().abs() <= tolerance.raw()
         && player.y.sub(target.1).raw().abs() <= tolerance.raw()
+}
+
+fn waypoint_target(
+    game: &NativeGame,
+    points: &[PicoFixed],
+    action: Action,
+    ban_corner_nodes: bool,
+) -> (PicoFixed, PicoFixed) {
+    let player = game.player();
+    let current = (
+        nearest_waypoint_index(points, player.x),
+        nearest_waypoint_index(points, player.y),
+    );
+    let (horizontal, vertical) = action_delta(action);
+    let last = points.len().saturating_sub(1);
+    let target = (
+        current.0.saturating_add_signed(horizontal).min(last),
+        current.1.saturating_add_signed(vertical).min(last),
+    );
+    let target =
+        if ban_corner_nodes && target.0.is_multiple_of(last) && target.1.is_multiple_of(last) {
+            current
+        } else {
+            target
+        };
+    (
+        points.get(target.0).copied().unwrap_or(PicoFixed::ZERO),
+        points.get(target.1).copied().unwrap_or(PicoFixed::ZERO),
+    )
+}
+
+const fn action_delta(action: Action) -> (isize, isize) {
+    match action {
+        Action::Neutral => (0, 0),
+        Action::Left => (-1, 0),
+        Action::Right => (1, 0),
+        Action::Up => (0, -1),
+        Action::Down => (0, 1),
+        Action::UpLeft => (-1, -1),
+        Action::UpRight => (1, -1),
+        Action::DownLeft => (-1, 1),
+        Action::DownRight => (1, 1),
+    }
+}
+
+fn waypoint_steering_action(
+    game: &NativeGame,
+    target: (PicoFixed, PicoFixed),
+    tolerance: PicoFixed,
+    arrived: bool,
+) -> Action {
+    if arrived {
+        return Action::Neutral;
+    }
+    let player = game.player();
+    let axis = |delta: i32| {
+        if delta < -tolerance.raw() {
+            -1
+        } else if delta > tolerance.raw() {
+            1
+        } else {
+            0
+        }
+    };
+    match (
+        axis(target.0.sub(player.x).raw()),
+        axis(target.1.sub(player.y).raw()),
+    ) {
+        (0, 0) => Action::Neutral,
+        (-1, 0) => Action::Left,
+        (1, 0) => Action::Right,
+        (0, -1) => Action::Up,
+        (0, 1) => Action::Down,
+        (-1, -1) => Action::UpLeft,
+        (1, -1) => Action::UpRight,
+        (-1, 1) => Action::DownLeft,
+        (1, 1) => Action::DownRight,
+        _ => Action::Neutral,
+    }
 }
 
 fn has_visible_enemy(game: &NativeGame) -> bool {
@@ -1165,7 +1900,7 @@ fn ml_observation_at_reset(
         frame: game.lifecycle().frame,
         frames_advanced: 0,
         reward: 0,
-        done: false,
+        done: game.lifecycle().dead,
         mode: game.lifecycle().mode,
         ml_observation,
         player_position: [player.x.to_f32(), player.y.to_f32()],
@@ -1196,6 +1931,53 @@ fn ml_observation_from_game(
         ml_observation,
         player_position: [player.x.to_f32(), player.y.to_f32()],
     })
+}
+
+fn ml_position_observation_from_game(
+    lane: usize,
+    seed: u32,
+    previous_frame: u32,
+    previous_survival: u32,
+    result: MlFrameResult,
+    game: &NativeGame,
+    grid_spacing: u32,
+) -> Result<MlPositionBatchObservation, BatchError> {
+    let player = game.player();
+    if grid_spacing == 0 {
+        return Err(BatchError::InvalidMlGridSpacing(grid_spacing));
+    }
+    Ok(MlPositionBatchObservation {
+        lane,
+        seed,
+        frame: result.frame,
+        frames_advanced: result.frame.saturating_sub(previous_frame),
+        reward: game.survival_frames().saturating_sub(previous_survival),
+        done: result.done,
+        mode: result.mode,
+        player_position: [player.x.to_f32(), player.y.to_f32()],
+    })
+}
+
+fn pixel_observation_from_result(
+    lane: usize,
+    seed: u32,
+    previous_frame: u32,
+    previous_survival: u32,
+    result: PixelFrameResult,
+) -> PixelBatchObservation {
+    let [player_x, player_y] = result.player_position;
+    PixelBatchObservation {
+        lane,
+        seed,
+        frame: result.frame,
+        frames_advanced: result.frame.saturating_sub(previous_frame),
+        reward: result.survival_frames.saturating_sub(previous_survival),
+        survival_frames: result.survival_frames,
+        done: result.done,
+        mode: result.mode,
+        pixels: result.pixels.into_array(),
+        player_position: [player_x.to_f32(), player_y.to_f32()],
+    }
 }
 
 fn observation_from_frame_result(
@@ -1243,6 +2025,7 @@ fn observation_from_snapshot(
         frame: logical_state.lifecycle.frame,
         frames_advanced,
         reward: 0,
+        survival_frames: logical_state.survival_frames,
         done,
         mode: logical_state.lifecycle.mode,
         events,
@@ -1279,7 +2062,8 @@ fn observation_from_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{
-        Action, BOARD_VALUES, BatchConfig, BatchEnvironment, ExecutionMode, ObservationFlags,
+        Action, BOARD_VALUES, BatchConfig, BatchEnvironment, ExecutionMode, HAZARD_CHANNELS,
+        HAZARD_DEFAULT_HORIZON, HAZARD_DEFAULT_SPAWN_HALO_RADIUS, HAZARD_SCALARS, ObservationFlags,
     };
 
     fn configured(execution: ExecutionMode) -> BatchConfig {
@@ -1384,6 +2168,90 @@ mod tests {
                 .unwrap_or_else(|_| unreachable!("parallel ML step should succeed"));
             assert_eq!(serial_step, parallel_step);
             if serial_step.iter().any(|observation| observation.done) {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn compact_ml_steps_preserve_state_until_observation_is_requested() {
+        let seeds = [42, 13, 30_100];
+        let mut full = BatchEnvironment::new(configured_ml(ExecutionMode::Serial, false))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        let mut compact = BatchEnvironment::new(configured_ml(ExecutionMode::Serial, false))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        assert_eq!(full.reset_ml(&seeds), compact.reset_ml(&seeds));
+
+        for step in 0..90 {
+            let actions = [action_at(step), action_at(step + 2), action_at(step + 5)];
+            let full_step = full
+                .step_ml(&actions)
+                .unwrap_or_else(|_| unreachable!("full ML step should succeed"));
+            let compact_step = compact
+                .step_ml_positions(&actions)
+                .unwrap_or_else(|_| unreachable!("compact ML step should succeed"));
+            for (full, compact) in full_step.iter().zip(compact_step.iter()) {
+                assert_eq!(full.lane, compact.lane);
+                assert_eq!(full.seed, compact.seed);
+                assert_eq!(full.frame, compact.frame);
+                assert_eq!(full.frames_advanced, compact.frames_advanced);
+                assert_eq!(full.reward, compact.reward);
+                assert_eq!(full.done, compact.done);
+                assert_eq!(full.mode, compact.mode);
+                assert_eq!(full.player_position, compact.player_position);
+            }
+            let materialized = compact
+                .observe_ml()
+                .unwrap_or_else(|_| unreachable!("current ML observation should succeed"));
+            for (full, current) in full_step.iter().zip(materialized.iter()) {
+                assert_eq!(full.ml_observation, current.ml_observation);
+                assert_eq!(full.player_position, current.player_position);
+            }
+            if full_step.iter().any(|observation| observation.done) {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_pixel_boundary_matches_canonical_batch_trace() {
+        let seeds = [42, 13, 30_100];
+        let mut canonical = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        let mut pixels = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        canonical
+            .reset(&seeds)
+            .unwrap_or_else(|_| unreachable!("canonical reset should succeed"));
+        pixels
+            .reset(&seeds)
+            .unwrap_or_else(|_| unreachable!("pixel reset should succeed"));
+
+        for step in 0..90 {
+            let actions = [action_at(step), action_at(step + 2), action_at(step + 5)];
+            let canonical_step = canonical
+                .step(&actions)
+                .unwrap_or_else(|_| unreachable!("canonical step should succeed"));
+            let pixel_step = pixels
+                .step_pixels(&actions)
+                .unwrap_or_else(|_| unreachable!("pixel step should succeed"));
+            for (canonical, pixel) in canonical_step.iter().zip(pixel_step.iter()) {
+                assert_eq!(canonical.lane, pixel.lane);
+                assert_eq!(canonical.seed, pixel.seed);
+                assert_eq!(canonical.frame, pixel.frame);
+                assert_eq!(canonical.frames_advanced, pixel.frames_advanced);
+                assert_eq!(canonical.reward, pixel.reward);
+                assert_eq!(canonical.survival_frames, pixel.survival_frames);
+                assert_eq!(canonical.done, pixel.done);
+                assert_eq!(canonical.mode, pixel.mode);
+                assert_eq!(canonical.pixels.as_ref(), Some(&pixel.pixels));
+                let canonical_position = canonical
+                    .full_state
+                    .as_ref()
+                    .map(|state| [state.player.x.to_f32(), state.player.y.to_f32()]);
+                assert_eq!(canonical_position, Some(pixel.player_position));
+            }
+            if canonical_step.iter().any(|observation| observation.done) {
                 break;
             }
         }
@@ -1516,6 +2384,44 @@ mod tests {
             .unwrap_or_else(|| unreachable!("board requested"));
         assert_eq!(board.as_slice().len(), BOARD_VALUES);
         assert!(board.as_slice().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn hazard_reference_is_parallel_deterministic_and_live_state_preserving() {
+        let seeds = [13, 27];
+        let mut serial = BatchEnvironment::new(configured(ExecutionMode::Serial))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        let mut parallel = BatchEnvironment::new(configured(ExecutionMode::Parallel))
+            .unwrap_or_else(|_| unreachable!("valid batch config"));
+        serial
+            .reset(&seeds)
+            .unwrap_or_else(|_| unreachable!("serial reset should succeed"));
+        parallel
+            .reset(&seeds)
+            .unwrap_or_else(|_| unreachable!("parallel reset should succeed"));
+
+        let serial_field = serial
+            .hazard_observations(4, HAZARD_DEFAULT_HORIZON, HAZARD_DEFAULT_SPAWN_HALO_RADIUS)
+            .unwrap_or_else(|_| unreachable!("serial hazard observation should succeed"));
+        let parallel_field = parallel
+            .hazard_observations(4, HAZARD_DEFAULT_HORIZON, HAZARD_DEFAULT_SPAWN_HALO_RADIUS)
+            .unwrap_or_else(|_| unreachable!("parallel hazard observation should succeed"));
+        assert_eq!(serial_field, parallel_field);
+        assert_eq!(serial_field.len(), seeds.len());
+        assert_eq!(
+            serial_field
+                .first()
+                .map(|observation| observation.hazard_observation.len()),
+            Some(HAZARD_CHANNELS * 4 * 4 + HAZARD_SCALARS)
+        );
+
+        let serial_step = serial
+            .step(&[Action::Neutral, Action::Left])
+            .unwrap_or_else(|_| unreachable!("serial step should succeed"));
+        let parallel_step = parallel
+            .step(&[Action::Neutral, Action::Left])
+            .unwrap_or_else(|_| unreachable!("parallel step should succeed"));
+        assert_eq!(serial_step, parallel_step);
     }
 
     #[test]

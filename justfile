@@ -135,6 +135,10 @@ dodge-ng-report run *options:
     devenv -q shell -- dodge-ng-report {{ run }} {{ options }}
 
 [group("dodge")]
+dodge-ng-hpo-report run *options:
+    devenv -q shell -- uv run --extra native --extra colab python -m dodge.ng.hpo_report {{ run }} {{ options }}
+
+[group("dodge")]
 dodge-ng-diagnose-actions *options:
     @mkdir -p history/dodge/ng/.launch-tmp
     @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-diagnose-actions {{ options }}
@@ -197,6 +201,20 @@ dodge-ng-pixel-dqn *options:
 [group("dodge")]
 dodge-ng-pixel-compare *options:
     @dodge-ng-pixel-compare {{ options }}
+
+[group("dodge")]
+dodge-ng-pixel-probe *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- dodge-ng-pixel-probe {{ options }}
+
+[group("dodge")]
+dodge-ng-colab *options:
+    @mkdir -p history/dodge/ng/.launch-tmp
+    @DODGE_HEADLESS=1 TMPDIR="$PWD/history/dodge/ng/.launch-tmp" devenv -q shell -- uv run --extra native --extra colab dodge-ng-colab {{ options }}
+
+[group("dodge")]
+dodge-colabctl *options:
+    @devenv -q shell -- uv run --extra colab colabctl {{ options }}
 
 [group("dodge")]
 dodge-ng-dashboard *options:

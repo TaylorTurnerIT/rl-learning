@@ -2,8 +2,10 @@
 
 use dodge_batch::{
     ACTION_COUNT, BOARD_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, BatchConfig, BatchEnvironment,
-    BatchError, BatchObservation, ExecutionMode, FULL_BOARD_CHANNELS, ML_OBSERVATION_SIZE,
-    ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
+    BatchError, BatchObservation, ExecutionMode, FULL_BOARD_CHANNELS, HAZARD_CHANNELS,
+    HAZARD_DEFAULT_HORIZON, HAZARD_DEFAULT_SPAWN_HALO_RADIUS, HAZARD_OBSERVATION_VERSION,
+    HAZARD_SCALARS, ML_OBSERVATION_SIZE, ObservationFlags, PIXEL_HEIGHT, PIXEL_WIDTH,
+    PixelBatchObservation,
 };
 use dodge_core::{Action, FrameEvent, Mode};
 use ndarray::{Array1, Array2, Array3, Array4};
@@ -205,6 +207,22 @@ impl NativeBatchEnv {
         ml_observations_to_dict(py, observations)
     }
 
+    fn reset_ml_batch_with_centered_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        seeds: PyReadonlyArray1<'_, u32>,
+        grid_size: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| self.inner.reset_ml_with_centered_startup(&seeds, grid_size))
+            .map_err(batch_error)?;
+        ml_observations_to_dict(py, observations)
+    }
+
     fn reset_ml_lanes<'py>(
         &mut self,
         py: Python<'py>,
@@ -251,6 +269,33 @@ impl NativeBatchEnv {
         ml_observations_to_dict(py, observations)
     }
 
+    fn reset_ml_lanes_with_centered_startup<'py>(
+        &mut self,
+        py: Python<'py>,
+        lanes: PyReadonlyArray1<'_, u32>,
+        seeds: PyReadonlyArray1<'_, u32>,
+        grid_size: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let lanes = lanes
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .copied()
+            .map(|lane| lane as usize)
+            .collect::<Vec<_>>();
+        let seeds = seeds
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .to_vec();
+        let observations = py
+            .detach(|| {
+                self.inner
+                    .reset_ml_lanes_with_centered_startup(&lanes, &seeds, grid_size)
+            })
+            .map_err(batch_error)?;
+        ml_observations_to_dict(py, observations)
+    }
+
     fn step_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -270,6 +315,48 @@ impl NativeBatchEnv {
         observations_to_dict(py, observations, self.flags)
     }
 
+    /// Advance lanes through the minimal rendered pixel-only boundary.
+    fn step_pixels<'py>(
+        &mut self,
+        py: Python<'py>,
+        actions: PyReadonlyArray1<'_, u8>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let action_values = actions
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let native_actions = action_values
+            .iter()
+            .copied()
+            .map(action_from_index)
+            .collect::<PyResult<Vec<_>>>()?;
+        let observations = py
+            .detach(|| self.inner.step_pixels(&native_actions))
+            .map_err(batch_error)?;
+        pixel_observations_to_dict(py, observations)
+    }
+
+    fn step_pixels_active<'py>(
+        &mut self,
+        py: Python<'py>,
+        actions: PyReadonlyArray1<'_, u8>,
+        active: PyReadonlyArray1<'_, bool>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let native_actions = actions
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .copied()
+            .map(action_from_index)
+            .collect::<PyResult<Vec<_>>>()?;
+        let selected = active
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let observations = py
+            .detach(|| self.inner.step_pixels_active(&native_actions, selected))
+            .map_err(batch_error)?;
+        pixel_observations_to_dict(py, observations)
+    }
+
     fn step_ml_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -287,6 +374,61 @@ impl NativeBatchEnv {
             .detach(|| self.inner.step_ml(&native_actions))
             .map_err(batch_error)?;
         ml_observations_to_dict(py, observations)
+    }
+
+    /// Advance lanes while returning only reward, terminal state, and player
+    /// position. The full ML observation is reserved for decision boundaries.
+    fn step_ml_positions_batch<'py>(
+        &mut self,
+        py: Python<'py>,
+        actions: PyReadonlyArray1<'_, u8>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let action_values = actions
+            .as_slice()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let native_actions = action_values
+            .iter()
+            .copied()
+            .map(action_from_index)
+            .collect::<PyResult<Vec<_>>>()?;
+        let observations = py
+            .detach(|| self.inner.step_ml_positions(&native_actions))
+            .map_err(batch_error)?;
+        ml_position_observations_to_dict(py, observations)
+    }
+
+    /// Materialize the current ML observation without advancing any lane.
+    fn observe_ml_batch<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let observations = py.detach(|| self.inner.observe_ml()).map_err(batch_error)?;
+        ml_observations_to_dict(py, observations)
+    }
+
+    /// Compute the slow/reference frozen-center hazard field without mutating
+    /// the live native lanes.
+    #[pyo3(signature = (grid_size, prediction_horizon_frames=32, spawn_halo_radius=1))]
+    fn hazard_observations<'py>(
+        &self,
+        py: Python<'py>,
+        grid_size: u32,
+        prediction_horizon_frames: u32,
+        spawn_halo_radius: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let observations = py
+            .detach(|| {
+                self.inner.hazard_observations(
+                    grid_size,
+                    prediction_horizon_frames,
+                    spawn_halo_radius,
+                )
+            })
+            .map_err(batch_error)?;
+        hazard_observations_to_dict(
+            py,
+            observations,
+            grid_size,
+            prediction_horizon_frames,
+            spawn_halo_radius,
+        )
     }
 
     /// Return survival-frame deltas for every action from each canonical state.
@@ -327,6 +469,57 @@ impl NativeBatchEnv {
         result.set_item("scores", scores)?;
         Ok(result)
     }
+
+    #[pyo3(signature = (snapshots, hold_decisions, grid_spacing=32, tolerance=2.0, arrival_latching=false, ban_corner_nodes=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn score_waypoint_actions<'py>(
+        &self,
+        py: Python<'py>,
+        snapshots: &Bound<'_, PyList>,
+        hold_decisions: u32,
+        grid_spacing: u32,
+        tolerance: f32,
+        arrival_latching: bool,
+        ban_corner_nodes: bool,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let snapshots = snapshots
+            .iter()
+            .map(|value| {
+                value
+                    .cast::<PyBytes>()
+                    .map(|bytes| bytes.as_bytes().to_vec())
+                    .map_err(|_| {
+                        PyValueError::new_err(
+                            "waypoint snapshots must be a non-empty list of bytes",
+                        )
+                    })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let snapshot_count = snapshots.len();
+        let scores = py
+            .detach(|| {
+                self.inner.score_waypoint_actions(
+                    &snapshots,
+                    hold_decisions,
+                    grid_spacing,
+                    tolerance,
+                    arrival_latching,
+                    ban_corner_nodes,
+                )
+            })
+            .map_err(batch_error)?;
+        let values = scores.into_iter().flatten().collect::<Vec<_>>();
+        let scores = Array2::from_shape_vec((snapshot_count, ACTION_COUNT), values)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+            .into_pyarray(py);
+        let result = PyDict::new(py);
+        result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
+        result.set_item("snapshot_count", snapshot_count)?;
+        result.set_item("action_count", ACTION_COUNT)?;
+        result.set_item("hold_decisions", hold_decisions)?;
+        result.set_item("scores", scores)?;
+        Ok(result)
+    }
 }
 
 #[pymodule]
@@ -339,6 +532,14 @@ fn dodge_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     module.add("PIXEL_SHAPE", (PIXEL_HEIGHT, PIXEL_WIDTH))?;
     module.add("ML_OBSERVATION_SHAPE", (ML_OBSERVATION_SIZE,))?;
+    module.add("HAZARD_CHANNELS", HAZARD_CHANNELS)?;
+    module.add("HAZARD_SCALARS", HAZARD_SCALARS)?;
+    module.add("HAZARD_OBSERVATION_VERSION", HAZARD_OBSERVATION_VERSION)?;
+    module.add("HAZARD_DEFAULT_HORIZON", HAZARD_DEFAULT_HORIZON)?;
+    module.add(
+        "HAZARD_DEFAULT_SPAWN_HALO_RADIUS",
+        HAZARD_DEFAULT_SPAWN_HALO_RADIUS,
+    )?;
     module.add_class::<NativeBatchEnv>()?;
     Ok(())
 }
@@ -520,6 +721,66 @@ fn observations_to_dict<'py>(
     Ok(result)
 }
 
+fn pixel_observations_to_dict<'py>(
+    py: Python<'py>,
+    observations: Vec<PixelBatchObservation>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let lane_count = observations.len();
+    let lane_ids = observations.iter().map(|value| value.lane as u32).collect();
+    let frames = observations.iter().map(|value| value.frame).collect();
+    let frames_advanced = observations
+        .iter()
+        .map(|value| value.frames_advanced)
+        .collect();
+    let rewards = observations
+        .iter()
+        .map(|value| value.reward as f32)
+        .collect();
+    let done = observations.iter().map(|value| value.done).collect();
+    let seeds = observations.iter().map(|value| value.seed).collect();
+    let modes = observations
+        .iter()
+        .map(|value| mode_code(value.mode))
+        .collect();
+    let pixels = observations
+        .iter()
+        .flat_map(|value| value.pixels.iter().copied())
+        .collect::<Vec<_>>();
+    let player_positions = observations
+        .iter()
+        .flat_map(|value| value.player_position)
+        .collect::<Vec<_>>();
+
+    let lane_ids = Array1::from_vec(lane_ids).into_pyarray(py);
+    let frames = Array1::from_vec(frames).into_pyarray(py);
+    let frames_advanced = Array1::from_vec(frames_advanced).into_pyarray(py);
+    let rewards = Array1::from_vec(rewards).into_pyarray(py);
+    let done = Array1::from_vec(done).into_pyarray(py);
+    let seeds = Array1::from_vec(seeds).into_pyarray(py);
+    let modes = Array1::from_vec(modes).into_pyarray(py);
+    let pixels = Array3::from_shape_vec((lane_count, PIXEL_HEIGHT, PIXEL_WIDTH), pixels)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+        .into_pyarray(py);
+    let player_positions = Array2::from_shape_vec((lane_count, 2), player_positions)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+        .into_pyarray(py);
+
+    let result = PyDict::new(py);
+    result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
+    result.set_item("fast_pixels", true)?;
+    result.set_item("lane_count", lane_count)?;
+    result.set_item("lane_ids", lane_ids)?;
+    result.set_item("frames", frames)?;
+    result.set_item("frames_advanced", frames_advanced)?;
+    result.set_item("rewards", rewards)?;
+    result.set_item("done", done)?;
+    result.set_item("seeds", seeds)?;
+    result.set_item("modes", modes)?;
+    result.set_item("pixels", pixels)?;
+    result.set_item("player_positions", player_positions)?;
+    Ok(result)
+}
+
 fn ml_observations_to_dict<'py>(
     py: Python<'py>,
     observations: Vec<dodge_batch::MlBatchObservation>,
@@ -576,6 +837,133 @@ fn ml_observations_to_dict<'py>(
     result.set_item("seeds", seeds)?;
     result.set_item("modes", modes)?;
     result.set_item("ml_observation", ml_observation)?;
+    result.set_item("player_positions", player_positions)?;
+    Ok(result)
+}
+
+fn ml_position_observations_to_dict<'py>(
+    py: Python<'py>,
+    observations: Vec<dodge_batch::MlPositionBatchObservation>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let lane_count = observations.len();
+    let lane_ids = observations.iter().map(|value| value.lane as u32).collect();
+    let frames = observations.iter().map(|value| value.frame).collect();
+    let frames_advanced = observations
+        .iter()
+        .map(|value| value.frames_advanced)
+        .collect();
+    let rewards = observations
+        .iter()
+        .map(|value| value.reward as f32)
+        .collect();
+    let done = observations.iter().map(|value| value.done).collect();
+    let seeds = observations.iter().map(|value| value.seed).collect();
+    let modes = observations
+        .iter()
+        .map(|value| mode_code(value.mode))
+        .collect();
+    let positions = observations
+        .iter()
+        .flat_map(|value| value.player_position)
+        .collect::<Vec<_>>();
+
+    let lane_ids = Array1::from_vec(lane_ids).into_pyarray(py);
+    let frames = Array1::from_vec(frames).into_pyarray(py);
+    let frames_advanced = Array1::from_vec(frames_advanced).into_pyarray(py);
+    let rewards = Array1::from_vec(rewards).into_pyarray(py);
+    let done = Array1::from_vec(done).into_pyarray(py);
+    let seeds = Array1::from_vec(seeds).into_pyarray(py);
+    let modes = Array1::from_vec(modes).into_pyarray(py);
+    let player_positions = Array2::from_shape_vec((lane_count, 2), positions)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?
+        .into_pyarray(py);
+
+    let result = PyDict::new(py);
+    result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
+    result.set_item("fast_ml_positions", true)?;
+    result.set_item("lane_count", lane_count)?;
+    result.set_item("lane_ids", lane_ids)?;
+    result.set_item("frames", frames)?;
+    result.set_item("frames_advanced", frames_advanced)?;
+    result.set_item("rewards", rewards)?;
+    result.set_item("done", done)?;
+    result.set_item("seeds", seeds)?;
+    result.set_item("modes", modes)?;
+    result.set_item("player_positions", player_positions)?;
+    Ok(result)
+}
+
+fn hazard_observations_to_dict<'py>(
+    py: Python<'py>,
+    observations: Vec<dodge_batch::HazardObservation>,
+    grid_size: u32,
+    prediction_horizon_frames: u32,
+    spawn_halo_radius: u32,
+) -> PyResult<Bound<'py, PyDict>> {
+    let lane_count = observations.len();
+    let observation_size =
+        HAZARD_CHANNELS * grid_size as usize * grid_size as usize + HAZARD_SCALARS;
+    let lane_ids = observations.iter().map(|value| value.lane as u32).collect();
+    let frames = observations.iter().map(|value| value.frame).collect();
+    let survival_frames = observations
+        .iter()
+        .map(|value| value.survival_frames)
+        .collect();
+    let done = observations.iter().map(|value| value.done).collect();
+    let seeds = observations.iter().map(|value| value.seed).collect();
+    let modes = observations
+        .iter()
+        .map(|value| mode_code(value.mode))
+        .collect();
+    let hazard_values = observations
+        .iter()
+        .flat_map(|value| value.hazard_observation.iter().copied())
+        .collect::<Vec<_>>();
+    let ttc_values = observations
+        .iter()
+        .flat_map(|value| value.ttc_reference.iter().copied())
+        .collect::<Vec<_>>();
+    let positions = observations
+        .iter()
+        .flat_map(|value| value.player_position)
+        .collect::<Vec<_>>();
+
+    let lane_ids = Array1::from_vec(lane_ids).into_pyarray(py);
+    let frames = Array1::from_vec(frames).into_pyarray(py);
+    let survival_frames = Array1::from_vec(survival_frames).into_pyarray(py);
+    let done = Array1::from_vec(done).into_pyarray(py);
+    let seeds = Array1::from_vec(seeds).into_pyarray(py);
+    let modes = Array1::from_vec(modes).into_pyarray(py);
+    let hazard_observation = Array2::from_shape_vec((lane_count, observation_size), hazard_values)
+        .map_err(|error| PyRuntimeError::new_err(format!("hazard observation shape: {error}")))?
+        .into_pyarray(py);
+    let ttc_reference = Array2::from_shape_vec(
+        (lane_count, grid_size as usize * grid_size as usize),
+        ttc_values,
+    )
+    .map_err(|error| PyRuntimeError::new_err(format!("hazard TTC shape: {error}")))?
+    .into_pyarray(py);
+    let player_positions = Array2::from_shape_vec((lane_count, 2), positions)
+        .map_err(|error| PyRuntimeError::new_err(format!("hazard positions shape: {error}")))?
+        .into_pyarray(py);
+
+    let result = PyDict::new(py);
+    result.set_item("schema_version", BATCH_SCHEMA_VERSION)?;
+    result.set_item("hazard_observation_version", HAZARD_OBSERVATION_VERSION)?;
+    result.set_item("lane_count", lane_count)?;
+    result.set_item("lane_ids", lane_ids)?;
+    result.set_item("frames", frames)?;
+    result.set_item("survival_frames", survival_frames)?;
+    result.set_item("done", done)?;
+    result.set_item("seeds", seeds)?;
+    result.set_item("modes", modes)?;
+    result.set_item("grid_size", grid_size)?;
+    result.set_item("prediction_horizon_frames", prediction_horizon_frames)?;
+    result.set_item("spawn_halo_radius", spawn_halo_radius)?;
+    result.set_item("hazard_channels", HAZARD_CHANNELS)?;
+    result.set_item("hazard_scalars", HAZARD_SCALARS)?;
+    result.set_item("hazard_observation", hazard_observation)?;
+    result.set_item("ttc_reference", ttc_reference)?;
     result.set_item("player_positions", player_positions)?;
     Ok(result)
 }

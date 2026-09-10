@@ -89,11 +89,41 @@ pub struct MlFrameResult {
     pub reward: PicoFixed,
 }
 
+/// Result of one rendered frame for pixel-only ML consumers.
+///
+/// Unlike `FrameResult`, this boundary does not materialize a canonical
+/// snapshot, hashes, events, or audio. The simulation and render boundary are
+/// shared with the canonical path; only the owned pixel payload and the
+/// controller position are returned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PixelFrameResult {
+    pub frame: u32,
+    pub mode: Mode,
+    pub done: bool,
+    pub reward: PicoFixed,
+    pub survival_frames: u32,
+    pub pixels: IndexedFramebuffer,
+    pub player_position: [PicoFixed; 2],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CaptureMode {
+    None,
+    Snapshot,
+    Pixels,
+}
+
+impl CaptureMode {
+    const fn renders(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 struct FrameBoundary {
     reward: PicoFixed,
     events: Vec<FrameEvent>,
     audio: Vec<AudioEvent>,
-    snapshot: Option<Snapshot>,
+    capture: Option<FrameCapture>,
 }
 
 struct FrameCapture {
@@ -396,16 +426,22 @@ impl NativeGame {
         input_mask: u8,
         post_frame_mask: u8,
     ) -> Result<FrameResult, CoreError> {
-        let boundary = self.advance_frame_internal(input_mask, post_frame_mask, true)?;
+        let boundary =
+            self.advance_frame_internal(input_mask, post_frame_mask, CaptureMode::Snapshot)?;
         let FrameBoundary {
             reward,
             events,
             audio,
-            snapshot,
+            capture,
         } = boundary;
-        let Some(snapshot) = snapshot else {
+        let Some(FrameCapture {
+            framebuffer,
+            render_state,
+        }) = capture
+        else {
             return Err(CoreError::InvalidSnapshotValue);
         };
+        let snapshot = Snapshot::with_framebuffer_from_game(self, framebuffer, render_state);
         Ok(self.result_with_snapshot(reward, events, audio, snapshot))
     }
 
@@ -420,7 +456,8 @@ impl NativeGame {
         input_mask: u8,
         post_frame_mask: u8,
     ) -> Result<MlFrameResult, CoreError> {
-        let boundary = self.advance_frame_internal(input_mask, post_frame_mask, false)?;
+        let boundary =
+            self.advance_frame_internal(input_mask, post_frame_mask, CaptureMode::None)?;
         Ok(MlFrameResult {
             frame: self.lifecycle.frame,
             mode: self.lifecycle.mode,
@@ -429,11 +466,40 @@ impl NativeGame {
         })
     }
 
+    /// Advance one rendered frame without canonical snapshot materialization.
+    ///
+    /// Pixel-only learners need the exact indexed framebuffer and player
+    /// position, but do not need full-state cloning, hashes, events, or audio.
+    /// The capture is taken at the same render boundary as `advance_frame`.
+    pub fn advance_frame_pixels(
+        &mut self,
+        input_mask: u8,
+        post_frame_mask: u8,
+    ) -> Result<PixelFrameResult, CoreError> {
+        let boundary =
+            self.advance_frame_internal(input_mask, post_frame_mask, CaptureMode::Pixels)?;
+        let FrameBoundary {
+            reward, capture, ..
+        } = boundary;
+        let Some(FrameCapture { framebuffer, .. }) = capture else {
+            return Err(CoreError::InvalidSnapshotValue);
+        };
+        Ok(PixelFrameResult {
+            frame: self.lifecycle.frame,
+            mode: self.lifecycle.mode,
+            done: self.lifecycle.dead,
+            reward,
+            survival_frames: self.survival_frames,
+            pixels: framebuffer,
+            player_position: [self.player.x, self.player.y],
+        })
+    }
+
     fn advance_frame_internal(
         &mut self,
         input_mask: u8,
         post_frame_mask: u8,
-        capture_render: bool,
+        capture_mode: CaptureMode,
     ) -> Result<FrameBoundary, CoreError> {
         InputState::validate_mask(input_mask)?;
         InputState::validate_mask(post_frame_mask)?;
@@ -536,13 +602,9 @@ impl NativeGame {
             PicoFixed::ZERO
         };
         self.update_camera();
-        let capture = if capture_render {
+        let capture = if capture_mode.renders() {
             let render_state = self.render_current_frame();
-            let framebuffer = self.screen.project(&render_state);
-            Some(FrameCapture {
-                framebuffer,
-                render_state,
-            })
+            Some(render_state)
         } else {
             None
         };
@@ -557,12 +619,6 @@ impl NativeGame {
             post_frame_mask
         };
         self.input.finalize_frame(observed_post_mask);
-        let snapshot = capture.map(
-            |FrameCapture {
-                 framebuffer,
-                 render_state,
-             }| Snapshot::with_framebuffer_from_game(self, framebuffer, render_state),
-        );
         // Pemsa can schedule a second visible draw on the transition boundary
         // after the canonical capture callback has observed the first draw.
         // Preserve that source-side particle mutation for the next frame while
@@ -576,12 +632,12 @@ impl NativeGame {
         Ok(FrameBoundary {
             reward,
             events,
-            audio: if capture_render {
+            audio: if capture_mode == CaptureMode::Snapshot {
                 self.frame_audio.clone()
             } else {
                 Vec::new()
             },
-            snapshot,
+            capture,
         })
     }
 
@@ -595,6 +651,25 @@ impl NativeGame {
             if result.done {
                 break;
             }
+        }
+        Ok(result)
+    }
+
+    /// Advance several frames through the rendered pixel-only boundary.
+    pub fn step_pixels(
+        &mut self,
+        action: Action,
+        frames: u32,
+    ) -> Result<PixelFrameResult, CoreError> {
+        if frames == 0 {
+            return Err(CoreError::InvalidFrameCount(frames));
+        }
+        let mut result = self.advance_frame_pixels(action.mask(), action.mask())?;
+        for _ in 1..frames {
+            if result.done {
+                break;
+            }
+            result = self.advance_frame_pixels(action.mask(), action.mask())?;
         }
         Ok(result)
     }
@@ -644,6 +719,10 @@ impl NativeGame {
 
     pub fn patterns(&self) -> &[PatternState] {
         self.patterns.as_slice()
+    }
+
+    pub fn spawns(&self) -> &[SpawnPoint] {
+        self.spawns.as_slice()
     }
 
     pub const fn active_pattern_index(&self) -> Option<usize> {
@@ -717,6 +796,38 @@ impl NativeGame {
 
     pub fn snapshot(&self) -> Snapshot {
         Snapshot::from_game(self)
+    }
+
+    /// Return the first native frame at which a frozen hypothetical player
+    /// would die, or `None` when the declared horizon contains no death.
+    ///
+    /// The live game is cloned before simulation. The hypothetical player is
+    /// placed at the supplied native center coordinate with zero velocity, so
+    /// this query cannot move or otherwise mutate the active lane.
+    pub fn time_to_death_at(
+        &self,
+        x: PicoFixed,
+        y: PicoFixed,
+        horizon: u32,
+    ) -> Result<Option<u32>, CoreError> {
+        let mut hypothetical = self.clone();
+        hypothetical.player.x = x;
+        hypothetical.player.y = y;
+        hypothetical.player.vx = PicoFixed::ZERO;
+        hypothetical.player.vy = PicoFixed::ZERO;
+        if hypothetical.lifecycle.dead {
+            return Ok(Some(0));
+        }
+        if hypothetical.player_would_die_now() {
+            return Ok(Some(0));
+        }
+        for frame in 1..=horizon {
+            let result = hypothetical.advance_frame_ml(0, 0)?;
+            if result.done {
+                return Ok(Some(frame));
+            }
+        }
+        Ok(None)
     }
 
     fn update_game_frame(&mut self, events: &mut Vec<FrameEvent>) {
@@ -944,7 +1055,7 @@ impl NativeGame {
         }
     }
 
-    fn render_current_frame(&mut self) -> crate::RenderState {
+    fn render_current_frame(&mut self) -> FrameCapture {
         let state = self.full_state();
         let mut render = crate::RenderState::new(state.transition_render_y);
         render.camera_x = state.camera_x;
@@ -952,7 +1063,11 @@ impl NativeGame {
         render.screen_palette[12] = state.settings.theme_background;
         render.screen_palette[1] = state.settings.theme_shadow;
         crate::snapshot::render_full_state_into(&state, &render, &mut self.screen);
-        render
+        let framebuffer = self.screen.project(&render);
+        FrameCapture {
+            framebuffer,
+            render_state: render,
+        }
     }
 
     fn update_particles(&mut self) {
@@ -1099,6 +1214,63 @@ impl NativeGame {
                 }
             }
         }
+    }
+
+    fn player_would_die_now(&self) -> bool {
+        if self.lifecycle.dead || !self.should_collide {
+            return false;
+        }
+        for enemy in &self.enemies {
+            if enemy.personality >= 2 {
+                continue;
+            }
+            let player = self.player;
+            let collision = player.x.add(player.size).sub(PicoFixed::ONE) > enemy.x
+                && player.y.add(player.size).sub(PicoFixed::ONE) > enemy.y
+                && player.x.sub(player.size).add(PicoFixed::ONE) < enemy.x.add(enemy.size)
+                && player.y.sub(player.size).add(PicoFixed::ONE) < enemy.y.add(enemy.size);
+            if collision {
+                return true;
+            }
+        }
+        if let Some(pattern_index) = self.active_pattern {
+            let Some(pattern) = self.patterns.get(pattern_index) else {
+                return false;
+            };
+            for rect in &pattern.rects {
+                if pattern.pattern_type != 1 && rect.sh != PicoFixed::from_int(2) {
+                    continue;
+                }
+                if self
+                    .player
+                    .x
+                    .sub(PicoFixed::from_int(2))
+                    .add(self.player.size)
+                    > rect.x
+                    && self
+                        .player
+                        .y
+                        .sub(PicoFixed::from_int(2))
+                        .add(self.player.size)
+                        > rect.y
+                    && self
+                        .player
+                        .x
+                        .add(PicoFixed::from_int(2))
+                        .sub(self.player.size)
+                        < rect.x.add(rect.width).sub(PicoFixed::ONE)
+                    && self
+                        .player
+                        .y
+                        .add(PicoFixed::from_int(2))
+                        .sub(self.player.size)
+                        < rect.y.add(rect.height).sub(PicoFixed::ONE)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn collide_enemy(&mut self, index: usize, enemy: EnemyState, events: &mut Vec<FrameEvent>) {
@@ -2403,6 +2575,188 @@ mod tests {
     }
 
     #[test]
+    fn frozen_center_time_to_death_reports_current_collision_at_zero() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.enemies.push(EnemyState::normal(
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(3),
+        ));
+        let before = game.snapshot().canonical_bytes();
+
+        assert_eq!(
+            game.time_to_death_at(PicoFixed::from_int(64), PicoFixed::from_int(64), 32,)
+                .ok(),
+            Some(Some(0))
+        );
+        assert_eq!(game.snapshot().canonical_bytes(), before);
+    }
+
+    fn assert_center_ttc_preserves_live_state(
+        game: &NativeGame,
+        horizon: u32,
+        expected: Option<u32>,
+    ) {
+        let before = game.snapshot().canonical_bytes();
+        assert_eq!(
+            game.time_to_death_at(PicoFixed::from_int(64), PicoFixed::from_int(64), horizon)
+                .ok(),
+            Some(expected)
+        );
+        assert_eq!(game.snapshot().canonical_bytes(), before);
+    }
+
+    #[test]
+    fn frozen_center_ttc_tracks_dying_enemy_into_expanding_aoe() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.enemies.push(EnemyState {
+            personality: 1,
+            size: PicoFixed::from_int(3),
+            max_size: PicoFixed::from_int(3),
+            is_dying: true,
+            x: PicoFixed::from_int(50),
+            y: PicoFixed::from_int(50),
+            ..EnemyState::normal(
+                PicoFixed::from_int(50),
+                PicoFixed::from_int(50),
+                PicoFixed::from_int(3),
+            )
+        });
+
+        assert_center_ttc_preserves_live_state(&game, 1, None);
+        assert_center_ttc_preserves_live_state(&game, 32, Some(21));
+        assert_center_ttc_preserves_live_state(&game, 96, Some(21));
+    }
+
+    #[test]
+    fn frozen_center_ttc_tracks_shrinking_aoe_without_false_collision() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.enemies.push(EnemyState {
+            personality: -1,
+            size: PicoFixed::from_int(30),
+            max_size: PicoFixed::from_int(30),
+            isizing: false,
+            life: Some(PicoFixed::from_int(60)),
+            x: PicoFixed::from_int(67),
+            y: PicoFixed::from_int(67),
+            ..EnemyState::normal(
+                PicoFixed::from_int(67),
+                PicoFixed::from_int(67),
+                PicoFixed::from_int(30),
+            )
+        });
+
+        assert_center_ttc_preserves_live_state(&game, 32, None);
+        assert_center_ttc_preserves_live_state(&game, 96, None);
+    }
+
+    #[test]
+    fn frozen_center_ttc_tracks_active_moving_pattern() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.patterns = vec![PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::ONE,
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 1,
+            bounce_cap: false,
+            spawn_enabled: false,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
+            counter: 0,
+            timer: PicoFixed::ZERO,
+            rects: vec![PatternRect {
+                x: PicoFixed::from_int(70),
+                y: PicoFixed::from_int(60),
+                width: PicoFixed::from_int(10),
+                height: PicoFixed::from_int(10),
+                speed: PicoFixed::ONE,
+                dx: PicoFixed::ZERO,
+                dy: PicoFixed::ZERO,
+                targets: vec![PatternTarget::Move {
+                    x: PicoFixed::from_int(60),
+                    y: PicoFixed::from_int(60),
+                    width: PicoFixed::from_int(10),
+                    height: PicoFixed::from_int(10),
+                }],
+                target_index: 0,
+                wait: PicoFixed::ZERO,
+                shown: true,
+                sh: PicoFixed::from_int(2),
+                warnings: Vec::new(),
+                collision_done: false,
+                finished: false,
+            }],
+        }];
+        game.active_pattern = Some(0);
+
+        assert_center_ttc_preserves_live_state(&game, 1, None);
+        assert_center_ttc_preserves_live_state(&game, 32, Some(6));
+    }
+
+    #[test]
+    fn frozen_center_ttc_tracks_static_pattern_activation() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.patterns = vec![PatternState {
+            id: 1,
+            mins: PicoFixed::ZERO,
+            maxs: PicoFixed::from_int(100),
+            probability: PicoFixed::ONE,
+            variants: Vec::new(),
+            smooth: false,
+            pattern_type: 0,
+            bounce_cap: false,
+            spawn_enabled: false,
+            automatic_variant: None,
+            special: PicoFixed::ZERO,
+            counter: 0,
+            timer: PicoFixed::ZERO,
+            rects: vec![PatternRect {
+                x: PicoFixed::from_int(60),
+                y: PicoFixed::from_int(60),
+                width: PicoFixed::from_int(10),
+                height: PicoFixed::from_int(10),
+                speed: PicoFixed::from_int(12),
+                dx: PicoFixed::ZERO,
+                dy: PicoFixed::ZERO,
+                targets: vec![PatternTarget::Wait(PicoFixed::from_int(1000))],
+                target_index: 0,
+                wait: PicoFixed::ZERO,
+                shown: true,
+                sh: PicoFixed::ZERO,
+                warnings: Vec::new(),
+                collision_done: false,
+                finished: false,
+            }],
+        }];
+        game.active_pattern = Some(0);
+
+        assert_center_ttc_preserves_live_state(&game, 96, None);
+        assert_center_ttc_preserves_live_state(&game, 120, Some(101));
+    }
+
+    #[test]
+    fn frozen_center_ttc_reports_terminal_lane_at_zero() {
+        let mut game = NativeGame::new(NativeConfig::new(42));
+        start_game(&mut game);
+        game.enemies.push(EnemyState::normal(
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(64),
+            PicoFixed::from_int(3),
+        ));
+        let result = game.advance_frame_ml(0, 0);
+        assert_eq!(result.as_ref().map(|value| value.done), Ok(true));
+        assert_center_ttc_preserves_live_state(&game, 32, Some(0));
+    }
+
+    #[test]
     fn frame_result_snapshot_matches_current_capture_boundary() {
         let mut game = NativeGame::new(NativeConfig::new(42));
         let inputs = [BUTTON_X_MASK, BUTTON_X_MASK, 0, 1, 4, 16, 32, 0, 0, 0];
@@ -2451,6 +2805,57 @@ mod tests {
             let mut actual = ml.full_state();
             actual.physical_screen = expected.physical_screen.clone();
             assert_eq!(actual, expected, "logical state diverged at frame {frame}");
+        }
+    }
+
+    #[test]
+    fn pixel_frame_path_matches_canonical_render_trace() {
+        let mut canonical = NativeGame::new(NativeConfig::new(42));
+        let mut pixels = NativeGame::new(NativeConfig::new(42));
+
+        for frame in 0..180 {
+            let input = if frame == 0 {
+                BUTTON_X_MASK
+            } else {
+                Action::ALL
+                    .get(frame % Action::ALL.len())
+                    .copied()
+                    .unwrap_or_else(|| unreachable!("action table index is bounded"))
+                    .mask()
+            };
+            let canonical_result = canonical.advance_frame(input);
+            let pixel_result = pixels.advance_frame_pixels(input, input);
+            assert_eq!(
+                canonical_result.as_ref().map(|result| (
+                    result.frame,
+                    result.mode,
+                    result.done,
+                    result.reward
+                )),
+                pixel_result
+                    .as_ref()
+                    .map(|result| { (result.frame, result.mode, result.done, result.reward) })
+            );
+
+            let Ok(canonical_result) = canonical_result else {
+                unreachable!("canonical frame should succeed")
+            };
+            let Ok(pixel_result) = pixel_result else {
+                unreachable!("pixel frame should succeed")
+            };
+            assert_eq!(
+                pixel_result.pixels.pixels(),
+                canonical_result.snapshot.pixels()
+            );
+            assert_eq!(
+                pixel_result.survival_frames,
+                canonical_result.snapshot.logical_state().survival_frames
+            );
+            let player = &canonical_result.snapshot.logical_state().player;
+            assert_eq!(pixel_result.player_position, [player.x, player.y]);
+            if pixel_result.done {
+                break;
+            }
         }
     }
 

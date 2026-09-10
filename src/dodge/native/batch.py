@@ -20,6 +20,10 @@ from dodge.neat.state import (
 
 Execution = Literal["serial", "parallel"]
 ML_OBSERVATION_SIZE = 225
+HAZARD_CHANNELS = 14
+HAZARD_SCALARS = 4
+HAZARD_OBSERVATION_VERSION = 1
+HAZARD_MAX_GRID_SIZE = 128
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,51 @@ class NativeMlBatchResult:
     seeds: np.ndarray
     modes: np.ndarray
     ml_observation: np.ndarray
+    player_positions: np.ndarray
+
+    @property
+    def lane_count(self) -> int:
+        return int(self.frames.shape[0])
+
+
+@dataclass(frozen=True, slots=True)
+class NativePixelBatchResult:
+    """Minimal rendered result returned by the native pixel boundary."""
+
+    lane_ids: np.ndarray
+    frames: np.ndarray
+    frames_advanced: np.ndarray
+    rewards: np.ndarray
+    done: np.ndarray
+    seeds: np.ndarray
+    modes: np.ndarray
+    pixels: np.ndarray
+    player_positions: np.ndarray
+
+    @property
+    def lane_count(self) -> int:
+        return int(self.frames.shape[0])
+
+
+@dataclass(frozen=True, slots=True)
+class NativeHazardBatchResult:
+    """Slow/reference frozen-center hazard field from the Rust boundary."""
+
+    lane_ids: np.ndarray
+    frames: np.ndarray
+    frames_advanced: np.ndarray
+    rewards: np.ndarray
+    done: np.ndarray
+    seeds: np.ndarray
+    modes: np.ndarray
+    survival_frames: np.ndarray
+    grid_size: int
+    prediction_horizon_frames: int
+    spawn_halo_radius: int
+    hazard_channels: int
+    hazard_scalars: int
+    hazard_observation: np.ndarray
+    ttc_reference: np.ndarray
     player_positions: np.ndarray
 
     @property
@@ -134,6 +183,8 @@ class NativeBatchEnvironment:
         self.ml_grid_spacing = ml_grid_spacing
         self._last_result: NativeBatchResult | None = None
         self._last_ml_result: NativeMlBatchResult | None = None
+        self._last_pixel_result: NativePixelBatchResult | None = None
+        self._last_hazard_result: NativeHazardBatchResult | None = None
         self._closed = False
 
     @property
@@ -152,6 +203,8 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_batch_with_startup(self, seeds: object) -> NativeBatchResult:
@@ -162,6 +215,8 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_lanes(self, lanes: object, seeds: object) -> NativeBatchResult:
@@ -174,6 +229,8 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_lanes_with_startup(
@@ -191,6 +248,8 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def step_batch(self, actions: object) -> NativeBatchResult:
@@ -200,6 +259,39 @@ class NativeBatchEnvironment:
         result = _result_from_payload(payload)
         self._last_result = result
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def step_pixels(self, actions: object) -> NativePixelBatchResult:
+        """Advance lanes through the minimal rendered pixel-only boundary."""
+        self._ensure_open()
+        values = _integer_array(actions, "actions", maximum=8)
+        payload = self._native.step_pixels(values)
+        result = _pixel_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = None
+        self._last_pixel_result = result
+        self._last_hazard_result = None
+        return result
+
+    def step_pixels_active(
+        self, actions: object, active: object
+    ) -> NativePixelBatchResult:
+        """Step selected lanes, returning only their original lane IDs and pixels."""
+        self._ensure_open()
+        values = _integer_array(actions, "actions", maximum=8)
+        selected = np.asarray(active)
+        if selected.dtype != np.bool_ or selected.shape != values.shape:
+            raise ValueError("active must be a boolean array matching actions")
+        payload = self._native.step_pixels_active(
+            values, np.ascontiguousarray(selected)
+        )
+        result = _pixel_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = None
+        self._last_pixel_result = result
+        self._last_hazard_result = None
         return result
 
     def reset_ml_batch(self, seeds: object) -> NativeMlBatchResult:
@@ -210,6 +302,8 @@ class NativeBatchEnvironment:
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_ml_batch_with_startup(self, seeds: object) -> NativeMlBatchResult:
@@ -220,6 +314,32 @@ class NativeBatchEnvironment:
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def reset_ml_batch_with_centered_startup(
+        self,
+        seeds: object,
+        grid_size: int,
+    ) -> NativeMlBatchResult:
+        """Reset ML lanes using the fixed-N centered hazard waypoint grid."""
+        self._ensure_open()
+        values = _integer_array(seeds, "seeds", maximum=32_767)
+        if (
+            isinstance(grid_size, bool)
+            or not isinstance(grid_size, int)
+            or not 1 <= grid_size <= HAZARD_MAX_GRID_SIZE
+        ):
+            raise ValueError(
+                f"grid_size must be an integer between 1 and {HAZARD_MAX_GRID_SIZE}"
+            )
+        payload = self._native.reset_ml_batch_with_centered_startup(values, grid_size)
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_ml_lanes(self, lanes: object, seeds: object) -> NativeMlBatchResult:
@@ -233,6 +353,8 @@ class NativeBatchEnvironment:
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def reset_ml_lanes_with_startup(
@@ -250,6 +372,38 @@ class NativeBatchEnvironment:
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def reset_ml_lanes_with_centered_startup(
+        self,
+        lanes: object,
+        seeds: object,
+        grid_size: int,
+    ) -> NativeMlBatchResult:
+        """Reset selected ML lanes using centered hazard waypoints."""
+        self._ensure_open()
+        lane_values = _integer_array(lanes, "lanes", maximum=2**31 - 1)
+        seed_values = _integer_array(seeds, "seeds", maximum=32_767)
+        if lane_values.shape != seed_values.shape:
+            raise ValueError("lanes and seeds must have the same length")
+        if (
+            isinstance(grid_size, bool)
+            or not isinstance(grid_size, int)
+            or not 1 <= grid_size <= HAZARD_MAX_GRID_SIZE
+        ):
+            raise ValueError(
+                f"grid_size must be an integer between 1 and {HAZARD_MAX_GRID_SIZE}"
+            )
+        payload = self._native.reset_ml_lanes_with_centered_startup(
+            lane_values, seed_values, grid_size
+        )
+        result = _ml_result_from_payload(payload)
+        self._last_result = None
+        self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
         return result
 
     def step_ml_batch(self, actions: object) -> NativeMlBatchResult:
@@ -260,6 +414,83 @@ class NativeBatchEnvironment:
         result = _ml_result_from_payload(payload)
         self._last_result = None
         self._last_ml_result = result
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def step_ml_positions_batch(
+        self,
+        actions: object,
+        fallback_observations: object,
+    ) -> NativeMlBatchResult:
+        """Advance lanes while retaining only positions and transition fields."""
+        self._ensure_open()
+        values = _integer_array(actions, "actions", maximum=8)
+        fallback = np.asarray(fallback_observations, dtype=np.float32)
+        if fallback.shape != (self.lane_count, ML_OBSERVATION_SIZE):
+            raise ValueError(
+                "fallback observations must have shape "
+                f"({self.lane_count}, {ML_OBSERVATION_SIZE})"
+            )
+        payload = self._native.step_ml_positions_batch(values)
+        result = _ml_position_result_from_payload(payload, fallback)
+        self._last_ml_result = result
+        self._last_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def observe_ml_batch(self) -> NativeMlBatchResult:
+        """Materialize the current ML observation without advancing lanes."""
+        self._ensure_open()
+        payload = self._native.observe_ml_batch()
+        result = _ml_result_from_payload(payload)
+        self._last_ml_result = result
+        self._last_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
+        return result
+
+    def hazard_observations(
+        self,
+        grid_size: int,
+        *,
+        prediction_horizon_frames: int = 32,
+        spawn_halo_radius: int = 1,
+    ) -> NativeHazardBatchResult:
+        """Return the finite slow/reference frozen-center hazard field."""
+        self._ensure_open()
+        if (
+            isinstance(grid_size, bool)
+            or not isinstance(grid_size, int)
+            or not 1 <= grid_size <= HAZARD_MAX_GRID_SIZE
+        ):
+            raise ValueError(
+                f"grid_size must be an integer between 1 and {HAZARD_MAX_GRID_SIZE}"
+            )
+        if (
+            isinstance(prediction_horizon_frames, bool)
+            or not isinstance(prediction_horizon_frames, int)
+            or prediction_horizon_frames < 1
+        ):
+            raise ValueError("prediction_horizon_frames must be a positive integer")
+        if (
+            isinstance(spawn_halo_radius, bool)
+            or not isinstance(spawn_halo_radius, int)
+            or spawn_halo_radius < 0
+        ):
+            raise ValueError("spawn_halo_radius must be a non-negative integer")
+        context = self._last_ml_result
+        payload = self._native.hazard_observations(
+            grid_size,
+            prediction_horizon_frames,
+            spawn_halo_radius,
+        )
+        result = _hazard_result_from_payload(payload, context)
+        self._last_result = None
+        self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = result
         return result
 
     def score_actions(
@@ -291,6 +522,38 @@ class NativeBatchEnvironment:
             )
         return np.asarray(scores, dtype=np.float32)
 
+    def score_waypoint_actions(
+        self,
+        snapshots: Sequence[bytes],
+        hold_decisions: int,
+        *,
+        grid_spacing: int = 32,
+        tolerance: float = 2.0,
+        arrival_latching: bool = False,
+        ban_corner_nodes: bool = False,
+    ) -> np.ndarray:
+        """Score exact relative waypoint targets without mutating live lanes."""
+        values = list(snapshots)
+        if not values or any(
+            not isinstance(value, bytes) or not value for value in values
+        ):
+            raise ValueError("snapshots must be a non-empty sequence of bytes")
+        payload = self._native.score_waypoint_actions(
+            values,
+            hold_decisions,
+            grid_spacing,
+            tolerance,
+            arrival_latching,
+            ban_corner_nodes,
+        )
+        scores = payload.get("scores")
+        expected = (len(values), len(ACTION_CHOICES))
+        if not isinstance(scores, np.ndarray) or scores.shape != expected:
+            raise ControlRuntimeError(
+                f"native waypoint scores have unexpected shape: expected {expected}"
+            )
+        return np.asarray(scores, dtype=np.float32)
+
     def observe_full_state(self) -> tuple[NativeSnapshot, ...]:
         self._ensure_open()
         result = self._require_result()
@@ -300,6 +563,8 @@ class NativeBatchEnvironment:
 
     def observe_pixels(self) -> np.ndarray:
         self._ensure_open()
+        if self._last_pixel_result is not None:
+            return self._last_pixel_result.pixels
         result = self._require_result()
         if result.pixels is None:
             raise ControlRuntimeError("pixel observation was not enabled")
@@ -323,6 +588,10 @@ class NativeBatchEnvironment:
     def observe_player_positions(self) -> np.ndarray:
         """Return native player-center coordinates with shape ``(lanes, 2)``."""
         self._ensure_open()
+        if self._last_pixel_result is not None:
+            return self._last_pixel_result.player_positions
+        if self._last_hazard_result is not None:
+            return self._last_hazard_result.player_positions
         result = self._require_observation_result()
         if result.player_positions is None:
             raise ControlRuntimeError("ML player positions were not enabled")
@@ -333,10 +602,21 @@ class NativeBatchEnvironment:
         self._ensure_open()
         return self._require_result()
 
+    @property
+    def last_pixel_result(self) -> NativePixelBatchResult:
+        self._ensure_open()
+        if self._last_pixel_result is None:
+            raise ControlRuntimeError(
+                "call step_pixels() before observing the pixel-only result"
+            )
+        return self._last_pixel_result
+
     def close(self) -> None:
         self._closed = True
         self._last_result = None
         self._last_ml_result = None
+        self._last_pixel_result = None
+        self._last_hazard_result = None
 
     def _require_result(self) -> NativeBatchResult:
         if self._last_result is None:
@@ -498,6 +778,124 @@ def _ml_result_from_payload(payload: MappingLike) -> NativeMlBatchResult:
     )
 
 
+def _ml_position_result_from_payload(
+    payload: MappingLike,
+    fallback_observations: np.ndarray,
+) -> NativeMlBatchResult:
+    """Adapt the compact native step while preserving the current observation."""
+    return NativeMlBatchResult(
+        lane_ids=_array(payload, "lane_ids"),
+        frames=_array(payload, "frames"),
+        frames_advanced=_array(payload, "frames_advanced"),
+        rewards=_array(payload, "rewards"),
+        done=_array(payload, "done"),
+        seeds=_array(payload, "seeds"),
+        modes=_array(payload, "modes"),
+        ml_observation=fallback_observations,
+        player_positions=_array(payload, "player_positions"),
+    )
+
+
+def _hazard_result_from_payload(
+    payload: MappingLike,
+    context: NativeMlBatchResult | None,
+) -> NativeHazardBatchResult:
+    lane_ids = _array(payload, "lane_ids")
+    frames = _array(payload, "frames")
+    lane_count = int(frames.shape[0])
+    grid_size = payload.get("grid_size")
+    horizon = payload.get("prediction_horizon_frames")
+    halo = payload.get("spawn_halo_radius")
+    channels = payload.get("hazard_channels")
+    scalars = payload.get("hazard_scalars")
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in (
+            grid_size,
+            horizon,
+            halo,
+            channels,
+            scalars,
+        )
+    ):
+        raise ControlRuntimeError("native hazard metadata is invalid")
+    if channels != HAZARD_CHANNELS or scalars != HAZARD_SCALARS:
+        raise ControlRuntimeError("native hazard channel schema is unsupported")
+    expected_shape = (
+        lane_count,
+        HAZARD_CHANNELS * grid_size * grid_size + HAZARD_SCALARS,
+    )
+    hazard_observation = _array(payload, "hazard_observation")
+    if hazard_observation.shape != expected_shape:
+        raise ControlRuntimeError(
+            "native hazard observations have unexpected shape: "
+            f"expected {expected_shape}, got {hazard_observation.shape}"
+        )
+    if (
+        hazard_observation.dtype != np.float32
+        or not np.isfinite(hazard_observation).all()
+    ):
+        raise ControlRuntimeError("native hazard observations must be finite float32")
+    player_positions = _array(payload, "player_positions")
+    if player_positions.shape != (lane_count, 2):
+        raise ControlRuntimeError(
+            "native hazard player positions have unexpected shape"
+        )
+    if player_positions.dtype != np.float32 or not np.isfinite(player_positions).all():
+        raise ControlRuntimeError(
+            "native hazard player positions must be finite float32"
+        )
+    ttc_reference = _array(payload, "ttc_reference")
+    if ttc_reference.shape != (lane_count, grid_size * grid_size):
+        raise ControlRuntimeError("native hazard TTC reference shape is invalid")
+    if ttc_reference.dtype != np.float32 or np.isnan(ttc_reference).any():
+        raise ControlRuntimeError(
+            "native hazard TTC reference must be float32 without NaN"
+        )
+    if np.any((ttc_reference < 0) & ~np.isinf(ttc_reference)):
+        raise ControlRuntimeError(
+            "native hazard TTC reference contains negative values"
+        )
+    if context is not None and context.lane_count == lane_count:
+        frames_advanced = context.frames_advanced.copy()
+        rewards = context.rewards.copy()
+    else:
+        frames_advanced = np.zeros(lane_count, dtype=np.uint32)
+        rewards = np.zeros(lane_count, dtype=np.float32)
+    return NativeHazardBatchResult(
+        lane_ids=lane_ids,
+        frames=frames,
+        frames_advanced=frames_advanced,
+        rewards=rewards,
+        done=_array(payload, "done"),
+        seeds=_array(payload, "seeds"),
+        modes=_array(payload, "modes"),
+        survival_frames=_array(payload, "survival_frames"),
+        grid_size=grid_size,
+        prediction_horizon_frames=horizon,
+        spawn_halo_radius=halo,
+        hazard_channels=channels,
+        hazard_scalars=scalars,
+        hazard_observation=hazard_observation,
+        ttc_reference=ttc_reference,
+        player_positions=player_positions,
+    )
+
+
+def _pixel_result_from_payload(payload: MappingLike) -> NativePixelBatchResult:
+    return NativePixelBatchResult(
+        lane_ids=_array(payload, "lane_ids"),
+        frames=_array(payload, "frames"),
+        frames_advanced=_array(payload, "frames_advanced"),
+        rewards=_array(payload, "rewards"),
+        done=_array(payload, "done"),
+        seeds=_array(payload, "seeds"),
+        modes=_array(payload, "modes"),
+        pixels=_array(payload, "pixels"),
+        player_positions=_array(payload, "player_positions"),
+    )
+
+
 MappingLike = dict[str, object]
 
 
@@ -523,11 +921,17 @@ def _integer_array(value: object, name: str, *, maximum: int) -> np.ndarray:
         raise ValueError(f"{name} must be a non-empty one-dimensional array")
     if not np.issubdtype(array.dtype, np.integer):
         raise TypeError(f"{name} must contain integers")
-    values = np.asarray(array, dtype=np.int64)
-    if np.any(values < 0) or np.any(values > maximum):
-        raise ValueError(f"{name} values must be between 0 and {maximum}")
     dtype = np.uint32 if name in {"lanes", "seeds"} else np.uint8
-    return np.ascontiguousarray(values, dtype=dtype)
+    if np.issubdtype(array.dtype, np.unsignedinteger):
+        if np.any(array > maximum):
+            raise ValueError(f"{name} values must be between 0 and {maximum}")
+        values = np.asarray(array, dtype=dtype)
+    else:
+        values = np.asarray(array, dtype=np.int64)
+        if np.any(values < 0) or np.any(values > maximum):
+            raise ValueError(f"{name} values must be between 0 and {maximum}")
+        values = np.asarray(values, dtype=dtype)
+    return np.ascontiguousarray(values)
 
 
 def _only_snapshot(result: NativeBatchResult) -> bytes:

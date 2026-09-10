@@ -191,6 +191,11 @@ impl IndexedFramebuffer {
         self.pixels.as_slice()
     }
 
+    /// Move the owned raster out of the framebuffer wrapper.
+    pub fn into_array(self) -> [u8; FRAMEBUFFER_SIZE] {
+        self.pixels
+    }
+
     pub fn pixel(&self, x: usize, y: usize) -> Option<u8> {
         if x >= FRAMEBUFFER_WIDTH || y >= FRAMEBUFFER_HEIGHT {
             return None;

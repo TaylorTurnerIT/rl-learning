@@ -49,25 +49,69 @@ _ACTION_INDEX_BY_ACTION: Final[dict[Direction, int]] = {
 _DELTA_TO_ACTION_INDEX: Final[dict[tuple[int, int], int]] = {
     delta: _ACTION_INDEX_BY_ACTION[action] for delta, action in _DELTA_TO_ACTION.items()
 }
+_ACTION_INDEX_GRID: Final[np.ndarray] = np.asarray(
+    (
+        (5, 1, 7),
+        (3, 0, 4),
+        (6, 2, 8),
+    ),
+    dtype=np.uint8,
+)
+
+# These are the native Dodge player constants from dodge-core's update_player
+# recurrence.  Keep the prediction in the same fixed-point domain as the game
+# so a controller decision does not quietly introduce a second movement model.
+_NATIVE_FIXED_SHIFT: Final[int] = 16
+_NATIVE_FIXED_ONE: Final[int] = 1 << _NATIVE_FIXED_SHIFT
+_NATIVE_PLAYER_SPEED_RAW: Final[int] = 32_768
+_NATIVE_PLAYER_FRICTION_RAW: Final[int] = 52_428
+_NATIVE_PLAYER_MIN_RAW: Final[int] = int(
+    PLAYER_CENTER_MIN * _NATIVE_FIXED_ONE
+)
+_NATIVE_PLAYER_MAX_RAW: Final[int] = int(
+    PLAYER_CENTER_MAX * _NATIVE_FIXED_ONE
+)
+_NATIVE_FIXED_MAX_ABS: Final[float] = (2**31 - 1) / _NATIVE_FIXED_ONE
+_NATIVE_VELOCITY_COST_WEIGHT: Final[int] = 2
+_NATIVE_ACTION_X: Final[np.ndarray] = np.asarray(
+    [_ACTION_DELTAS[action][0] for action in ACTION_CHOICES], dtype=np.int64
+)
+_NATIVE_ACTION_Y: Final[np.ndarray] = np.asarray(
+    [_ACTION_DELTAS[action][1] for action in ACTION_CHOICES], dtype=np.int64
+)
 
 
 @dataclass(frozen=True, slots=True)
 class WaypointGrid:
-    """Axis-aligned waypoint grid bounded by native player-center limits."""
+    """Axis-aligned waypoint grid bounded by native player-center limits.
 
-    spacing: int
+    ``WaypointGrid(spacing)`` preserves the original endpoint-based waypoint
+    geometry. ``WaypointGrid.centered(resolution)`` is the fixed-N geometry
+    used by the hazard observation: each point is the center of one equal
+    cell, including the outer cells.
+    """
+
+    spacing: int | float
     min_center: float = PLAYER_CENTER_MIN
     max_center: float = PLAYER_CENTER_MAX
     ban_corner_nodes: bool = False
+    resolution: int | None = None
     _axis_points: tuple[float, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.spacing, bool)
-            or not isinstance(self.spacing, int)
-            or self.spacing < 1
+        if self.resolution is None:
+            if (
+                isinstance(self.spacing, bool)
+                or not isinstance(self.spacing, int)
+                or self.spacing < 1
+            ):
+                raise ValueError("waypoint spacing must be a positive integer")
+        elif (
+            isinstance(self.resolution, bool)
+            or not isinstance(self.resolution, int)
+            or self.resolution < 1
         ):
-            raise ValueError("waypoint spacing must be a positive integer")
+            raise ValueError("centered waypoint resolution must be a positive integer")
         if (
             self.min_center < 0
             or self.max_center > 128
@@ -77,14 +121,40 @@ class WaypointGrid:
         if not isinstance(self.ban_corner_nodes, bool):
             raise ValueError("corner-node policy must be a boolean")
 
-        points: list[float] = []
-        point = self.min_center
-        while point < self.max_center:
-            points.append(point)
-            point += self.spacing
-        if not points or points[-1] != self.max_center:
-            points.append(self.max_center)
+        if self.resolution is not None:
+            cell_width = (self.max_center - self.min_center) / self.resolution
+            points = [
+                self.min_center + (column + 0.5) * cell_width
+                for column in range(self.resolution)
+            ]
+            object.__setattr__(self, "spacing", cell_width)
+        else:
+            points = []
+            point = self.min_center
+            while point < self.max_center:
+                points.append(point)
+                point += self.spacing
+            if not points or points[-1] != self.max_center:
+                points.append(self.max_center)
         object.__setattr__(self, "_axis_points", tuple(points))
+
+    @classmethod
+    def centered(
+        cls,
+        resolution: int,
+        *,
+        min_center: float = PLAYER_CENTER_MIN,
+        max_center: float = PLAYER_CENTER_MAX,
+        ban_corner_nodes: bool = False,
+    ) -> WaypointGrid:
+        """Build ``resolution × resolution`` waypoints at cell centers."""
+        return cls(
+            1,
+            min_center=min_center,
+            max_center=max_center,
+            ban_corner_nodes=ban_corner_nodes,
+            resolution=resolution,
+        )
 
     @property
     def axis_points(self) -> tuple[float, ...]:
@@ -151,7 +221,14 @@ class WaypointGrid:
         self, x: float, y: float, waypoint_action_index: int
     ) -> tuple[int, int]:
         """Return only the neighboring cell needed by the DQN hot path."""
-        current_cell = self.nearest_cell(x, y)
+        return self.target_cell_from_current(
+            self.nearest_cell(x, y), waypoint_action_index
+        )
+
+    def target_cell_from_current(
+        self, current_cell: tuple[int, int], waypoint_action_index: int
+    ) -> tuple[int, int]:
+        """Return an action target when the current cell is already known."""
         return self._apply_corner_policy(
             current_cell,
             self.neighbor_cell(current_cell, waypoint_action_index),
@@ -274,6 +351,113 @@ class WaypointController:
         horizontal, vertical = self._steering_delta(x, y, target, arrived=arrived)
         return _DELTA_TO_ACTION_INDEX[(horizontal, vertical)]
 
+    def native_action_indices_for_positions(
+        self,
+        positions: np.ndarray,
+        target_positions: np.ndarray,
+        *,
+        arrived: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Return scalar-equivalent native actions for one lane batch."""
+        positions = np.asarray(positions, dtype=np.float64)
+        target_positions = np.asarray(target_positions, dtype=np.float64)
+        if positions.ndim != 2 or positions.shape[1] != 2:
+            raise ValueError("waypoint positions must have shape (N, 2)")
+        if target_positions.shape != positions.shape:
+            raise ValueError("waypoint target positions must match positions")
+        if not np.isfinite(positions).all() or not np.isfinite(target_positions).all():
+            raise ValueError("waypoint positions must be finite")
+        if arrived is not None:
+            arrived = np.asarray(arrived, dtype=bool)
+            if arrived.shape != (len(positions),):
+                raise ValueError("waypoint arrival flags must match positions")
+
+        delta_x = target_positions[:, 0] - positions[:, 0]
+        delta_y = target_positions[:, 1] - positions[:, 1]
+        horizontal = np.where(
+            delta_x < -self.tolerance,
+            -1,
+            np.where(
+                delta_x > self.tolerance,
+                1,
+                0,
+            ),
+        )
+        vertical = np.where(
+            delta_y < -self.tolerance,
+            -1,
+            np.where(
+                delta_y > self.tolerance,
+                1,
+                0,
+            ),
+        )
+        if self.arrival_latching and arrived is not None:
+            horizontal = np.where(arrived, 0, horizontal)
+            vertical = np.where(arrived, 0, vertical)
+        return _ACTION_INDEX_GRID[horizontal + 1, vertical + 1]
+
+    def native_action_index_for_position_velocity(
+        self,
+        position: tuple[float, float] | np.ndarray,
+        velocity: tuple[float, float] | np.ndarray,
+        target: tuple[float, float] | np.ndarray,
+        step_frames: int = 3,
+    ) -> int:
+        """Return one velocity-aware native action for a single lane.
+
+        ``position``, ``velocity``, and ``target`` are native coordinate pairs
+        in pixels per native frame.  The target is expected to be a waypoint
+        center, normally obtained from :meth:`WaypointGrid.centered`.  This
+        method is opt-in; legacy sign steering remains the default everywhere.
+        """
+        actions = self.native_action_indices_for_positions_and_velocities(
+            np.asarray(position, dtype=np.float64).reshape(1, 2),
+            np.asarray(velocity, dtype=np.float64).reshape(1, 2),
+            np.asarray(target, dtype=np.float64).reshape(1, 2),
+            step_frames,
+        )
+        return int(actions[0])
+
+    def native_action_indices_for_positions_and_velocities(
+        self,
+        positions: np.ndarray,
+        velocities: np.ndarray,
+        target_positions: np.ndarray,
+        step_frames: int = 3,
+    ) -> np.ndarray:
+        """Choose native actions by forecasting the next native frame block.
+
+        The three arrays must have shape ``(N, 2)`` and contain current native
+        player centers, current native velocities, and centered target
+        coordinates.  Each of the nine existing native inputs is simulated for
+        ``step_frames`` using the native Q16.16 friction, acceleration, and
+        position clamp.  The action with the smallest deterministic score is
+        selected: endpoint L1 target error plus twice endpoint L1 residual
+        velocity.  Ties use the existing ``ACTION_CHOICES`` order.
+
+        No arrival latch or mutable controller state is needed.  A stopped
+        player inside a target window selects neutral; a player still carrying
+        momentum selects the native input that reduces its predicted residual
+        velocity.  The live game state is never modified or reset.
+        """
+        step_frames = _validate_native_step_frames(step_frames)
+        positions = _validated_waypoint_vectors(positions, "waypoint positions")
+        velocities = _validated_waypoint_vectors(velocities, "waypoint velocities")
+        target_positions = _validated_waypoint_vectors(
+            target_positions, "waypoint target positions"
+        )
+        if velocities.shape != positions.shape:
+            raise ValueError("waypoint velocities must match positions")
+        if target_positions.shape != positions.shape:
+            raise ValueError("waypoint target positions must match positions")
+        return _native_action_indices_for_positions_and_velocities(
+            positions,
+            velocities,
+            target_positions,
+            step_frames,
+        )
+
     def target_reached(self, x: float, y: float, target_cell: tuple[int, int]) -> bool:
         """Return whether a player center is inside the configured target window."""
         target = self.grid.point(target_cell)
@@ -281,6 +465,27 @@ class WaypointController:
             abs(target[0] - x) <= self.tolerance
             and abs(target[1] - y) <= self.tolerance
         )
+
+    def target_reached_between(
+        self,
+        previous_x: float,
+        previous_y: float,
+        x: float,
+        y: float,
+        target_cell: tuple[int, int],
+    ) -> bool:
+        """Return whether one native step entered or crossed the target window.
+
+        The native player has momentum, so a multi-frame step can move from one
+        side of a waypoint window to the other without leaving a sampled
+        position inside the window. Arrival latching must treat that as an
+        arrival; otherwise the controller reverses toward the target on the
+        following sample.
+        """
+        target = self.grid.point(target_cell)
+        return _axis_reached_between(
+            previous_x, x, target[0], self.tolerance
+        ) and _axis_reached_between(previous_y, y, target[1], self.tolerance)
 
     def _steering_delta(
         self,
@@ -332,6 +537,94 @@ def _sign(delta: float, tolerance: float) -> int:
     if delta > tolerance:
         return 1
     return 0
+
+
+def _validate_native_step_frames(step_frames: int) -> int:
+    if (
+        isinstance(step_frames, bool)
+        or not isinstance(step_frames, (int, np.integer))
+        or not 3 <= step_frames <= 5
+    ):
+        raise ValueError("velocity-aware waypoint step_frames must be between 3 and 5")
+    return int(step_frames)
+
+
+def _validated_waypoint_vectors(value: np.ndarray, name: str) -> np.ndarray:
+    try:
+        vectors = np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must contain numeric pairs") from error
+    if vectors.ndim != 2 or vectors.shape[1] != 2:
+        raise ValueError(f"{name} must have shape (N, 2)")
+    if not np.isfinite(vectors).all():
+        raise ValueError(f"{name} must be finite")
+    if np.any(np.abs(vectors) > _NATIVE_FIXED_MAX_ABS):
+        raise ValueError(f"{name} is outside the native fixed-point range")
+    return vectors
+
+
+def _native_raw_vectors(vectors: np.ndarray) -> np.ndarray:
+    return np.trunc(vectors * _NATIVE_FIXED_ONE).astype(np.int64)
+
+
+def _native_action_indices_for_positions_and_velocities(
+    positions: np.ndarray,
+    velocities: np.ndarray,
+    target_positions: np.ndarray,
+    step_frames: int,
+) -> np.ndarray:
+    """Forecast the native player recurrence for every lane and action."""
+    position_raw = _native_raw_vectors(positions)
+    velocity_raw = _native_raw_vectors(velocities)
+    target_raw = _native_raw_vectors(target_positions)
+
+    # The second axis is the native action index.  All arithmetic stays in
+    # int64 so the fixed-point product is safe before its arithmetic shift.
+    candidate_x = np.repeat(position_raw[:, 0, None], len(ACTION_CHOICES), axis=1)
+    candidate_y = np.repeat(position_raw[:, 1, None], len(ACTION_CHOICES), axis=1)
+    candidate_vx = np.repeat(velocity_raw[:, 0, None], len(ACTION_CHOICES), axis=1)
+    candidate_vy = np.repeat(velocity_raw[:, 1, None], len(ACTION_CHOICES), axis=1)
+    action_x = _NATIVE_ACTION_X[None, :] * _NATIVE_PLAYER_SPEED_RAW
+    action_y = _NATIVE_ACTION_Y[None, :] * _NATIVE_PLAYER_SPEED_RAW
+
+    for _ in range(step_frames):
+        candidate_vx = (
+            candidate_vx * _NATIVE_PLAYER_FRICTION_RAW
+        ) >> _NATIVE_FIXED_SHIFT
+        candidate_vy = (
+            candidate_vy * _NATIVE_PLAYER_FRICTION_RAW
+        ) >> _NATIVE_FIXED_SHIFT
+        candidate_vx += action_x
+        candidate_vy += action_y
+        candidate_x = np.clip(
+            candidate_x + candidate_vx,
+            _NATIVE_PLAYER_MIN_RAW,
+            _NATIVE_PLAYER_MAX_RAW,
+        )
+        candidate_y = np.clip(
+            candidate_y + candidate_vy,
+            _NATIVE_PLAYER_MIN_RAW,
+            _NATIVE_PLAYER_MAX_RAW,
+        )
+
+    endpoint_error = np.abs(candidate_x - target_raw[:, 0, None]) + np.abs(
+        candidate_y - target_raw[:, 1, None]
+    )
+    residual_velocity = np.abs(candidate_vx) + np.abs(candidate_vy)
+    score = endpoint_error + _NATIVE_VELOCITY_COST_WEIGHT * residual_velocity
+    return np.argmin(score, axis=1).astype(np.uint8)
+
+
+def _axis_reached_between(
+    previous: float,
+    current: float,
+    target: float,
+    tolerance: float,
+) -> bool:
+    """Return whether a scalar step entered or crossed a target interval."""
+    if abs(target - previous) <= tolerance or abs(target - current) <= tolerance:
+        return True
+    return min(previous, current) < target < max(previous, current)
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,6 +795,13 @@ def _evaluate_waypoint_batch(
                 )
                 actions[lane_index] = decision.native_action_index
                 hold_remaining[lane_index] -= 1
+            previous_positions = {
+                int(lane): (
+                    states[int(lane)].player.x,
+                    states[int(lane)].player.y,
+                )
+                for lane in active_indices
+            }
             result = environment.step_batch(actions)
             current_snapshots = list(result.snapshot_bytes)
             completed: list[int] = [
@@ -522,7 +822,10 @@ def _evaluate_waypoint_batch(
                     state = _raw_state_from_snapshot(
                         _decode_snapshot(_snapshot_at(current_snapshots, lane_index))
                     )
-                    if controller.target_reached(
+                    previous_x, previous_y = previous_positions[lane_index]
+                    if controller.target_reached_between(
+                        previous_x,
+                        previous_y,
                         state.player.x,
                         state.player.y,
                         selected_target,

@@ -15,6 +15,7 @@ let
     libxkbcommon
     libglvnd
     mesa
+    zlib
   ];
   x11LibraryPath = lib.makeLibraryPath x11Runtime;
 in
@@ -33,6 +34,7 @@ in
     pkgs.maturin
     pkgs.bacon
     pkgs.curl
+    pkgs.google-cloud-sdk
     pkgs.ruff
     pkgs.SDL2
     pkgs.xdotool
@@ -185,6 +187,16 @@ in
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native dodge-ng-overnight "$@"
     '';
+    dodge-ng-pixel-probe.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-pixel-probe "$@"
+    '';
+    dodge-ng-pixel-dqn.exec = ''
+      export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
+      export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
+      exec uv run --extra native dodge-ng-pixel-dqn "$@"
+    '';
     dodge-ng-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
@@ -194,6 +206,9 @@ in
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"
       export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
       exec uv run --extra native dodge-ng-dashboard "$@"
+    '';
+    colabctl.exec = ''
+      exec uv run --extra colab colabctl "$@"
     '';
     dodge-neat-replay.exec = ''
       export LD_LIBRARY_PATH=${x11LibraryPath}:"$LD_LIBRARY_PATH"

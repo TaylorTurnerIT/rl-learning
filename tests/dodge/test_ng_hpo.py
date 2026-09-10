@@ -10,6 +10,7 @@ import torch
 from dodge.ng.dqn import DuelingWaypointDQN
 from dodge.ng.hpo import (
     HPOConfig,
+    _load_best_model,
     _parse_budgets,
     _score_run,
     _trial_config,
@@ -75,6 +76,54 @@ def test_trial_config_maps_search_parameters() -> None:
     assert config.n_step == 5
     assert config.epsilon_decay_steps == 100_000
     assert config.epsilon_final == pytest.approx(0.2)
+    assert config.checkpoint_every == 60_000
+    assert config.eval_every == 60_000
+    assert config.native_execution == "serial"
+
+
+def test_trial_config_maps_hazard_representation() -> None:
+    config = _trial_config(
+        {
+            "learning_rate": 1e-4,
+            "weight_decay": 0.0,
+            "target_update_interval": 1_000,
+            "batch_size": 256,
+            "n_step": 3,
+            "epsilon_decay_steps": 60_000,
+            "epsilon_final": 0.05,
+        },
+        budget=120,
+        learner_seed=7,
+        native_lanes=2,
+        device="cpu",
+        observation_mode="hazard",
+        hazard_grid_size=8,
+        prediction_horizon_frames=64,
+        spawn_halo_radius=2,
+    )
+
+    assert config.observation_mode == "hazard"
+    assert config.hazard_grid_size == 8
+    assert config.prediction_horizon_frames == 64
+    assert config.spawn_halo_radius == 2
+    assert config.native_execution == "parallel"
+    assert config.hazard_observation_cadence == "decision_boundary"
+
+
+def test_hpo_model_loader_uses_checkpoint_observation_contract(tmp_path: Path) -> None:
+    model = DuelingWaypointDQN(input_size=32, hidden_size=16)
+    checkpoint = tmp_path / "checkpoint-best.pt"
+    torch.save(
+        {
+            "best_model_state": model.state_dict(),
+            "contract": {"observation_size": 32},
+        },
+        checkpoint,
+    )
+
+    loaded = _load_best_model(checkpoint, hidden_size=16)
+
+    assert loaded.input_size == 32
 
 
 def test_hpo_keeps_holdout_out_of_trial_objective(

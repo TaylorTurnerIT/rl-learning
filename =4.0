@@ -1,0 +1,41 @@
+{
+  "auth_required_for": "submit/status/logs/watch/stop/retrieve",
+  "gpu_tiers": [
+    "T4",
+    "A100",
+    "H100"
+  ],
+  "manifest": {
+    "path": "/home/dev/Projects/rl-learning/context/kits/dodge-ng/ng-v1.json",
+    "sha256": "c75e2c8327888d3f2b31a3bb4681c0a537c8603161f8ffbf4a2539f32d2e01f6"
+  },
+  "requirements": [
+    "optuna>=4.0",
+    "optuna"
+  ],
+  "run_directory": "/home/dev/Projects/rl-learning/history/dodge/ng/waypoint-hpo-hazard-colab-20260909",
+  "state": "planned",
+  "trainer_args": [
+    "--trials",
+    "4",
+    "--budgets",
+    "20000,60000,120000",
+    "--native-lanes",
+    "32",
+    "--device",
+    "cuda",
+    "--observation-mode",
+    "hazard",
+    "--hazard-grid-size",
+    "8",
+    "--prediction-horizon-frames",
+    "64",
+    "--spawn-halo-radius",
+    "1",
+    "--manifest",
+    "{SOURCE_ROOT}/context/kits/dodge-ng/ng-v1.json",
+    "--run-dir",
+    "{RUN_DIRECTORY}"
+  ],
+  "trainer_module": "dodge.ng.hpo"
+}

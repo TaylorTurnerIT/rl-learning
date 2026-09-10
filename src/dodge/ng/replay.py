@@ -15,7 +15,11 @@ import numpy as np
 import torch
 
 from dodge.control import ControlRuntimeError
-from dodge.native.batch import NativeBatchEnvironment, NativeBatchResult
+from dodge.native.batch import (
+    NativeBatchEnvironment,
+    NativeBatchResult,
+    NativeHazardBatchResult,
+)
 from dodge.native.differential import FRAME_HEIGHT, FRAME_SIZE, FRAME_WIDTH
 from dodge.ng.dqn import (
     WAYPOINT_DQN_VERSION,
@@ -24,6 +28,7 @@ from dodge.ng.dqn import (
     DuelingWaypointDQN,
     config_from_json,
     evaluate_waypoint_dqn,
+    observation_size_for_config,
     waypoint_controller_for_config,
 )
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, load_manifest
@@ -31,8 +36,10 @@ from dodge.ng.pixel_regression import (
     compare_saved_replay,
     unavailable_pixel_regression,
 )
+from dodge.ng.waypoint import PLAYER_CENTER_MAX, PLAYER_CENTER_MIN
 
-REPLAY_VERSION = 3
+REPLAY_VERSION = 4
+DANGER_MAP_ENCODING = "float32_le_ttc_native_frames_row_major"
 REPRESENTATIVE_REPLAY_SET_VERSION = 1
 REPRESENTATIVE_ROLES: tuple[str, ...] = ("best", "mean", "bad")
 ResetMode = Literal["native-startup", "legacy"]
@@ -65,7 +72,13 @@ def record_replay(
         reset_mode = configured_mode if configured_mode in RESET_MODES else "legacy"
     if reset_mode not in RESET_MODES:
         raise ValueError(f"replay reset mode must be one of {RESET_MODES}")
-    model = DuelingWaypointDQN(hidden_size=config.hidden_size)
+    if config.observation_mode == "hazard":
+        model = DuelingWaypointDQN(
+            input_size=observation_size_for_config(config),
+            hidden_size=config.hidden_size,
+        )
+    else:
+        model = DuelingWaypointDQN(hidden_size=config.hidden_size)
     model_state = payload.get("best_model_state") or payload.get("model_state_dict")
     if not isinstance(model_state, dict):
         raise ValueError("DQN checkpoint has no model state")
@@ -92,6 +105,8 @@ def record_replay(
     frame_path = replay_directory / f"{stem}.bin"
     metadata_path = replay_directory / f"{stem}.json"
     temporary_frame_path = frame_path.with_name(f".{frame_path.name}.tmp")
+    danger_path = replay_directory / f"{stem}.danger.f32"
+    temporary_danger_path = danger_path.with_name(f".{danger_path.name}.tmp")
     controller = waypoint_controller_for_config(config)
     native_steps = 0
     frame_count = 0
@@ -101,7 +116,10 @@ def record_replay(
     survival_frames = 0
     native_action_trace: list[int] = []
     saved_frame_numbers: list[int] = []
+    danger_frame_count = 0
+    hazard_result: NativeHazardBatchResult | None = None
     temporary_frame_path.unlink(missing_ok=True)
+    temporary_danger_path.unlink(missing_ok=True)
     try:
         with NativeBatchEnvironment(
             step_frames=config.step_frames,
@@ -113,53 +131,106 @@ def record_replay(
             ml_grid_spacing=config.grid_spacing,
         ) as environment:
             if reset_mode == "legacy":
-                result = environment.reset_batch([seed])
+                if config.observation_mode == "hazard":
+                    environment.reset_ml_batch([seed])
+                    hazard_result = _hazard_observations(environment, config)
+                    observations, positions = _replay_state(hazard_result, config)
+                    initial_frame = int(hazard_result.frames[0])
+                else:
+                    result = environment.reset_batch([seed])
+                    observations, positions = _replay_state(result, config)
+                    initial_frame = int(result.frames[0])
             else:
-                result = environment.reset_batch_with_startup([seed])
-            observations, positions = _replay_state(result)
-            initial_frame = int(result.frames[0])
+                if config.observation_mode == "hazard":
+                    environment.reset_ml_batch_with_centered_startup(
+                        [seed], config.hazard_grid_size
+                    )
+                    hazard_result = _hazard_observations(environment, config)
+                    observations, positions = _replay_state(hazard_result, config)
+                    initial_frame = int(hazard_result.frames[0])
+                else:
+                    result = environment.reset_batch_with_startup([seed])
+                    observations, positions = _replay_state(result, config)
+                    initial_frame = int(result.frames[0])
             with temporary_frame_path.open("wb") as stream:
-                for _ in range(max_steps):
-                    with torch.inference_mode():
-                        action = int(
-                            model(torch.from_numpy(observations)).argmax(dim=1)[0]
-                        )
-                    target_cell = controller.grid.target_cell_for_action(
-                        float(positions[0, 0]),
-                        float(positions[0, 1]),
-                        action,
-                    )
-                    arrived = controller.arrival_latching and controller.target_reached(
-                        float(positions[0, 0]),
-                        float(positions[0, 1]),
-                        target_cell,
-                    )
-                    for _ in range(config.hold_decisions):
-                        native_action = controller.native_action_index_for_position(
+                danger_stream = (
+                    temporary_danger_path.open("wb")
+                    if config.observation_mode == "hazard"
+                    else None
+                )
+                try:
+                    for _ in range(max_steps):
+                        with torch.inference_mode():
+                            action = int(
+                                model(torch.from_numpy(observations)).argmax(dim=1)[0]
+                            )
+                        target_cell = controller.grid.target_cell_for_action(
                             float(positions[0, 0]),
                             float(positions[0, 1]),
-                            target_cell,
-                            arrived=arrived,
+                            action,
                         )
-                        native_action_trace.append(native_action)
-                        result = environment.step_batch([native_action])
-                        observations, positions = _replay_state(result)
-                        native_steps += 1
-                        survival_frames += int(result.rewards[0])
-                        if bool(result.done[0]):
-                            done = True
-                            break
-                        if controller.arrival_latching and not arrived:
-                            arrived = controller.target_reached(
+                        arrived = (
+                            controller.arrival_latching
+                            and controller.target_reached(
                                 float(positions[0, 0]),
                                 float(positions[0, 1]),
                                 target_cell,
                             )
-                        frame_count += _write_frame(stream, result)
-                        last_frame = int(result.frames[0])
-                        saved_frame_numbers.append(last_frame)
-                    if done:
-                        break
+                        )
+                        for _ in range(config.hold_decisions):
+                            previous_position = positions[0].copy()
+                            native_action = controller.native_action_index_for_position(
+                                float(positions[0, 0]),
+                                float(positions[0, 1]),
+                                target_cell,
+                                arrived=arrived,
+                            )
+                            native_action_trace.append(native_action)
+                            result = environment.step_batch([native_action])
+                            if config.observation_mode == "hazard":
+                                hazard_result = _hazard_observations(
+                                    environment, config
+                                )
+                                observations, positions = _replay_state(
+                                    hazard_result, config
+                                )
+                            else:
+                                observations, positions = _replay_state(result, config)
+                            native_steps += 1
+                            survival_frames += int(result.rewards[0])
+                            if bool(result.done[0]):
+                                done = True
+                                break
+                            if controller.arrival_latching and not arrived:
+                                arrived = controller.target_reached_between(
+                                    float(previous_position[0]),
+                                    float(previous_position[1]),
+                                    float(positions[0, 0]),
+                                    float(positions[0, 1]),
+                                    target_cell,
+                                )
+                            frame_count += _write_frame(stream, result)
+                            if danger_stream is not None:
+                                if hazard_result is None:
+                                    raise ControlRuntimeError(
+                                        "hazard replay has no danger calculation"
+                                    )
+                                danger_frame_count += _write_danger_map(
+                                    danger_stream,
+                                    hazard_result,
+                                    config.hazard_grid_size,
+                                )
+                            last_frame = int(result.frames[0])
+                            saved_frame_numbers.append(last_frame)
+                        if done:
+                            break
+                finally:
+                    if danger_stream is not None:
+                        danger_stream.close()
+        if config.observation_mode == "hazard" and danger_frame_count != frame_count:
+            raise ControlRuntimeError(
+                "saved replay danger maps are not aligned with saved frames"
+            )
         metadata = {
             "version": REPLAY_VERSION,
             "kind": "dodge_ng_waypoint_dqn_replay",
@@ -191,7 +262,25 @@ def record_replay(
             },
             "created_at": time.time(),
         }
+        if config.observation_mode == "hazard":
+            metadata.update(
+                {
+                    "danger_file": danger_path.name,
+                    "danger_encoding": DANGER_MAP_ENCODING,
+                    "danger_frame_count": danger_frame_count,
+                    "danger_frame_bytes": config.hazard_grid_size
+                    * config.hazard_grid_size
+                    * np.dtype("<f4").itemsize,
+                    "danger_grid_size": config.hazard_grid_size,
+                    "danger_horizon_frames": config.prediction_horizon_frames,
+                    "danger_min_center": PLAYER_CENTER_MIN,
+                    "danger_max_center": PLAYER_CENTER_MAX,
+                    "danger_scale": "ttc_lower_is_more_dangerous",
+                }
+            )
         temporary_frame_path.replace(frame_path)
+        if config.observation_mode == "hazard":
+            temporary_danger_path.replace(danger_path)
         try:
             pixel_regression = compare_saved_replay(run_directory, metadata)
         except Exception as error:
@@ -206,6 +295,7 @@ def record_replay(
         return metadata
     except Exception:
         temporary_frame_path.unlink(missing_ok=True)
+        temporary_danger_path.unlink(missing_ok=True)
         raise
 
 
@@ -404,7 +494,13 @@ def _load_checkpoint_payload(path: Path) -> dict[str, object]:
 
 
 def _load_model(payload: Mapping[str, object], config: DQNConfig) -> DuelingWaypointDQN:
-    model = DuelingWaypointDQN(hidden_size=config.hidden_size)
+    if config.observation_mode == "hazard":
+        model = DuelingWaypointDQN(
+            input_size=observation_size_for_config(config),
+            hidden_size=config.hidden_size,
+        )
+    else:
+        model = DuelingWaypointDQN(hidden_size=config.hidden_size)
     model_state = payload.get("best_model_state") or payload.get("model_state_dict")
     if not isinstance(model_state, dict):
         raise ValueError("DQN checkpoint has no model state")
@@ -434,15 +530,54 @@ def _write_frame(stream: BinaryIO, result: NativeBatchResult) -> int:
     return 1
 
 
-def _replay_state(result: NativeBatchResult) -> tuple[np.ndarray, np.ndarray]:
-    observations = result.ml_observation
-    positions = result.player_positions
+def _write_danger_map(
+    stream: BinaryIO,
+    result: NativeHazardBatchResult,
+    grid_size: int,
+) -> int:
+    ttc_reference = result.ttc_reference
+    expected_shape = (1, grid_size * grid_size)
+    if (
+        not isinstance(ttc_reference, np.ndarray)
+        or ttc_reference.shape != expected_shape
+        or ttc_reference.dtype != np.float32
+        or np.isnan(ttc_reference).any()
+        or np.any((ttc_reference < 0) & ~np.isinf(ttc_reference))
+    ):
+        raise ControlRuntimeError(
+            "native replay danger map has an invalid TTC reference"
+        )
+    values = np.asarray(ttc_reference[0], dtype=np.dtype("<f4"))
+    stream.write(values.tobytes(order="C"))
+    return 1
+
+
+def _hazard_observations(
+    environment: NativeBatchEnvironment,
+    config: DQNConfig,
+) -> NativeHazardBatchResult:
+    return environment.hazard_observations(
+        config.hazard_grid_size,
+        prediction_horizon_frames=config.prediction_horizon_frames,
+        spawn_halo_radius=config.spawn_halo_radius,
+    )
+
+
+def _replay_state(
+    result: NativeBatchResult | NativeHazardBatchResult,
+    config: DQNConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    if config.observation_mode == "hazard":
+        observations = getattr(result, "hazard_observation", None)
+        positions = getattr(result, "player_positions", None)
+        expected_shape = (1, observation_size_for_config(config))
+    else:
+        observations = getattr(result, "ml_observation", None)
+        positions = getattr(result, "player_positions", None)
+        expected_shape = (1, WAYPOINT_OBSERVATION_SIZE)
     if observations is None or positions is None:
         raise ControlRuntimeError("native replay result has no ML state")
-    if observations.shape != (1, WAYPOINT_OBSERVATION_SIZE) or positions.shape != (
-        1,
-        2,
-    ):
+    if observations.shape != expected_shape or positions.shape != (1, 2):
         raise ControlRuntimeError("native replay result has invalid ML state shape")
     return observations, positions
 

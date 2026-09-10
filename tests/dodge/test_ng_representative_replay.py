@@ -120,6 +120,36 @@ def test_representative_set_evaluates_training_seeds_only(
     assert replay_set["selection_split"] == "training"
 
 
+def test_hazard_representative_model_uses_hazard_observation_width(monkeypatch) -> None:
+    import dodge.ng.replay as replay_module
+
+    config = DQNConfig(observation_mode="hazard", hazard_grid_size=4)
+    observed: dict[str, int] = {}
+
+    class FakeModel:
+        def __init__(self, *, input_size: int, hidden_size: int) -> None:
+            observed["input_size"] = input_size
+            observed["hidden_size"] = hidden_size
+
+        def load_state_dict(self, state: object) -> None:
+            assert state == {"marker": 1}
+
+        def eval(self) -> FakeModel:
+            return self
+
+    monkeypatch.setattr(replay_module, "DuelingWaypointDQN", FakeModel)
+
+    replay_module._load_model(
+        {"best_model_state": {"marker": 1}},
+        config,
+    )
+
+    assert observed == {
+        "input_size": replay_module.observation_size_for_config(config),
+        "hidden_size": config.hidden_size,
+    }
+
+
 def test_dashboard_exposes_role_replays_and_role_controls() -> None:
     page = DASHBOARD_PAGE.read_text(encoding="utf-8")
 

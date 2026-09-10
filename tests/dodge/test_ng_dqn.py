@@ -9,7 +9,11 @@ import pytest
 import torch
 
 from dodge.dataset import ACTION_CHOICES
-from dodge.native.batch import NativeBatchEnvironment, _decode_snapshot
+from dodge.native.batch import (
+    NativeBatchEnvironment,
+    NativeHazardBatchResult,
+    _decode_snapshot,
+)
 from dodge.native.differential import NativeDifferentialError
 from dodge.neat.state import PlayerState, RawState
 from dodge.ng.dqn import (
@@ -27,11 +31,14 @@ from dodge.ng.dqn import (
     _epsilon,
     _install_stop_signal_handlers,
     _load_checkpoint,
+    _make_dqn_optimizer,
     _native_ml_state,
     _player_position,
     _restore_stop_signal_handlers,
+    _step_observation_for_decision,
     encode_waypoint_observation,
 )
+from dodge.ng.hazard import HAZARD_CHANNELS, HAZARD_SCALARS, hazard_observation_size
 from dodge.ng.manifest import SeedManifest
 from dodge.ng.waypoint import WaypointController, WaypointGrid
 
@@ -124,6 +131,58 @@ def test_dueling_waypoint_dqn_returns_one_value_per_native_action() -> None:
         model(torch.zeros((4, WAYPOINT_OBSERVATION_SIZE + 1)))
 
 
+@pytest.mark.parametrize("arrival_latching", [False, True])
+def test_batch_waypoint_steering_matches_scalar_reference(
+    arrival_latching: bool,
+) -> None:
+    grid = WaypointGrid.centered(16)
+    controller = WaypointController(
+        grid,
+        tolerance=2.0,
+        arrival_latching=arrival_latching,
+    )
+    rng = np.random.default_rng(20260909)
+    positions = rng.uniform(2.0, 125.0, size=(64, 2)).astype(np.float32)
+    target_cells = [
+        (int(rng.integers(0, 16)), int(rng.integers(0, 16))) for _ in positions
+    ]
+    target_positions = np.asarray(
+        [grid.point(cell) for cell in target_cells],
+        dtype=np.float64,
+    )
+    positions[0] = target_positions[0] - (2.0, -2.0)
+    positions[1] = target_positions[1] + (2.0, -2.0)
+    arrived = rng.random(len(positions)) < 0.25
+
+    scalar = np.asarray(
+        [
+            controller.native_action_index_for_position(
+                float(position[0]),
+                float(position[1]),
+                target_cells[index],
+                arrived=bool(arrived[index]),
+            )
+            for index, position in enumerate(positions)
+        ],
+        dtype=np.uint8,
+    )
+    batch = controller.native_action_indices_for_positions(
+        positions,
+        target_positions,
+        arrived=arrived,
+    )
+
+    assert np.array_equal(batch, scalar)
+    for index, position in enumerate(positions):
+        action_index = index % len(ACTION_CHOICES)
+        current_cell = grid.nearest_cell(float(position[0]), float(position[1]))
+        assert grid.target_cell_from_current(current_cell, action_index) == (
+            grid.target_cell_for_action(
+                float(position[0]), float(position[1]), action_index
+            )
+        )
+
+
 def test_n_step_replay_preserves_target_and_stops_at_episode_boundary() -> None:
     replay = ReplayBuffer(capacity=8, observation_size=WAYPOINT_OBSERVATION_SIZE)
     accumulator = NStepAccumulator(
@@ -190,6 +249,17 @@ def test_dqn_config_rejects_zero_evaluation_interval() -> None:
         DQNConfig(eval_every=0).validate()
 
 
+def test_v143_cpu_dqn_optimizer_uses_batched_adamw_kernel() -> None:
+    config = DQNConfig(hidden_size=8)
+    optimizer = _make_dqn_optimizer(
+        DuelingWaypointDQN(hidden_size=config.hidden_size),
+        config,
+        torch.device("cpu"),
+    )
+
+    assert optimizer.defaults["foreach"] is True
+
+
 def test_dqn_controller_controls_are_validated_and_provenanced() -> None:
     config = DQNConfig(
         grid_spacing=24,
@@ -216,6 +286,258 @@ def test_dqn_controller_controls_are_validated_and_provenanced() -> None:
         "hold_decisions": 12,
         "decision_interval": 12,
     }
+
+
+def test_hazard_decision_boundary_cadence_skips_redundant_inner_fields() -> None:
+    class FakeEnvironment:
+        def __init__(self) -> None:
+            self.hazard_calls = 0
+
+        def step_ml_batch(self, _actions: np.ndarray) -> SimpleNamespace:
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.zeros(
+                    (1, WAYPOINT_OBSERVATION_SIZE), dtype=np.float32
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                done=np.asarray([False], dtype=bool),
+            )
+
+        def hazard_observations(
+            self,
+            grid_size: int,
+            *,
+            prediction_horizon_frames: int,
+            spawn_halo_radius: int,
+        ) -> SimpleNamespace:
+            self.hazard_calls += 1
+            cell_count = grid_size * grid_size
+            return NativeHazardBatchResult(
+                lane_ids=np.asarray([0], dtype=np.uint32),
+                frames=np.asarray([0], dtype=np.uint32),
+                frames_advanced=np.asarray([0], dtype=np.uint32),
+                rewards=np.asarray([0.0], dtype=np.float32),
+                done=np.asarray([False], dtype=bool),
+                seeds=np.asarray([0], dtype=np.uint32),
+                modes=np.asarray([0], dtype=np.uint8),
+                survival_frames=np.asarray([0], dtype=np.uint32),
+                grid_size=grid_size,
+                prediction_horizon_frames=prediction_horizon_frames,
+                spawn_halo_radius=spawn_halo_radius,
+                hazard_channels=HAZARD_CHANNELS,
+                hazard_scalars=HAZARD_SCALARS,
+                hazard_observation=np.zeros(
+                    (1, hazard_observation_size(grid_size)), dtype=np.float32
+                ),
+                ttc_reference=np.full(
+                    (1, cell_count), np.inf, dtype=np.float32
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+            )
+
+    config = DQNConfig(
+        observation_mode="hazard",
+        hazard_grid_size=2,
+        hazard_observation_cadence="decision_boundary",
+        native_lanes=1,
+    )
+    environment = FakeEnvironment()
+    actions = np.zeros(1, dtype=np.uint8)
+
+    result, observations, positions = _step_observation_for_decision(
+        environment, actions, config, 0
+    )
+    assert isinstance(result, SimpleNamespace)
+    assert observations is None
+    assert positions.shape == (1, 2)
+    assert environment.hazard_calls == 0
+
+    _, observations, _ = _step_observation_for_decision(
+        environment, actions, config, config.hold_decisions - 1
+    )
+    assert observations is not None
+    assert observations.shape == (1, hazard_observation_size(2))
+    assert environment.hazard_calls == 1
+
+
+def test_hazard_boundary_cadence_materializes_intermediate_terminal_state() -> None:
+    class FakeEnvironment:
+        def __init__(self) -> None:
+            self.hazard_calls = 0
+
+        def step_ml_batch(self, _actions: np.ndarray) -> SimpleNamespace:
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.zeros(
+                    (1, WAYPOINT_OBSERVATION_SIZE), dtype=np.float32
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                done=np.asarray([True], dtype=bool),
+            )
+
+        def hazard_observations(
+            self,
+            grid_size: int,
+            *,
+            prediction_horizon_frames: int,
+            spawn_halo_radius: int,
+        ) -> SimpleNamespace:
+            self.hazard_calls += 1
+            cell_count = grid_size * grid_size
+            return NativeHazardBatchResult(
+                lane_ids=np.asarray([0], dtype=np.uint32),
+                frames=np.asarray([0], dtype=np.uint32),
+                frames_advanced=np.asarray([0], dtype=np.uint32),
+                rewards=np.asarray([0.0], dtype=np.float32),
+                done=np.asarray([True], dtype=bool),
+                seeds=np.asarray([0], dtype=np.uint32),
+                modes=np.asarray([0], dtype=np.uint8),
+                survival_frames=np.asarray([0], dtype=np.uint32),
+                grid_size=grid_size,
+                prediction_horizon_frames=prediction_horizon_frames,
+                spawn_halo_radius=spawn_halo_radius,
+                hazard_channels=HAZARD_CHANNELS,
+                hazard_scalars=HAZARD_SCALARS,
+                hazard_observation=np.zeros(
+                    (1, hazard_observation_size(grid_size)), dtype=np.float32
+                ),
+                ttc_reference=np.full(
+                    (1, cell_count), np.inf, dtype=np.float32
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+            )
+
+    config = DQNConfig(
+        observation_mode="hazard",
+        hazard_grid_size=2,
+        hazard_observation_cadence="decision_boundary",
+        native_lanes=1,
+    )
+    environment = FakeEnvironment()
+
+    _, observations, _ = _step_observation_for_decision(
+        environment, np.zeros(1, dtype=np.uint8), config, 0
+    )
+
+    assert observations is not None
+    assert observations.shape == (1, hazard_observation_size(2))
+    assert environment.hazard_calls == 1
+
+
+def test_v140_compact_terminal_step_preserves_transition_metadata() -> None:
+    class FakeEnvironment:
+        def __init__(self) -> None:
+            self.observe_calls = 0
+
+        def step_ml_positions_batch(
+            self,
+            _actions: np.ndarray,
+            fallback_observations: np.ndarray,
+        ) -> SimpleNamespace:
+            return SimpleNamespace(
+                lane_count=1,
+                frames=np.asarray([17], dtype=np.uint32),
+                frames_advanced=np.asarray([4], dtype=np.uint32),
+                rewards=np.asarray([-7.0], dtype=np.float32),
+                done=np.asarray([True], dtype=bool),
+                ml_observation=fallback_observations.copy(),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+            )
+
+        def observe_ml_batch(self) -> SimpleNamespace:
+            self.observe_calls += 1
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.full(
+                    (1, WAYPOINT_OBSERVATION_SIZE),
+                    9.0,
+                    dtype=np.float32,
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+            )
+
+    config = DQNConfig(observation_mode="legacy", native_lanes=1)
+    environment = FakeEnvironment()
+    current = np.zeros((1, WAYPOINT_OBSERVATION_SIZE), dtype=np.float32)
+
+    result, observations, positions = _step_observation_for_decision(
+        environment,
+        np.zeros(1, dtype=np.uint8),
+        config,
+        0,
+        current,
+    )
+
+    assert result.rewards.tolist() == [-7.0]
+    assert result.frames_advanced.tolist() == [4]
+    assert result.done.tolist() == [True]
+    assert observations is not None
+    assert observations[0, 0] == pytest.approx(9.0)
+    assert positions.tolist() == [[66.0, 66.0]]
+    assert environment.observe_calls == 1
+
+
+def test_v141_legacy_compact_step_materializes_boundary_observation() -> None:
+    class FakeEnvironment:
+        def __init__(self) -> None:
+            self.compact_calls = 0
+            self.full_calls = 0
+
+        def step_ml_positions_batch(
+            self,
+            _actions: np.ndarray,
+            fallback_observations: np.ndarray,
+        ) -> SimpleNamespace:
+            self.compact_calls += 1
+            return SimpleNamespace(
+                lane_count=1,
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                done=np.asarray([False], dtype=bool),
+            )
+
+        def step_ml_batch(self, _actions: np.ndarray) -> SimpleNamespace:
+            self.full_calls += 1
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.full(
+                    (1, WAYPOINT_OBSERVATION_SIZE),
+                    7.0,
+                    dtype=np.float32,
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
+                done=np.asarray([False], dtype=bool),
+            )
+
+    config = DQNConfig(
+        observation_mode="legacy",
+        hold_decisions=2,
+        native_lanes=1,
+    )
+    environment = FakeEnvironment()
+    current = np.zeros((1, WAYPOINT_OBSERVATION_SIZE), dtype=np.float32)
+
+    _, observations, _ = _step_observation_for_decision(
+        environment,
+        np.zeros(1, dtype=np.uint8),
+        config,
+        0,
+        current,
+    )
+    assert observations is None
+    assert environment.compact_calls == 1
+    assert environment.full_calls == 0
+
+    _, observations, _ = _step_observation_for_decision(
+        environment,
+        np.zeros(1, dtype=np.uint8),
+        config,
+        1,
+        current,
+    )
+    assert observations is not None
+    assert observations[0, 0] == pytest.approx(7.0)
+    assert environment.compact_calls == 1
+    assert environment.full_calls == 1
 
 
 def test_epsilon_uses_explicit_decay_schedule_when_configured() -> None:
@@ -270,6 +592,26 @@ def test_training_lives_penalize_nonfinal_death_and_advance_seed_on_final_loss(
                 player_positions=np.full((1, 2), 66.0, dtype=np.float32),
                 rewards=np.asarray([4.0], dtype=np.float32),
                 done=np.asarray([True], dtype=bool),
+            )
+
+        def step_ml_positions_batch(
+            self,
+            _actions: np.ndarray,
+            fallback_observations: np.ndarray,
+        ) -> SimpleNamespace:
+            result = self.step_ml_batch(_actions)
+            result.ml_observation = fallback_observations.copy()
+            return result
+
+        def observe_ml_batch(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                lane_count=1,
+                ml_observation=np.full(
+                    (1, WAYPOINT_OBSERVATION_SIZE),
+                    2.0,
+                    dtype=np.float32,
+                ),
+                player_positions=np.full((1, 2), 66.0, dtype=np.float32),
             )
 
         def reset_ml_lanes_with_startup(
@@ -345,6 +687,7 @@ def test_training_lives_penalize_nonfinal_death_and_advance_seed_on_final_loss(
     assert replay.next_observations[0, 0] == pytest.approx(9.0)
     assert result[4]["life_loss_count"] == 1.0
     assert result[4]["final_death_count"] == 0.0
+    assert sum(result[4]["waypoint_action_counts"]) == 1
 
     lives_remaining[0] = 1
     result = _collect_macro_transition(
@@ -385,6 +728,7 @@ def test_training_lives_penalize_nonfinal_death_and_advance_seed_on_final_loss(
         ("life_loss_penalty", 1.0, "life-loss penalty"),
         ("epsilon_decay_steps", -1, "epsilon decay"),
         ("epsilon_final", 1.0, "final epsilon"),
+        ("torch_threads", -1, "torch threads"),
     ],
 )
 def test_dqn_config_rejects_invalid_regularization_or_epsilon(
@@ -406,6 +750,7 @@ def test_old_checkpoint_config_is_compatible_with_new_optional_fields() -> None:
     saved.pop("training_lives")
     saved.pop("life_loss_penalty")
     saved.pop("reset_mode")
+    saved.pop("torch_threads")
 
     assert _checkpoint_config_matches(saved, config)
 

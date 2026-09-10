@@ -6,10 +6,15 @@ from dodge.native.assets import (
     validate_asset_bundle,
 )
 from dodge.native.batch import (
+    HAZARD_CHANNELS,
+    HAZARD_OBSERVATION_VERSION,
+    HAZARD_SCALARS,
     ML_OBSERVATION_SIZE,
     NativeBatchEnvironment,
     NativeBatchResult,
     NativeDodgeEnv,
+    NativeHazardBatchResult,
+    NativePixelBatchResult,
 )
 from dodge.native.compat import PicoCompat, PicoFixed, PicoInput, PicoRng
 from dodge.native.compatibility import (
@@ -33,11 +38,16 @@ __all__ = [
     "CartridgeManifest",
     "DatasetEpisode",
     "FileIdentity",
+    "HAZARD_CHANNELS",
+    "HAZARD_OBSERVATION_VERSION",
+    "HAZARD_SCALARS",
     "IndexedRaster",
     "ML_OBSERVATION_SIZE",
     "NativeBatchEnvironment",
     "NativeBatchResult",
     "NativeDodgeEnv",
+    "NativeHazardBatchResult",
+    "NativePixelBatchResult",
     "OracleTrace",
     "PicoCompat",
     "PicoFixed",

@@ -10,6 +10,7 @@ import sys
 import time
 from collections import deque
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal
@@ -23,6 +24,7 @@ from dodge.dataset import ACTION_CHOICES
 from dodge.native.batch import (
     NativeBatchEnvironment,
     NativeBatchResult,
+    NativeHazardBatchResult,
     NativeMlBatchResult,
     _decode_snapshot,
     _raw_state_from_snapshot,
@@ -33,6 +35,16 @@ from dodge.neat.state import (
     RawState,
     project_state,
 )
+from dodge.ng.hazard import (
+    HAZARD_OBSERVATION_ENCODINGS,
+    HAZARD_OBSERVATION_VERSION,
+    HazardObservationEncoding,
+    HazardObservationSpec,
+    encode_hazard_observations,
+    hazard_observation_size,
+    player_velocities_from_hazard_observations,
+    validate_native_hazard_result,
+)
 from dodge.ng.manifest import DEFAULT_MANIFEST_PATH, SeedManifest, load_manifest
 from dodge.ng.report import summarize_evaluation
 from dodge.ng.telemetry import DashboardTelemetry
@@ -41,8 +53,17 @@ from dodge.ng.waypoint import WaypointController, WaypointGrid
 WAYPOINT_OBSERVATION_SIZE: Final[int] = OBSERVATION_SIZE_WITH_TIME_TO_INTERSECTION + 4
 WAYPOINT_DQN_VERSION: Final[int] = 2
 RELEVANCE_GATE_FRAMES: Final[int] = 800
+SURVIVAL_TARGET_FRAMES: Final[int] = 9_000
+SURVIVAL_SAFETY_LIMIT_FRAMES: Final[int] = 12_000
+CANDIDATE_PRESET: Final[str] = "fresh-cpu-hazard-v1"
+CANDIDATE_DISCOUNT_REFERENCE_FRAMES: Final[int] = 32
+CANDIDATE_NATIVE_GAMMA: Final[float] = 0.99 ** (1 / CANDIDATE_DISCOUNT_REFERENCE_FRAMES)
 WaypointExecution = Literal["serial", "parallel"]
 ResetMode = Literal["native-startup", "legacy"]
+ObservationMode = Literal["legacy", "hazard"]
+HazardObservationCadence = Literal["every_step", "decision_boundary"]
+ControllerMode = Literal["position", "velocity"]
+GammaUnit = Literal["decision", "native_frame"]
 RESET_MODES: tuple[ResetMode, ...] = ("native-startup", "legacy")
 
 
@@ -122,7 +143,12 @@ class DQNConfig:
     train_frequency: int = 1
     target_update_interval: int = 1_000
     hidden_size: int = 256
+    observation_mode: ObservationMode = "legacy"
+    hazard_observation_cadence: HazardObservationCadence = "every_step"
     grid_spacing: int = 32
+    hazard_grid_size: int = 16
+    prediction_horizon_frames: int = 32
+    spawn_halo_radius: int = 1
     hold_decisions: int = 8
     steering_tolerance: float = 2.0
     arrival_latching: bool = False
@@ -141,6 +167,11 @@ class DQNConfig:
     eval_every: int = 2_000
     seed: int = 2_026_0903
     device: str = "cpu"
+    torch_threads: int = 8
+    hazard_observation_encoding: HazardObservationEncoding = "native"
+    controller_mode: ControllerMode = "position"
+    gamma_unit: GammaUnit = "decision"
+    reward_scale: float = 1.0
 
     def validate(self) -> None:
         positive = (
@@ -170,11 +201,40 @@ class DQNConfig:
             raise ValueError("DQN gamma must be between 0 and 1")
         if not 3 <= self.step_frames <= 5:
             raise ValueError("step frames must be between 3 and 5")
+        if self.observation_mode not in {"legacy", "hazard"}:
+            raise ValueError("DQN observation mode must be legacy or hazard")
+        if self.hazard_observation_cadence not in {"every_step", "decision_boundary"}:
+            raise ValueError(
+                "hazard observation cadence must be every_step or decision_boundary"
+            )
+        if self.hazard_observation_encoding not in HAZARD_OBSERVATION_ENCODINGS:
+            raise ValueError(
+                "hazard observation encoding must be native or normalized_v2"
+            )
+        if self.controller_mode not in {"position", "velocity"}:
+            raise ValueError("DQN controller mode must be position or velocity")
+        if self.controller_mode == "velocity" and self.observation_mode != "hazard":
+            raise ValueError("velocity controller requires hazard observations")
+        if self.gamma_unit not in {"decision", "native_frame"}:
+            raise ValueError("DQN gamma unit must be decision or native_frame")
+        if not np.isfinite(self.reward_scale) or self.reward_scale <= 0:
+            raise ValueError("DQN reward scale must be finite and positive")
         if self.grid_spacing < 1:
             raise ValueError("DQN grid spacing must be positive")
+        if self.observation_mode == "hazard":
+            HazardObservationSpec(
+                grid_size=self.hazard_grid_size,
+                prediction_horizon_frames=self.prediction_horizon_frames,
+                spawn_halo_radius=self.spawn_halo_radius,
+            )
         if not np.isfinite(self.steering_tolerance) or self.steering_tolerance < 0:
             raise ValueError("DQN steering tolerance must be finite and non-negative")
-        if self.steering_tolerance >= self.grid_spacing / 2:
+        steering_spacing = (
+            self.grid_spacing
+            if self.observation_mode == "legacy"
+            else WaypointGrid.centered(self.hazard_grid_size).spacing
+        )
+        if self.steering_tolerance >= steering_spacing / 2:
             raise ValueError("DQN steering tolerance must be below half grid spacing")
         if not isinstance(self.arrival_latching, bool):
             raise ValueError("DQN arrival latching must be a boolean")
@@ -202,6 +262,8 @@ class DQNConfig:
             raise ValueError("DQN final epsilon must be in [0, 1)")
         if self.device not in {"cpu", "cuda", "auto"}:
             raise ValueError("DQN device must be cpu, cuda, or auto")
+        if self.torch_threads < 0:
+            raise ValueError("DQN torch threads must not be negative")
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -214,19 +276,100 @@ def config_from_json(payload: Mapping[str, object]) -> DQNConfig:
     normalized.setdefault("arrival_latching", False)
     normalized.setdefault("ban_corner_nodes", False)
     normalized.setdefault("corner_node_penalty", 0.0)
+    normalized.setdefault("observation_mode", "legacy")
+    normalized.setdefault("hazard_observation_cadence", "every_step")
+    normalized.setdefault("hazard_grid_size", 16)
+    normalized.setdefault("prediction_horizon_frames", 32)
+    normalized.setdefault("spawn_halo_radius", 1)
+    normalized.setdefault("torch_threads", 8)
+    normalized.setdefault("hazard_observation_encoding", "native")
+    normalized.setdefault("controller_mode", "position")
+    normalized.setdefault("gamma_unit", "decision")
+    normalized.setdefault("reward_scale", 1.0)
     return DQNConfig(**normalized)  # type: ignore[arg-type]
+
+
+def fresh_cpu_candidate_config(**overrides: object) -> DQNConfig:
+    """Return the reproducible first remediation candidate configuration."""
+    values: dict[str, object] = {
+        "total_steps": 32_768,
+        "batch_size": 128,
+        "replay_capacity": 4_096,
+        "learning_rate": 1e-4,
+        "gamma": CANDIDATE_NATIVE_GAMMA,
+        "gamma_unit": "native_frame",
+        "n_step": 5,
+        "warmup_steps": 2_000,
+        "target_update_interval": 1_000,
+        "observation_mode": "hazard",
+        "hazard_observation_encoding": "normalized_v2",
+        "hazard_observation_cadence": "every_step",
+        "hazard_grid_size": 16,
+        "prediction_horizon_frames": 32,
+        "spawn_halo_radius": 1,
+        "hold_decisions": 1,
+        "step_frames": 3,
+        "max_episode_steps": SURVIVAL_SAFETY_LIMIT_FRAMES // 3,
+        "native_lanes": 32,
+        "native_execution": "serial",
+        "reset_mode": "native-startup",
+        "controller_mode": "velocity",
+        "reward_scale": 1.0 / 3.0,
+        "epsilon_decay_steps": 13_107,
+        "epsilon_final": 0.05,
+        "checkpoint_every": 4_096,
+        "eval_every": 4_096,
+        "device": "cpu",
+        "torch_threads": 1,
+    }
+    values.update(overrides)
+    config = DQNConfig(**values)  # type: ignore[arg-type]
+    config.validate()
+    return config
+
+
+def _effective_gamma(config: DQNConfig) -> float:
+    """Return the per-decision discount used by the n-step accumulator."""
+    if config.gamma_unit == "native_frame":
+        return config.gamma**config.step_frames
+    return config.gamma
+
+
+def waypoint_grid_for_config(config: DQNConfig) -> WaypointGrid:
+    """Create the fixed geometry shared by controller and checkpoint paths."""
+    if config.observation_mode == "hazard":
+        return WaypointGrid.centered(config.hazard_grid_size)
+    return WaypointGrid(
+        config.grid_spacing,
+        ban_corner_nodes=config.ban_corner_nodes,
+    )
 
 
 def waypoint_controller_for_config(config: DQNConfig) -> WaypointController:
     """Create the one controller contract shared by train, eval, and replay."""
-    grid = WaypointGrid(
-        config.grid_spacing,
-        ban_corner_nodes=config.ban_corner_nodes,
-    )
+    grid = waypoint_grid_for_config(config)
     return WaypointController(
         grid,
         tolerance=config.steering_tolerance,
         arrival_latching=config.arrival_latching,
+    )
+
+
+def observation_size_for_config(config: DQNConfig) -> int:
+    """Return model/replay width without changing the legacy contract."""
+    if config.observation_mode == "hazard":
+        return hazard_observation_size(
+            config.hazard_grid_size,
+            config.hazard_observation_encoding,
+        )
+    return WAYPOINT_OBSERVATION_SIZE
+
+
+def model_for_config(config: DQNConfig) -> DuelingWaypointDQN:
+    """Create the dueling DDQN with the fixed observation width for config."""
+    return DuelingWaypointDQN(
+        input_size=observation_size_for_config(config),
+        hidden_size=config.hidden_size,
     )
 
 
@@ -567,6 +710,31 @@ def _resolve_device(device: str) -> torch.device:
     return torch.device(device)
 
 
+def _configure_torch_threads(thread_count: int) -> None:
+    """Configure small-MLP CPU parallelism without requiring it on CUDA."""
+    if thread_count:
+        torch.set_num_threads(thread_count)
+    with suppress(RuntimeError):
+        torch.set_num_interop_threads(1)
+
+
+def _make_dqn_optimizer(
+    model: DuelingWaypointDQN,
+    config: DQNConfig,
+    device: torch.device,
+) -> torch.optim.Optimizer:
+    """Use Torch's batched AdamW kernel on measured CPU training paths."""
+    options: dict[str, object] = {}
+    if device.type == "cpu":
+        options["foreach"] = True
+    return torch.optim.AdamW(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+        **options,
+    )
+
+
 def _seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -626,14 +794,102 @@ def _native_ml_state(
     return observations, positions
 
 
+def _native_player_positions(
+    result: NativeBatchResult | NativeMlBatchResult,
+) -> np.ndarray:
+    """Validate only positions for compact intermediate ML transitions."""
+    positions = result.player_positions
+    if positions is None:
+        raise ControlRuntimeError("waypoint DQN requires native ML player positions")
+    if positions.shape != (result.lane_count, 2):
+        raise ControlRuntimeError(
+            "native ML player positions have unexpected shape: "
+            f"expected {(result.lane_count, 2)}, got {positions.shape}"
+        )
+    if positions.dtype != np.float32 or not np.isfinite(positions).all():
+        raise ControlRuntimeError("native ML player positions must be finite float32")
+    return positions
+
+
+def _native_hazard_state(
+    result: NativeHazardBatchResult,
+    spec: HazardObservationSpec,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Validate and return fixed-N native hazard features and positions."""
+    return validate_native_hazard_result(result, spec)
+
+
+def _native_observation_state(
+    result: NativeBatchResult | NativeMlBatchResult | NativeHazardBatchResult,
+    config: DQNConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    if config.observation_mode == "hazard":
+        if not isinstance(result, NativeHazardBatchResult):
+            raise ControlRuntimeError("hazard DQN requires native hazard observations")
+        return _native_hazard_state(
+            result,
+            HazardObservationSpec(
+                grid_size=config.hazard_grid_size,
+                prediction_horizon_frames=config.prediction_horizon_frames,
+                spawn_halo_radius=config.spawn_halo_radius,
+            ),
+        )
+    return _native_ml_state(result)
+
+
+def _select_hazard_lanes(
+    result: NativeHazardBatchResult,
+    lanes: np.ndarray,
+) -> NativeHazardBatchResult:
+    """Retain requested lane order after a partial native reset."""
+    indices: list[int] = []
+    for lane_value in lanes:
+        matches = np.flatnonzero(result.lane_ids == lane_value)
+        if len(matches) != 1:
+            raise ControlRuntimeError("native hazard reset returned unexpected lanes")
+        indices.append(int(matches[0]))
+    selected = np.asarray(indices, dtype=np.intp)
+    return NativeHazardBatchResult(
+        lane_ids=np.take(result.lane_ids, selected, axis=0),
+        frames=np.take(result.frames, selected, axis=0),
+        frames_advanced=np.take(result.frames_advanced, selected, axis=0),
+        rewards=np.take(result.rewards, selected, axis=0),
+        done=np.take(result.done, selected, axis=0),
+        seeds=np.take(result.seeds, selected, axis=0),
+        modes=np.take(result.modes, selected, axis=0),
+        survival_frames=np.take(result.survival_frames, selected, axis=0),
+        grid_size=result.grid_size,
+        prediction_horizon_frames=result.prediction_horizon_frames,
+        spawn_halo_radius=result.spawn_halo_radius,
+        hazard_channels=result.hazard_channels,
+        hazard_scalars=result.hazard_scalars,
+        hazard_observation=np.take(result.hazard_observation, selected, axis=0),
+        ttc_reference=np.take(result.ttc_reference, selected, axis=0),
+        player_positions=np.take(result.player_positions, selected, axis=0),
+    )
+
+
 def _reset_ml_batch(
     environment: NativeBatchEnvironment,
     seeds: np.ndarray,
     config: DQNConfig,
-) -> NativeMlBatchResult:
+) -> NativeMlBatchResult | NativeHazardBatchResult:
     if config.reset_mode == "legacy":
-        return environment.reset_ml_batch(seeds)
-    return environment.reset_ml_batch_with_startup(seeds)
+        result = environment.reset_ml_batch(seeds)
+    elif config.observation_mode == "hazard":
+        result = environment.reset_ml_batch_with_centered_startup(
+            seeds,
+            config.hazard_grid_size,
+        )
+    else:
+        result = environment.reset_ml_batch_with_startup(seeds)
+    if config.observation_mode == "hazard":
+        return environment.hazard_observations(
+            config.hazard_grid_size,
+            prediction_horizon_frames=config.prediction_horizon_frames,
+            spawn_halo_radius=config.spawn_halo_radius,
+        )
+    return result
 
 
 def _reset_ml_lanes(
@@ -641,10 +897,131 @@ def _reset_ml_lanes(
     lanes: np.ndarray,
     seeds: np.ndarray,
     config: DQNConfig,
-) -> NativeMlBatchResult:
+) -> NativeMlBatchResult | NativeHazardBatchResult:
     if config.reset_mode == "legacy":
-        return environment.reset_ml_lanes(lanes, seeds)
-    return environment.reset_ml_lanes_with_startup(lanes, seeds)
+        result = environment.reset_ml_lanes(lanes, seeds)
+    elif config.observation_mode == "hazard":
+        result = environment.reset_ml_lanes_with_centered_startup(
+            lanes,
+            seeds,
+            config.hazard_grid_size,
+        )
+    else:
+        result = environment.reset_ml_lanes_with_startup(lanes, seeds)
+    if config.observation_mode == "hazard":
+        return _select_hazard_lanes(
+            environment.hazard_observations(
+                config.hazard_grid_size,
+                prediction_horizon_frames=config.prediction_horizon_frames,
+                spawn_halo_radius=config.spawn_halo_radius,
+            ),
+            lanes,
+        )
+    return result
+
+
+def _step_observation_batch(
+    environment: NativeBatchEnvironment,
+    actions: np.ndarray,
+    config: DQNConfig,
+    *,
+    materialize_hazard: bool = True,
+    compact_ml: bool = False,
+    fallback_observations: np.ndarray | None = None,
+) -> NativeMlBatchResult | NativeHazardBatchResult:
+    """Advance native lanes and materialize the configured observation."""
+    if compact_ml:
+        if fallback_observations is None:
+            raise ControlRuntimeError(
+                "compact ML stepping requires fallback observations"
+            )
+        return environment.step_ml_positions_batch(actions, fallback_observations)
+    result = environment.step_ml_batch(actions)
+    if config.observation_mode == "hazard" and materialize_hazard:
+        return environment.hazard_observations(
+            config.hazard_grid_size,
+            prediction_horizon_frames=config.prediction_horizon_frames,
+            spawn_halo_radius=config.spawn_halo_radius,
+        )
+    return result
+
+
+def _hazard_observation_batch(
+    environment: NativeBatchEnvironment,
+    config: DQNConfig,
+) -> NativeHazardBatchResult:
+    """Materialize one hazard field without advancing the native lanes."""
+    if config.observation_mode != "hazard":
+        raise ControlRuntimeError("hazard observation requested for legacy DQN")
+    return environment.hazard_observations(
+        config.hazard_grid_size,
+        prediction_horizon_frames=config.prediction_horizon_frames,
+        spawn_halo_radius=config.spawn_halo_radius,
+    )
+
+
+def _step_observation_for_decision(
+    environment: NativeBatchEnvironment,
+    actions: np.ndarray,
+    config: DQNConfig,
+    inner_step: int,
+    current_observations: np.ndarray | None = None,
+) -> tuple[
+    NativeMlBatchResult | NativeHazardBatchResult,
+    np.ndarray | None,
+    np.ndarray,
+]:
+    """Advance once, avoiding redundant hazard fields inside a held action.
+
+    In boundary cadence, the DDQN sees a fresh hazard field at the end of the
+    held decision interval. A terminal intermediate step still materializes a
+    field so terminal bookkeeping retains the reference observation.
+    """
+    materialize_hazard = config.observation_mode != "hazard" or (
+        config.hazard_observation_cadence == "every_step"
+        or inner_step == config.hold_decisions - 1
+    )
+    compact_ml = current_observations is not None and (
+        (
+            config.observation_mode != "hazard"
+            and inner_step != config.hold_decisions - 1
+        )
+        or (config.observation_mode == "hazard" and not materialize_hazard)
+    )
+    result = _step_observation_batch(
+        environment,
+        actions,
+        config,
+        materialize_hazard=materialize_hazard,
+        compact_ml=compact_ml,
+        fallback_observations=current_observations,
+    )
+    if config.observation_mode == "hazard" and not materialize_hazard:
+        if bool(result.done.any()):
+            result = _hazard_observation_batch(environment, config)
+            observations, positions = _native_hazard_state(
+                result,
+                HazardObservationSpec(
+                    grid_size=config.hazard_grid_size,
+                    prediction_horizon_frames=config.prediction_horizon_frames,
+                    spawn_halo_radius=config.spawn_halo_radius,
+                ),
+            )
+            return result, observations, positions
+        positions = _native_player_positions(result)
+        return result, None, positions
+    if compact_ml and config.observation_mode != "hazard":
+        if bool(result.done.any()):
+            observation_result = environment.observe_ml_batch()
+            observations, positions = _native_observation_state(
+                observation_result,
+                config,
+            )
+            return result, observations, positions
+        positions = _native_player_positions(result)
+        return result, None, positions
+    observations, positions = _native_observation_state(result, config)
+    return result, observations, positions
 
 
 def _epsilon(config: DQNConfig, step: int) -> float:
@@ -836,18 +1213,18 @@ def _collect_macro_transition(
         for lane, action in enumerate(waypoint_actions)
     ]
     target_cells = [
-        controller.grid.target_cell_for_action(
-            float(current_positions[lane, 0]),
-            float(current_positions[lane, 1]),
-            int(action),
-        )
+        controller.grid.target_cell_from_current(current_cells[lane], int(action))
         for lane, action in enumerate(waypoint_actions)
     ]
+    target_positions = np.asarray(
+        [controller.grid.point(target_cell) for target_cell in target_cells],
+        dtype=np.float64,
+    )
     corner_target_count = sum(
         controller.grid.is_corner(target_cell) for target_cell in raw_target_cells
     )
     macro_rewards = np.zeros(lane_count, dtype=np.float32)
-    if config.corner_node_penalty:
+    if config.observation_mode == "legacy" and config.corner_node_penalty:
         for lane, target_cell in enumerate(raw_target_cells):
             if controller.grid.is_corner(target_cell):
                 macro_rewards[lane] += config.corner_node_penalty
@@ -868,20 +1245,23 @@ def _collect_macro_transition(
                 float(current_positions[lane, 1]),
                 target_cell,
             )
-    for _ in range(config.hold_decisions):
-        native_actions = np.zeros(lane_count, dtype=np.uint8)
-        for lane in range(lane_count):
-            if boundary[lane]:
-                continue
-            x, y = current_positions[lane]
-            native_actions[lane] = controller.native_action_index_for_position(
-                float(x),
-                float(y),
-                target_cells[lane],
-                arrived=bool(arrived[lane]),
-            )
-        result = environment.step_ml_batch(native_actions)
-        result_observations, result_positions = _native_ml_state(result)
+    for inner_step in range(config.hold_decisions):
+        previous_positions = current_positions.copy()
+        native_actions = controller.native_action_indices_for_positions(
+            current_positions,
+            target_positions,
+            arrived=arrived,
+        )
+        native_actions[boundary] = 0
+        result, result_observations, result_positions = _step_observation_for_decision(
+            environment,
+            native_actions,
+            config,
+            inner_step,
+            current_observations,
+        )
+        if result_observations is None:
+            result_observations = current_observations
         native_steps += lane_count
         reset_lanes: set[int] = set()
         for lane in range(lane_count):
@@ -927,7 +1307,9 @@ def _collect_macro_transition(
                 current_observations[lane] = result_observations[lane]
                 current_positions[lane] = result_positions[lane]
                 if controller.arrival_latching and not arrived[lane]:
-                    arrived[lane] = controller.target_reached(
+                    arrived[lane] = controller.target_reached_between(
+                        float(previous_positions[lane, 0]),
+                        float(previous_positions[lane, 1]),
                         float(current_positions[lane, 0]),
                         float(current_positions[lane, 1]),
                         target_cells[lane],
@@ -953,7 +1335,9 @@ def _collect_macro_transition(
                 np.asarray(replacement_seeds, dtype=np.uint32),
                 config,
             )
-            reset_observations, reset_positions = _native_ml_state(reset)
+            reset_observations, reset_positions = _native_observation_state(
+                reset, config
+            )
             for index, lane in enumerate(ordered_reset_lanes):
                 current_observations[lane] = reset_observations[index]
                 current_positions[lane] = reset_positions[index]
@@ -983,6 +1367,13 @@ def _collect_macro_transition(
         native_steps,
         {
             "epsilon": epsilon,
+            "waypoint_action_counts": [
+                int(value)
+                for value in np.bincount(
+                    waypoint_actions,
+                    minlength=len(ACTION_CHOICES),
+                )
+            ],
             "macro_reward_mean": float(macro_rewards.mean()),
             "macro_reward_max": float(macro_rewards.max()),
             "life_loss_count": float(life_loss_count),
@@ -1072,7 +1463,9 @@ def _evaluate_batch(
             np.asarray(seeds, dtype=np.uint32),
             config,
         )
-        current_observations, current_positions = _native_ml_state(result)
+        current_observations, current_positions = _native_observation_state(
+            result, config
+        )
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
         while bool(active.any()):
@@ -1110,7 +1503,8 @@ def _evaluate_batch(
             if not controller.arrival_latching:
                 arrived.fill(False)
             block_done = np.zeros(len(active_indices), dtype=bool)
-            for _ in range(config.hold_decisions):
+            for inner_step in range(config.hold_decisions):
+                previous_positions = current_positions.copy()
                 native_actions = np.zeros(lane_count, dtype=np.uint8)
                 for local, lane_value in enumerate(active_indices):
                     if block_done[local]:
@@ -1123,8 +1517,17 @@ def _evaluate_batch(
                         target_cells[local],
                         arrived=bool(arrived[local]),
                     )
-                result = environment.step_ml_batch(native_actions)
-                result_observations, result_positions = _native_ml_state(result)
+                result, result_observations, result_positions = (
+                    _step_observation_for_decision(
+                        environment,
+                        native_actions,
+                        config,
+                        inner_step,
+                        current_observations,
+                    )
+                )
+                if result_observations is None:
+                    result_observations = current_observations
                 current_observations[:] = result_observations
                 current_positions[:] = result_positions
                 completed: list[int] = []
@@ -1149,7 +1552,9 @@ def _evaluate_batch(
                             )
                         completed.append(lane)
                     elif controller.arrival_latching and not arrived[local]:
-                        arrived[local] = controller.target_reached(
+                        arrived[local] = controller.target_reached_between(
+                            float(previous_positions[lane, 0]),
+                            float(previous_positions[lane, 1]),
                             float(current_positions[lane, 0]),
                             float(current_positions[lane, 1]),
                             target_cells[local],
@@ -1163,7 +1568,9 @@ def _evaluate_batch(
                         np.zeros(len(reset_lanes), dtype=np.uint32),
                         config,
                     )
-                    reset_observations, reset_positions = _native_ml_state(reset)
+                    reset_observations, reset_positions = _native_observation_state(
+                        reset, config
+                    )
                     for index, lane in enumerate(reset_lanes):
                         current_observations[lane] = reset_observations[index]
                         current_positions[lane] = reset_positions[index]
@@ -1176,31 +1583,79 @@ def _evaluate_batch(
 
 
 def _checkpoint_contract(config: DQNConfig) -> dict[str, object]:
-    grid = WaypointGrid(
-        config.grid_spacing,
-        ban_corner_nodes=config.ban_corner_nodes,
+    grid = waypoint_grid_for_config(config)
+    if config.observation_mode == "legacy":
+        return {
+            "grid_spacing": config.grid_spacing,
+            "grid_shape": list(grid.shape),
+            "corner_nodes": "banned" if config.ban_corner_nodes else "allowed",
+            "reset_mode": config.reset_mode,
+            "controller": {
+                "tolerance": config.steering_tolerance,
+                "arrival_latching": config.arrival_latching,
+                "corner_node_penalty": config.corner_node_penalty,
+                "steering": "sign(target_position-current_position)",
+            },
+            "cadence": {
+                "step_frames": config.step_frames,
+                "hold_decisions": config.hold_decisions,
+                "decision_interval": config.hold_decisions,
+            },
+            "observation_size": WAYPOINT_OBSERVATION_SIZE,
+            "observation_contract": (
+                "native_projected_state_with_time_to_intersection+grid_cell+overflow"
+            ),
+            "observation_source": "native_ml_with_python_reference_parity",
+            "relevance_gate_frames": RELEVANCE_GATE_FRAMES,
+            "max_episode_steps": config.max_episode_steps,
+            "training_lives": config.training_lives,
+            "life_loss_penalty": config.life_loss_penalty,
+            "replay": {
+                "capacity": config.replay_capacity,
+                "n_step": config.n_step,
+                "gamma": config.gamma,
+                "boundary": "terminated_or_truncated_zero_bootstrap",
+            },
+            "target": {
+                "algorithm": "double_dqn",
+                "network": "dueling",
+                "update_interval": config.target_update_interval,
+            },
+            "actions": list(ACTION_CHOICES),
+        }
+    spec = HazardObservationSpec(
+        grid_size=config.hazard_grid_size,
+        prediction_horizon_frames=config.prediction_horizon_frames,
+        spawn_halo_radius=config.spawn_halo_radius,
     )
     return {
-        "grid_spacing": config.grid_spacing,
+        "observation_mode": "hazard",
+        "grid_size": config.hazard_grid_size,
         "grid_shape": list(grid.shape),
-        "corner_nodes": "banned" if config.ban_corner_nodes else "allowed",
+        "grid_geometry": "centered_equal_cells",
+        "grid_bounds": [grid.min_center, grid.max_center],
+        "corner_nodes": "not_applicable",
         "reset_mode": config.reset_mode,
         "controller": {
             "tolerance": config.steering_tolerance,
             "arrival_latching": config.arrival_latching,
-            "corner_node_penalty": config.corner_node_penalty,
+            "corner_node_penalty": 0.0,
+            "corner_policy": "labels_only",
             "steering": "sign(target_position-current_position)",
         },
         "cadence": {
             "step_frames": config.step_frames,
             "hold_decisions": config.hold_decisions,
             "decision_interval": config.hold_decisions,
+            "hazard_observation_cadence": config.hazard_observation_cadence,
         },
-        "observation_size": WAYPOINT_OBSERVATION_SIZE,
+        "hazard": spec.to_json(),
+        "observation_size": spec.observation_size,
         "observation_contract": (
-            "native_projected_state_with_time_to_intersection+grid_cell+overflow"
+            "frozen_center_ttc+enemy_presence_velocity_type+"
+            "aoe_presence_velocity_stage_kind+spawn_mask_halo+player"
         ),
-        "observation_source": "native_ml_with_python_reference_parity",
+        "observation_source": "native_hazard_reference_float32",
         "relevance_gate_frames": RELEVANCE_GATE_FRAMES,
         "max_episode_steps": config.max_episode_steps,
         "training_lives": config.training_lives,
@@ -1217,6 +1672,7 @@ def _checkpoint_contract(config: DQNConfig) -> dict[str, object]:
             "update_interval": config.target_update_interval,
         },
         "actions": list(ACTION_CHOICES),
+        "hazard_observation_version": HAZARD_OBSERVATION_VERSION,
     }
 
 
@@ -1299,6 +1755,18 @@ def _checkpoint_config_matches(saved: object, config: DQNConfig) -> bool:
         normalized["ban_corner_nodes"] = False
     if "corner_node_penalty" not in normalized:
         normalized["corner_node_penalty"] = 0.0
+    if "observation_mode" not in normalized:
+        normalized["observation_mode"] = "legacy"
+    if "hazard_observation_cadence" not in normalized:
+        normalized["hazard_observation_cadence"] = "every_step"
+    if "hazard_grid_size" not in normalized:
+        normalized["hazard_grid_size"] = 16
+    if "prediction_horizon_frames" not in normalized:
+        normalized["prediction_horizon_frames"] = 32
+    if "spawn_halo_radius" not in normalized:
+        normalized["spawn_halo_radius"] = 1
+    if "torch_threads" not in normalized:
+        normalized["torch_threads"] = 8
     saved_total_steps = normalized.get("total_steps")
     if (
         isinstance(saved_total_steps, bool)
@@ -1333,6 +1801,8 @@ def _checkpoint_contract_matches(saved: object, config: DQNConfig) -> bool:
         normalized_cadence.setdefault(
             "decision_interval", normalized_cadence["hold_decisions"]
         )
+    if config.observation_mode == "hazard":
+        normalized_cadence.setdefault("hazard_observation_cadence", "every_step")
     normalized["cadence"] = normalized_cadence
     return normalized == _checkpoint_contract(config)
 
@@ -1431,19 +1901,17 @@ def _train_waypoint_dqn_impl(
     """Train and evaluate one waypoint DQN run after signal setup."""
     config.validate()
     manifest.validate()
-    _seed_everything(config.seed)
     device = _resolve_device(config.device)
+    if device.type == "cpu":
+        _configure_torch_threads(config.torch_threads)
+    _seed_everything(config.seed)
     controller = waypoint_controller_for_config(config)
     grid = controller.grid
-    model = DuelingWaypointDQN(hidden_size=config.hidden_size).to(device)
-    target_model = DuelingWaypointDQN(hidden_size=config.hidden_size).to(device)
+    model = model_for_config(config).to(device)
+    target_model = model_for_config(config).to(device)
     target_model.load_state_dict(model.state_dict())
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
-    )
-    replay = ReplayBuffer(config.replay_capacity, WAYPOINT_OBSERVATION_SIZE)
+    optimizer = _make_dqn_optimizer(model, config, device)
+    replay = ReplayBuffer(config.replay_capacity, observation_size_for_config(config))
     accumulator = NStepAccumulator(
         config.native_lanes,
         config.n_step,
@@ -1521,7 +1989,9 @@ def _train_waypoint_dqn_impl(
             episode_seeds,
             config,
         )
-        current_observations, current_positions = _native_ml_state(result)
+        current_observations, current_positions = _native_observation_state(
+            result, config
+        )
         current_observations = current_observations.copy()
         current_positions = current_positions.copy()
         while step < config.total_steps:
@@ -1558,6 +2028,7 @@ def _train_waypoint_dqn_impl(
                 )
                 time.sleep(0.1)
                 continue
+            collection_started = time.perf_counter()
             (
                 current_observations,
                 current_positions,
@@ -1581,15 +2052,18 @@ def _train_waypoint_dqn_impl(
                 device,
                 step,
             )
+            collection_seconds = time.perf_counter() - collection_started
             total_native_steps += native_steps
             step += 1
             learning: dict[str, float] = {}
+            learning_seconds = 0.0
             if (
                 step >= config.warmup_steps
                 and step % config.train_frequency == 0
                 and replay.size >= config.batch_size
             ):
                 model.train()
+                learning_started = time.perf_counter()
                 learning = _learn_step(
                     model,
                     target_model,
@@ -1599,12 +2073,17 @@ def _train_waypoint_dqn_impl(
                     rng,
                     device,
                 )
+                learning_seconds = time.perf_counter() - learning_started
             if step % config.target_update_interval == 0:
                 target_model.load_state_dict(model.state_dict())
             record: dict[str, object] = {
                 "step": step,
                 "replay_size": replay.size,
                 "native_steps": total_native_steps,
+                "collection_seconds": collection_seconds,
+                "learning_seconds": learning_seconds,
+                "evaluation_seconds": 0.0,
+                "checkpoint_seconds": 0.0,
                 **collection,
                 **learning,
             }
@@ -1621,12 +2100,14 @@ def _train_waypoint_dqn_impl(
                         record=record,
                     )
                 )
+                evaluation_started = time.perf_counter()
                 inner = evaluate_waypoint_dqn(
                     model,
                     manifest.training_seeds[:10],
                     config,
                     grid=grid,
                 )
+                record["evaluation_seconds"] = time.perf_counter() - evaluation_started
                 record["inner_validation"] = inner["summary"]
                 inner_mean = float(inner["summary"]["mean_survival_frames"])
                 if best_inner is None or inner_mean > float(
@@ -1669,6 +2150,7 @@ def _train_waypoint_dqn_impl(
                 )
             )
             if step % config.checkpoint_every == 0 or step == config.total_steps:
+                checkpoint_started = time.perf_counter()
                 _save_checkpoint(
                     checkpoint,
                     _checkpoint_payload(
@@ -1688,6 +2170,7 @@ def _train_waypoint_dqn_impl(
                         metrics=metrics,
                     ),
                 )
+                record["checkpoint_seconds"] = time.perf_counter() - checkpoint_started
     except Exception as error:
         telemetry.publish(
             {
@@ -1721,7 +2204,7 @@ def _train_waypoint_dqn_impl(
     final_model = model
     selected_model = "final"
     if best_model_state is not None:
-        final_model = DuelingWaypointDQN(hidden_size=config.hidden_size).to(device)
+        final_model = model_for_config(config).to(device)
         final_model.load_state_dict(best_model_state)
         selected_model = "best_inner"
     final_model.eval()
@@ -1762,11 +2245,13 @@ def _train_waypoint_dqn_impl(
                 "manifest_sha256": manifest.sha256,
                 "config": config.to_json(),
                 "contract": _checkpoint_contract(config),
-                "observation_size": WAYPOINT_OBSERVATION_SIZE,
-                "observation_contract": (
-                    "native_projected_state_with_time_to_intersection+grid_cell+overflow"
-                ),
-                "observation_source": "native_ml_with_python_reference_parity",
+                "observation_size": observation_size_for_config(config),
+                "observation_contract": _checkpoint_contract(config)[
+                    "observation_contract"
+                ],
+                "observation_source": _checkpoint_contract(config)[
+                    "observation_source"
+                ],
                 "grid_shape": list(grid.shape),
                 "point_count": grid.point_count,
                 "actions": list(ACTION_CHOICES),
@@ -1888,14 +2373,24 @@ def _build_report(path: Path, manifest: SeedManifest) -> str:
         if isinstance(holdout, dict)
         else "Holdout was not evaluated in this training-only run."
     )
+    config = run["config"]
+    if config.get("observation_mode", "legacy") == "hazard":
+        grid_note = (
+            f"fixed {config['hazard_grid_size']}x{config['hazard_grid_size']} "
+            f"centered cells; H={config['prediction_horizon_frames']} native frames"
+        )
+    else:
+        grid_note = (
+            f"{config['grid_spacing']} px; "
+            f"{run['grid_shape'][0]}x{run['grid_shape'][1]} points"
+        )
     return "\n".join(
         [
             "# Dodge NG waypoint DQN",
             "",
             f"Manifest SHA-256: `{manifest.sha256}`  ",
-            f"Grid: `{run['config']['grid_spacing']}` px; "
-            f"{run['grid_shape'][0]}x{run['grid_shape'][1]} points  ",
-            f"Macro hold: `{run['config']['hold_decisions']}` native decisions  ",
+            f"Grid: {grid_note}  ",
+            f"Macro hold: `{config['hold_decisions']}` native decisions  ",
             f"Observation size: `{run['observation_size']}`  ",
             "",
             "| Split | Mean | Median | P10 | Worst | Complete |",
@@ -1939,7 +2434,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--train-frequency", type=int, default=1)
     parser.add_argument("--target-update-interval", type=int, default=1_000)
     parser.add_argument("--hidden-size", type=int, default=256)
+    parser.add_argument(
+        "--observation-mode",
+        choices=("legacy", "hazard"),
+        default="legacy",
+        help="use legacy projected features or fixed-N frozen-center hazard fields",
+    )
     parser.add_argument("--grid-spacing", type=int, default=32)
+    parser.add_argument("--hazard-grid-size", type=int, default=16)
+    parser.add_argument("--prediction-horizon-frames", type=int, default=32)
+    parser.add_argument("--spawn-halo-radius", type=int, default=1)
+    parser.add_argument(
+        "--hazard-observation-cadence",
+        choices=("every_step", "decision_boundary"),
+        default="every_step",
+        help="refresh hazard fields every native step or only at waypoint boundaries",
+    )
     parser.add_argument(
         "--hold-decisions",
         "--decision-interval",
@@ -1974,6 +2484,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-every", type=int, default=2_000)
     parser.add_argument("--seed", type=int, default=2_026_0903)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cpu")
+    parser.add_argument("--torch-threads", type=int, default=8)
     parser.add_argument(
         "--skip-holdout",
         action="store_true",
@@ -1997,7 +2508,12 @@ def main(argv: list[str] | None = None) -> int:
         train_frequency=arguments.train_frequency,
         target_update_interval=arguments.target_update_interval,
         hidden_size=arguments.hidden_size,
+        observation_mode=arguments.observation_mode,
+        hazard_observation_cadence=arguments.hazard_observation_cadence,
         grid_spacing=arguments.grid_spacing,
+        hazard_grid_size=arguments.hazard_grid_size,
+        prediction_horizon_frames=arguments.prediction_horizon_frames,
+        spawn_halo_radius=arguments.spawn_halo_radius,
         hold_decisions=arguments.hold_decisions,
         steering_tolerance=arguments.steering_tolerance,
         arrival_latching=arguments.arrival_latching,
@@ -2016,6 +2532,7 @@ def main(argv: list[str] | None = None) -> int:
         eval_every=arguments.eval_every,
         seed=arguments.seed,
         device=arguments.device,
+        torch_threads=arguments.torch_threads,
     )
     try:
         run = train_waypoint_dqn(
